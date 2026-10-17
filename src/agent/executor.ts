@@ -10,7 +10,7 @@ import { AirwallexError, type Airwallex, type Transfer } from "../airwallex/clie
 import { emit } from "../events.js";
 import type { Store } from "../store.js";
 import { ApprovalGate, type Approval, type ApprovalTerms } from "../treasury/approval.js";
-import { toMajor } from "../treasury/money.js";
+import { toMajor, toMinor } from "../treasury/money.js";
 import type { Action } from "../treasury/policy.js";
 
 export type AirwallexPort = Pick<Airwallex, "fxConvert" | "createTransfer" | "transferByRequestId">;
@@ -61,7 +61,8 @@ export async function executeConvert(d: ExecutorDeps, a: Extract<Action, { kind:
   try {
     // FX settles immediately (status SETTLED); there is no pending state to track.
     const c = await d.awx.fxConvert({ request_id: requestId, sell_currency: a.sellCurrency, buy_currency: a.buyCurrency, buy_amount: toMajor(a.buyMinor).toFixed(2) });
-    d.store.updateOp(requestId, "settled", c.id);
+    // The sell side is kept for reconciliation: base currency out must match what was bought.
+    d.store.updateOp(requestId, "settled", c.id, JSON.stringify({ sell_currency: a.sellCurrency, sell_minor: toMinor(c.sell_amount) }));
     emit("act", `Converted ${a.sellCurrency} -> ${toMajor(a.buyMinor).toFixed(2)} ${a.buyCurrency} for ${a.obligationId}`, { sell_amount: c.sell_amount }, c.id);
   } catch (err) {
     // A conversion can't be looked up by request_id here, so an ambiguous one is held for a person.
