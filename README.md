@@ -11,7 +11,9 @@ The rails decide what is allowed, not the prompt:
 - **Earnings reach the Airwallex float only through a Metal sweep mandate whose only payee is the ramp.** A compromised agent trying to drain them is refused on chain.
 - **Reconciliation is arithmetic, to the cent.**
 
-Built for the Airwallex Agentic Banking Hackathon (2026).
+Built for the Airwallex Agentic Banking Hackathon (2026). Demo script: [docs/DEMO-SCRIPT.md](docs/DEMO-SCRIPT.md). Write-up: [docs/SUBMISSION.md](docs/SUBMISSION.md).
+
+![The inbox](docs/app-inbox.png)
 
 ## Try it now (no keys, no network)
 
