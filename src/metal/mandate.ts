@@ -92,23 +92,26 @@ export class MetalMandate {
     return a as Address;
   }
 
-  /** One-time: write a credential that may pay ONLY the ramp, then bind it on the owner's account. */
-  async setup(limits: { capCents: number; budgetCents: number; expiresInSeconds?: number }): Promise<{ principal: Address; reference: string; gasKeyAddress: string }> {
+  /**
+   * One-time: write a credential and bind it on the owner's account. By default it may pay ONLY
+   * the ramp; `anyPayee` (the refund mandate) drops the payee list and relies on cap and budget.
+   */
+  async setup(limits: { capCents: number; budgetCents: number; expiresInSeconds?: number; anyPayee?: boolean; description?: string }): Promise<{ principal: Address; reference: string; gasKeyAddress: string }> {
     const principal = await this.account();
     const create = await this.cli([
       "mandate", "credential", "create",
       "--principal", principal,
       "--cap", centsToUsdz(limits.capCents),
       "--budget", centsToUsdz(limits.budgetCents),
-      "--payee", `${this.cfg.rampAddress},CoinSlotRamp`,
-      "--description", "Coin Slot earnings sweep to the Airwallex off-ramp",
+      ...(limits.anyPayee ? [] : ["--payee", `${this.cfg.rampAddress},CoinSlotRamp`]),
+      "--description", limits.description ?? "Coin Slot earnings sweep to the Airwallex off-ramp",
       ...(limits.expiresInSeconds ? ["--expires-in", String(limits.expiresInSeconds)] : []),
       "--key", this.cfg.ownerKey,
       "--out", this.cfg.credential,
     ]);
     const kv = parseCliOutput(create.stdout);
     await this.cli(["mandate", "bind", "--credential", this.cfg.credential, "--key", this.cfg.ownerKey]);
-    emit("act", "Bound sweep mandate: payee is the ramp only", { principal, cap: centsToUsdz(limits.capCents), budget: centsToUsdz(limits.budgetCents) }, kv.reference);
+    emit("act", limits.anyPayee ? "Bound refund mandate: any payee, capped per refund and in total" : "Bound sweep mandate: payee is the ramp only", { principal, cap: centsToUsdz(limits.capCents), budget: centsToUsdz(limits.budgetCents) }, kv.reference);
     return { principal, reference: kv.reference ?? "", gasKeyAddress: kv["gas-key-address"] ?? "" };
   }
 
@@ -161,5 +164,23 @@ export class MandateSweepVerifier implements MetalSettlementVerifier {
     });
     emit("reconcile", `Sweep for ${epoch} is final on Metal`, { eventKey }, prior.txHash ?? undefined);
     return { eventKey };
+  }
+}
+
+/** Refunds a buyer under the refund mandate: Metal caps each refund and the lifetime total. */
+export class MandateRefunder {
+  constructor(private readonly mandate: MetalMandate) {}
+
+  static fromEnv(): MandateRefunder {
+    const base = MetalMandate.fromEnv();
+    const credential = process.env.METAL_REFUND_MANDATE;
+    if (!credential) throw new Error("Set METAL_REFUND_MANDATE (see scripts/setup-metal.ts)");
+    return new MandateRefunder(new MetalMandate({ ...base.cfg, credential }));
+  }
+
+  async refund(to: string, amountMinor: number, payoutId: string): Promise<{ tx: string }> {
+    const r = await this.mandate.pull(to as Address, amountMinor);
+    if (r.outcome !== "paid") throw new Error(`refund mandate refused ${payoutId}: ${r.reason}`);
+    return { tx: r.explorer ?? r.tx };
   }
 }

@@ -83,7 +83,7 @@ export class PayoutService {
 
   // ---------- 1. quote ----------
 
-  async quote(input: unknown, now = new Date()): Promise<Payout> {
+  async quote(input: unknown, now = new Date(), opts: { ttlMs?: number } = {}): Promise<Payout> {
     const parsed = PayoutRequest.safeParse(input);
     if (!parsed.success) throw new PayoutError(400, parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
     const r = parsed.data;
@@ -129,7 +129,7 @@ export class PayoutService {
       bankCountry: r.payee.bank_country_code, payeeName: r.payee.name, payeeHash: hash, beneficiary, reference: r.reference,
       costMinor: pr.costMinor, feeMinor: pr.feeMinor, totalMinor: pr.totalMinor, rateUsed: pr.rateUsed,
       status, reasons, createdAt: now.toISOString(),
-      expiresAt: new Date(now.getTime() + (status === "needs_review" ? 24 * HOUR : this.ttl)).toISOString(),
+      expiresAt: new Date(now.getTime() + (status === "needs_review" ? 24 * HOUR : opts.ttlMs ?? this.ttl)).toISOString(),
       fundingTx: null, transferId: null, refundTx: null, failure: null,
     };
     this.book.insert(p);
@@ -141,8 +141,8 @@ export class PayoutService {
   }
 
   /** The operator looked at a held payout and is happy to quote it. */
-  approveReview(id: string, operator: string, now = new Date()): Payout {
-    if (!this.book.transition(id, ["needs_review"], "quoted", { expiresAt: new Date(now.getTime() + this.ttl).toISOString() })) throw new PayoutError(409, "not awaiting review");
+  approveReview(id: string, operator: string, now = new Date(), ttlMs = this.ttl): Payout {
+    if (!this.book.transition(id, ["needs_review"], "quoted", { expiresAt: new Date(now.getTime() + ttlMs).toISOString() })) throw new PayoutError(409, "not awaiting review");
     emit("decide", `${operator} cleared payout ${id.slice(0, 8)} after review`);
     return this.book.get(id)!;
   }
@@ -176,6 +176,16 @@ export class PayoutService {
   /** Settlement failed or the request was cancelled: the quote can be paid again until it expires. */
   release(id: string): void {
     if (this.book.transition(id, ["accepted"], "quoted")) emit("observe", `Payment for ${id.slice(0, 8)} did not settle; quote released`);
+  }
+
+  /**
+   * The operator's own invoices (the inbox): no x402 buyer, the payout is funded from the float
+   * the agent already holds. The person's tap is the approval; there is no one to refund.
+   */
+  async payInternally(id: string, approver: string, now = new Date()): Promise<Payout> {
+    this.accept(id, now);
+    emit("decide", `${approver} approved paying ${id.slice(0, 8)} from Coin Slot's own balance`);
+    return this.onFunded(id, `internal:${approver}`, `internal:${id}`, now);
   }
 
   // ---------- 3–4. funded, then execute ----------
@@ -285,6 +295,10 @@ export class PayoutService {
     if (!this.book.transition(p.id, from, "failed", { failure: reason })) return this.book.get(p.id)!;
     emit("refuse", `Payout ${p.id.slice(0, 8)} failed: ${reason}`);
     const buyer = this.book.get(p.id)!.buyer;
+    if (buyer?.startsWith("internal:")) {
+      emit("escalate", `Your invoice payout ${p.id.slice(0, 8)} to ${p.payeeName} failed: ${reason}. The money is still in your Airwallex balance.`);
+      return this.book.get(p.id)!;
+    }
     if (!buyer) {
       this.book.transition(p.id, ["failed"], "refund_failed", { failure: `${reason}; no payer to refund` });
       emit("escalate", `Payout ${p.id.slice(0, 8)} failed with no known payer to refund`);

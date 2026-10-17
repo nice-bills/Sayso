@@ -54,7 +54,8 @@ export async function readMessage(client: Anthropic, message: string): Promise<F
 export function heuristicRead(message: string): Findings {
   const text = message.toLowerCase();
   const quote = (re: RegExp) => message.match(re)?.[0];
-  const bank = /(new|updated|changed|different)\s+(bank|account|iban|wallet|payment)\s*(details|number|address)?|\biban\b|sort code|routing number|0x[0-9a-f]{40}/i;
+  // Listing bank details is normal for an invoice; asking to CHANGE them (or to pay a wallet) is the red flag.
+  const bank = /(new|updated|changed|different)\s+(bank|account|iban|wallet|payment)\s*(details|number|address)?|bank (has|have) changed|changed (our|their) bank|0x[0-9a-f]{40}/i;
   const pressure = /urgent|immediately|today only|asap|confidential|do not tell|don't tell|final notice|right away/i;
   const contradicts = /(pay(ing)?|payment).{0,30}(late|delay|next month)|cancel(l)?ing|pausing (our|the) (usage|calls)|traffic (drop|down)|churn/i;
   const requestsNewBankDetails = bank.test(message);
