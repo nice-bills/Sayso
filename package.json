@@ -1,0 +1,31 @@
+{
+  "name": "coinslot",
+  "version": "0.1.0",
+  "description": "An AI agent that sells its service per call on Metal, banks it with Airwallex, and pays its own bills.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "seller": "tsx src/metal/seller.ts",
+    "swarm": "tsx src/metal/swarm.ts",
+    "smoke:airwallex": "tsx src/airwallex/smoke.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@metalntwx/metal-pay": "^0.2.0",
+    "@x402/core": "2.21.0",
+    "@x402/evm": "2.21.0",
+    "@x402/express": "2.21.0",
+    "@x402/fetch": "2.21.0",
+    "express": "^5.3.0",
+    "viem": "^2.57.7",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "type": "module"
+}
