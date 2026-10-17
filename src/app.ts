@@ -8,6 +8,7 @@ import { METAL_NETWORKS, registerMetalScheme, sellerToken } from "@metalntwx/met
 import type { Address } from "viem";
 import { Airwallex, type Transfer } from "./airwallex/client.js";
 import { webhookRouter } from "./airwallex/webhooks.js";
+import { createAuth } from "./auth.js";
 import { RampLedger } from "./bridge/ledger.js";
 import { SimulatedDepositCredit } from "./bridge/deposit-credit.js";
 import { sweepEpoch, type MetalSettlementVerifier } from "./bridge/ramp.js";
@@ -53,6 +54,8 @@ export interface CoinSlot {
   tick(): Promise<void>;
   reconcileNow(): Promise<ReturnType<typeof reconcile>>;
   balances(): Promise<Record<string, number>>;
+  /** The owner's sign-in token (Bearer, or POST /auth/login). */
+  ownerToken: string;
 }
 
 export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string }): Promise<CoinSlot> {
@@ -142,24 +145,42 @@ export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string })
   }
   app.use(payoutApi(svc, mode));
 
-  // The inbox: forward an invoice here (from an email webhook, a mail rule, or the app).
-  app.post("/v1/inbox", express.json({ limit: "256kb" }), async (req, res) => {
+  // Everything below moves the business's money or shows its payees, so it needs the owner.
+  const auth = createAuth({ offline: opts.offline, log: (l) => emit("observe", l) });
+  app.use(auth.router);
+  const fail = (res: express.Response, err: unknown) => res.status(err instanceof PayoutError ? err.status : 500).json({ error: String((err as Error).message) });
+
+  // The inbox: forward an invoice here (from the app, or a mail hook holding INBOX_SECRET).
+  app.post("/v1/inbox", auth.requireOwnerOrInboxSecret, express.json({ limit: "256kb" }), async (req, res) => {
     const b = req.body as { message_id?: string; from?: string; subject?: string; body?: string };
     if (!b?.body || !b.from) return void res.status(400).json({ error: "from and body are required" });
-    const item = await inbox.receive({ messageId: b.message_id ?? `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, from: b.from, subject: b.subject ?? "(no subject)", body: b.body, receivedAt: new Date() });
-    res.status(201).json(item);
-  });
-  app.get("/v1/inbox", (_req, res) => res.json(inbox.list()));
-  app.post("/v1/inbox/:id/approve", express.json(), async (req, res) => {
     try {
-      res.json(await inbox.approve(req.params.id, String(req.body?.approver ?? "owner"), { verifiedWithPayee: req.body?.verified_with_payee === true }));
-    } catch (err) {
-      res.status(err instanceof PayoutError ? err.status : 500).json({ error: String((err as Error).message) });
-    }
+      const item = await inbox.receive({ messageId: b.message_id ?? `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, from: b.from, subject: b.subject ?? "(no subject)", body: b.body, receivedAt: new Date() });
+      res.status(201).json(item);
+    } catch (err) { fail(res, err); }
   });
-  app.post("/v1/inbox/:id/ignore", (req, res) => res.json(inbox.ignore(req.params.id)));
+  app.get("/v1/inbox", auth.requireOwner, (_req, res) => res.json(inbox.list()));
+  app.post("/v1/inbox/:id/approve", auth.requireOwner, express.json(), async (req, res) => {
+    try { res.json(await inbox.approve(String(req.params.id), String(req.body?.approver ?? "owner"), { verifiedWithPayee: req.body?.verified_with_payee === true })); } catch (err) { fail(res, err); }
+  });
+  app.post("/v1/inbox/:id/details", auth.requireOwner, express.json(), async (req, res) => {
+    try { res.json(await inbox.complete(String(req.params.id), req.body ?? {})); } catch (err) { fail(res, err); }
+  });
+  app.post("/v1/inbox/:id/ignore", auth.requireOwner, express.json(), (req, res) => {
+    try { res.json(inbox.ignore(String(req.params.id))); } catch (err) { fail(res, err); }
+  });
 
-  app.use("/ops", dashboardRouter({
+  // The app's own views: every payout (agents' and the inbox's), and the money on hand.
+  app.get("/v1/payouts", auth.requireOwner, (_req, res) => res.json(svc.book.list().map(publicView)));
+  app.get("/v1/summary", auth.requireOwner, (_req, res) => res.json({ offline: opts.offline, balances: lastBalances, sweeps: ledger.all(), reconcile: lastReconcile }));
+  app.post("/v1/payouts/:id/review", auth.requireOwner, express.json(), (req, res) => {
+    try {
+      const approver = String(req.body?.approver ?? "owner");
+      res.json(publicView(req.body?.decision === "reject" ? svc.rejectReview(String(req.params.id), approver) : svc.approveReview(String(req.params.id), approver)));
+    } catch (err) { fail(res, err); }
+  });
+
+  app.use("/ops", auth.requireOwner, dashboardRouter({
     state: () => ({
       offline: opts.offline,
       balances: lastBalances,
@@ -178,5 +199,5 @@ export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string })
     },
   }));
 
-  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances };
+  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances, ownerToken: auth.ownerToken };
 }

@@ -22,7 +22,7 @@ const beat = async (n: number, title: string) => { emit("observe", `Beat ${n}: $
 const cs = await buildCoinSlot({ offline });
 const server = cs.app.listen(Number(process.env.PORT ?? 4021));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-emit("observe", `Coin Slot on ${base}; back office at ${base}/ops/`);
+emit("observe", `Coin Slot on ${base}; open it and sign in with ${cs.offline ? cs.ownerToken : "your owner token"}`);
 const settle = async (n = 3) => { for (let i = 0; i < n; i++) await cs.tick(); };
 
 /** One buying agent: its own MCP connection to Coin Slot, paying with its own Metal identity. */
@@ -58,7 +58,7 @@ await settle();
 
 // ---- 2. the invoice inbox ----
 await beat(2, "a business forwards invoices; one tap pays each");
-const post = (path: string, body: unknown) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<{ id: string; status: string; error?: string }>);
+const post = (path: string, body: unknown) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${cs.ownerToken}` }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<{ id: string; status: string; error?: string }>);
 const items = [];
 for (const e of [studioInvoice, designerInvoice, fakeLandlord, vagueEmail]) items.push(await post("/v1/inbox", { message_id: e.messageId, from: e.from, subject: e.subject, body: e.body }));
 for (const it of items.filter((i) => i.status === "awaiting_approval")) await post(`/v1/inbox/${encodeURIComponent(it.id)}/approve`, { approver: "will" });
@@ -92,5 +92,5 @@ await beat(6, "reconcile every cent");
 await cs.reconcileNow();
 
 for (const a of agents) await a.close();
-emit("observe", `Demo complete. ${offline ? "Offline: no real money moved." : "Live sandbox run."} Back office: ${base}/ops/`);
+emit("observe", `Demo complete. ${offline ? "Offline: no real money moved." : "Live sandbox run."} App: ${base}/`);
 if (exit) { server.close(); process.exit(0); }

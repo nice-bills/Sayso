@@ -8,7 +8,7 @@ import type { Store } from "../store.js";
 import { emit } from "../events.js";
 import { PayoutError, publicView, type PayoutService } from "../payouts/service.js";
 import { fmt, toMinor } from "../treasury/money.js";
-import { extractInvoice, missingFields, toPayoutRequest, type InboundEmail, type InvoiceFields } from "./extract.js";
+import { extractInvoice, InvoiceFields, missingFields, toPayoutRequest, type InboundEmail } from "./extract.js";
 
 export type InboxStatus = "needs_details" | "awaiting_approval" | "needs_verification" | "rejected" | "paying" | "ignored" | "duplicate";
 
@@ -38,10 +38,38 @@ export class Inbox {
     const existing = this.get(e.messageId);
     if (existing) return existing; // the same email delivered twice
     const fields = await extractInvoice(e);
+    const { status, payoutId, missing, fingerprint } = await this.triage(fields, e);
+    this.store.db.prepare("INSERT INTO inbox (id, sender, subject, received_at, body, fields, missing, payout_id, status, fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?)")
+      .run(e.messageId, e.from, e.subject, e.receivedAt.toISOString(), e.body, JSON.stringify(fields), JSON.stringify(missing), payoutId, status, fingerprint);
+    this.announce(status, fields, missing, e);
+    return this.get(e.messageId)!;
+  }
+
+  /**
+   * A person fills in what the extractor couldn't find. The invoice then goes through exactly the
+   * same checks as a complete one, including the scam read of the original email.
+   */
+  async complete(id: string, patch: Partial<InvoiceFields>, now = new Date()): Promise<InboxItem> {
+    const item = this.get(id);
+    if (!item) throw new PayoutError(404, "no such invoice");
+    if (item.status !== "needs_details") throw new PayoutError(409, `invoice is ${item.status}`);
+    const clean = Object.fromEntries(Object.entries(patch).filter(([k, v]) => k in InvoiceFields.shape && typeof v === "string" && v.trim()).map(([k, v]) => [k, (v as string).trim()]));
+    const fields = { ...item.fields, ...clean };
+    const body = (this.store.db.prepare("SELECT body FROM inbox WHERE id = ?").get(id) as { body: string }).body;
+    const e: InboundEmail = { messageId: id, from: item.from, subject: item.subject, body, receivedAt: now };
+    const { status, payoutId, missing, fingerprint } = await this.triage(fields, e);
+    const changed = this.store.db.prepare("UPDATE inbox SET fields = ?, missing = ?, payout_id = ?, status = ?, fingerprint = ? WHERE id = ? AND status = 'needs_details'")
+      .run(JSON.stringify(fields), JSON.stringify(missing), payoutId, status, fingerprint, id);
+    if (Number(changed.changes) !== 1) throw new PayoutError(409, "invoice changed while you were editing it");
+    this.announce(status, fields, missing, e);
+    return this.get(id)!;
+  }
+
+  private async triage(fields: InvoiceFields, e: InboundEmail) {
     const missing = missingFields(fields);
     // The same invoice forwarded twice (or resent by the supplier) must not be paid twice.
     const fingerprint = missing.length ? null : [fields.payeeName, fields.amount, fields.currency, fields.reference, fields.iban ?? fields.accountNumber].join("|").toLowerCase();
-    const dup = fingerprint ? (this.store.db.prepare("SELECT id FROM inbox WHERE fingerprint = ? AND status NOT IN ('ignored','rejected')").get(fingerprint) as { id: string } | undefined) : undefined;
+    const dup = fingerprint ? (this.store.db.prepare("SELECT id FROM inbox WHERE fingerprint = ? AND id != ? AND status NOT IN ('ignored','rejected')").get(fingerprint, e.messageId) as { id: string } | undefined) : undefined;
 
     let status: InboxStatus = missing.length ? "needs_details" : dup ? "duplicate" : "awaiting_approval";
     let payoutId: string | null = null;
@@ -56,9 +84,10 @@ export class Inbox {
         missing.push(err.message);
       }
     }
-    this.store.db.prepare("INSERT INTO inbox (id, sender, subject, received_at, body, fields, missing, payout_id, status, fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?)")
-      .run(e.messageId, e.from, e.subject, e.receivedAt.toISOString(), e.body, JSON.stringify(fields), JSON.stringify(missing), payoutId, status, status === "duplicate" ? null : fingerprint);
+    return { status, payoutId, missing, fingerprint: status === "duplicate" || status === "needs_details" ? null : fingerprint };
+  }
 
+  private announce(status: InboxStatus, fields: InvoiceFields, missing: string[], e: InboundEmail) {
     const what = fields.amount && fields.currency ? `${fmt(toMinor(Number(fields.amount)), fields.currency)} to ${fields.payeeName ?? "?"}` : `"${e.subject}"`;
     const line: Record<InboxStatus, string> = {
       awaiting_approval: `Invoice in: pay ${what}? One tap to approve.`,
@@ -68,8 +97,7 @@ export class Inbox {
       duplicate: `Invoice in: ${what} looks like one you already have; not queued again.`,
       paying: "", ignored: "",
     };
-    emit(status === "awaiting_approval" ? "decide" : status === "needs_details" ? "observe" : "escalate", line[status], { inbox: e.messageId, extractor: fields.extractor });
-    return this.get(e.messageId)!;
+    emit(status === "awaiting_approval" ? "decide" : status === "needs_details" ? "observe" : "escalate", line[status], { inbox: e.messageId });
   }
 
   /** The one tap. `verifiedWithPayee` is required to clear a held invoice. */
@@ -83,13 +111,14 @@ export class Inbox {
     } else if (item.status !== "awaiting_approval") {
       throw new PayoutError(409, `invoice is ${item.status}`);
     }
-    this.setStatus(id, "paying");
+    if (!this.setStatus(id, "paying", [item.status])) throw new PayoutError(409, "already approved");
     await this.svc.payInternally(item.payoutId, approver, now);
     return this.get(id)!;
   }
 
   ignore(id: string): InboxItem {
-    this.setStatus(id, "ignored");
+    if (!this.get(id)) throw new PayoutError(404, "no such invoice");
+    if (!this.setStatus(id, "ignored", ["needs_details", "awaiting_approval", "needs_verification", "duplicate"])) throw new PayoutError(409, `invoice is ${this.get(id)!.status}`);
     return this.get(id)!;
   }
 
@@ -105,8 +134,10 @@ export class Inbox {
     });
   }
 
-  private setStatus(id: string, status: InboxStatus) {
-    this.store.db.prepare("UPDATE inbox SET status = ? WHERE id = ?").run(status, id);
+  /** Compare-and-set, so two taps can't both pay. */
+  private setStatus(id: string, status: InboxStatus, from: InboxStatus[]): boolean {
+    const r = this.store.db.prepare(`UPDATE inbox SET status = ? WHERE id = ? AND status IN (${from.map(() => "?").join(",")})`).run(status, id, ...from);
+    return Number(r.changes) === 1;
   }
 
   private decode(r: unknown): InboxItem | undefined {

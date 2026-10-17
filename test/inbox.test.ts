@@ -57,4 +57,23 @@ describe("Inbox", () => {
     expect(item.status).toBe("needs_details");
     expect(item.missing).toEqual(["payee name", "amount", "currency", "bank country", "bank account"]);
   });
+
+  it("lets a person fill in missing details, then runs the same checks", async () => {
+    const { inbox, svc } = setup();
+    const item = await inbox.receive(vagueEmail);
+    await expect(inbox.approve(item.id, "will")).rejects.toThrow();
+    const done = await inbox.complete(item.id, { payeeName: "Kreuzberg Studio GmbH", amount: "120.00", currency: "EUR", bankCountry: "DE", iban: "DE89370400440532013000", addressCountry: "DE", city: "Berlin", bogus: "x" } as never);
+    expect(done.status).toBe("awaiting_approval");
+    expect(done.missing).toEqual([]);
+    expect(svc.book.get(done.payoutId!)?.amountMinor).toBe(12000);
+    await expect(inbox.complete(item.id, {})).rejects.toThrow(/awaiting_approval/);
+  });
+
+  it("pays once however many times it is tapped", async () => {
+    const { inbox } = setup();
+    const item = await inbox.receive(studioInvoice);
+    const taps = await Promise.allSettled([inbox.approve(item.id, "will"), inbox.approve(item.id, "will")]);
+    expect(taps.filter((t) => t.status === "fulfilled")).toHaveLength(1);
+    expect(() => inbox.ignore(item.id)).toThrow(/paying/);
+  });
 });
