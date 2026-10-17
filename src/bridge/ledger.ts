@@ -78,6 +78,12 @@ export class RampLedger {
     return Number(r.s);
   }
 
+  /** Metal side of the identity: sweeps whose on-chain movement was verified final. */
+  verifiedOnChainMinor(currency: string): number {
+    const r = this.db.prepare("SELECT COALESCE(SUM(amount_minor),0) AS s FROM sweeps WHERE event_key IS NOT NULL AND status IN ('verified','credited') AND currency = ?").get(currency) as { s: number };
+    return Number(r.s);
+  }
+
   private row(r: unknown): Sweep | undefined {
     if (!r) return undefined;
     const x = r as Record<string, unknown>;

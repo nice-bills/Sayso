@@ -26,10 +26,10 @@ export interface ExecutorDeps {
   baseCurrency: string;
 }
 
-const approvalKey = (obligationId: string, action: "convert" | "pay") => `${obligationId}:${action}`;
+export const approvalKey = (obligationId: string, action: "convert" | "pay") => `${obligationId}:${action}`;
 const isAmbiguous = (err: unknown) => !(err instanceof AirwallexError) || err.status >= 500 || err.status === 408 || err.status === 429;
 
-function termsOf(a: Extract<Action, { kind: "convert" | "pay" }>, evidenceHash: string): ApprovalTerms {
+export function termsOf(a: Extract<Action, { kind: "convert" | "pay" }>, evidenceHash: string): ApprovalTerms {
   return a.kind === "convert"
     ? { action: "convert", obligationId: a.obligationId, currency: a.buyCurrency, amountMinor: a.buyMinor, evidenceHash }
     : { action: "pay", obligationId: a.obligationId, currency: a.currency, amountMinor: a.amountMinor, beneficiaryId: a.beneficiaryId, evidenceHash };
@@ -77,7 +77,7 @@ export async function executePay(d: ExecutorDeps, a: Extract<Action, { kind: "pa
   if (!approved(d, a)) return;
   const attempt = (prior?.attempt ?? 0) + 1;
   const requestId = randomUUID();
-  d.store.insertOp({ requestId, obligationId: a.obligationId, kind: "pay", attempt, status: "submitted", currency: a.currency, amountMinor: a.amountMinor });
+  d.store.insertOp({ requestId, obligationId: a.obligationId, kind: "pay", attempt, status: "submitted", currency: a.currency, amountMinor: a.amountMinor, detail: JSON.stringify({ fee_minor: a.feeMinor }) });
   await submitTransfer(d, requestId, a);
 }
 

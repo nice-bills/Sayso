@@ -5,9 +5,15 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "seller": "tsx src/metal/seller.ts",
-    "swarm": "tsx src/metal/swarm.ts",
-    "smoke:airwallex": "tsx src/airwallex/smoke.ts"
+    "demo:offline": "tsx src/demo.ts --offline",
+    "demo": "tsx --env-file-if-exists=.env src/demo.ts",
+    "seller": "tsx --env-file-if-exists=.env src/metal/seller.ts",
+    "swarm": "tsx --env-file-if-exists=.env src/metal/swarm.ts",
+    "setup:metal": "tsx --env-file-if-exists=.env scripts/setup-metal.ts",
+    "setup:airwallex": "tsx --env-file-if-exists=.env scripts/setup-airwallex.ts",
+    "smoke:airwallex": "tsx --env-file-if-exists=.env src/airwallex/smoke.ts",
+    "fetch-fx": "tsx scripts/fetch-fx.ts",
+    "backtest": "tsx scripts/backtest.ts"
   },
   "license": "MIT",
   "dependencies": {

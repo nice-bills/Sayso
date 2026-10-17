@@ -41,11 +41,11 @@ describe("reconcile", () => {
     ledger.markCredited("op1", "dep1");
     store.insertOp({ requestId: "r1", obligationId: "o1", kind: "convert", attempt: 1, status: "submitted", currency: "EUR", amountMinor: 2000 });
     store.updateOp("r1", "settled", "conv1", JSON.stringify({ sell_currency: "USD", sell_minor: 2200 }));
-    store.insertOp({ requestId: "r2", obligationId: "o1", kind: "pay", attempt: 1, status: "settled", currency: "EUR", amountMinor: 2000 });
+    store.insertOp({ requestId: "r2", obligationId: "o1", kind: "pay", attempt: 1, status: "settled", currency: "EUR", amountMinor: 2000, detail: JSON.stringify({ fee_minor: 1285 }) });
     store.insertOp({ requestId: "r3", obligationId: "o2", kind: "pay", attempt: 1, status: "submitted", currency: "EUR", amountMinor: 999 });
     expect(flowsFromBooks(store, ledger, "USD")).toEqual({
-      USD: { depositsMinor: 5000, boughtMinor: 0, soldMinor: 2200, payoutsMinor: 0, cardSpendMinor: 0 },
-      EUR: { depositsMinor: 0, boughtMinor: 2000, soldMinor: 0, payoutsMinor: 2000, cardSpendMinor: 0 },
+      USD: { depositsMinor: 5000, boughtMinor: 0, soldMinor: 2200, payoutsMinor: 0, feesMinor: 0, cardSpendMinor: 0 },
+      EUR: { depositsMinor: 0, boughtMinor: 2000, soldMinor: 0, payoutsMinor: 2000, feesMinor: 1285, cardSpendMinor: 0 },
     });
   });
 });

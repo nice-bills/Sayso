@@ -48,17 +48,22 @@ export function reconcile(i: ReconcileInput): { ok: boolean; checks: Check[] } {
   return { ok: checks.every((c) => c.ok), checks };
 }
 
+export type BookFlows = Omit<CurrencyFlows, "openingMinor" | "closingMinor">;
+
 /**
  * Builds the recorded flows from our own books (settled ops and credited sweeps).
- * Opening/closing balances and observed deposits come from Airwallex; fees from transfer records.
+ * Opening/closing balances and observed deposits come from Airwallex.
  */
-export function flowsFromBooks(store: Store, ledger: RampLedger, rampCurrency: string): Record<string, Omit<CurrencyFlows, "openingMinor" | "closingMinor" | "feesMinor">> {
-  const out: Record<string, Omit<CurrencyFlows, "openingMinor" | "closingMinor" | "feesMinor">> = {};
-  const f = (ccy: string) => (out[ccy] ??= { depositsMinor: 0, boughtMinor: 0, soldMinor: 0, payoutsMinor: 0, cardSpendMinor: 0 });
+export function flowsFromBooks(store: Store, ledger: RampLedger, rampCurrency: string): Record<string, BookFlows> {
+  const out: Record<string, BookFlows> = {};
+  const f = (ccy: string) => (out[ccy] ??= { depositsMinor: 0, boughtMinor: 0, soldMinor: 0, payoutsMinor: 0, feesMinor: 0, cardSpendMinor: 0 });
   f(rampCurrency).depositsMinor += ledger.creditedMinor(rampCurrency);
   for (const op of store.ops()) {
     if (op.status !== "settled") continue;
-    if (op.kind === "pay") f(op.currency).payoutsMinor += op.amountMinor;
+    if (op.kind === "pay") {
+      f(op.currency).payoutsMinor += op.amountMinor;
+      f(op.currency).feesMinor += op.detail?.startsWith("{") ? ((JSON.parse(op.detail) as { fee_minor?: number }).fee_minor ?? 0) : 0;
+    }
     if (op.kind === "card_spend") f(op.currency).cardSpendMinor += op.amountMinor;
     if (op.kind === "convert") {
       f(op.currency).boughtMinor += op.amountMinor;

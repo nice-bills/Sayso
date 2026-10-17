@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coin Slot</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1b1b18; --muted: #6b6a63; --line: #e3e1d8;
+    --observe: #3b6fd8; --decide: #7a4fd0; --act: #1f8a4c; --reconcile: #0f7f86; --escalate: #c27a00; --refuse: #c2372b;
+    --coin: #c99a06;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121210; --panel: #1c1c19; --ink: #ecebe4; --muted: #9a998f; --line: #2d2d28;
+      --observe: #7aa2ff; --decide: #b393ff; --act: #4cc47f; --reconcile: #3fc6cd; --escalate: #f0a935; --refuse: #ff6d60; --coin: #f2c230; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 20px 24px 8px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 22px; letter-spacing: -0.01em; }
+  .tag { color: var(--muted); }
+  main { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; padding: 16px 24px 32px; }
+  @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; } header { padding: 16px 16px 4px; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+  h2 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+  .coin { font-size: 44px; font-weight: 700; color: var(--coin); font-variant-numeric: tabular-nums; line-height: 1; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td { padding: 4px 0; border-bottom: 1px solid var(--line); }
+  td:last-child { text-align: right; }
+  tr:last-child td { border-bottom: 0; }
+  .approval { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .approval:last-child { border-bottom: 0; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  button:hover { border-color: var(--act); color: var(--act); }
+  .ok { color: var(--act); font-weight: 600; } .bad { color: var(--refuse); font-weight: 600; }
+  #feed { list-style: none; margin: 0; padding: 0; max-height: calc(100vh - 140px); overflow-y: auto; }
+  #feed li { display: grid; grid-template-columns: 88px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); animation: in .25s ease-out; }
+  @keyframes in { from { opacity: 0; transform: translateY(-4px); } }
+  .phase { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding-top: 2px; }
+  .proof { display: block; color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+  .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Coin Slot</h1>
+  <span class="tag">An agent that earns per call on Metal, banks with Airwallex, and pays its own bills.</span>
+</header>
+<main>
+  <div>
+    <section>
+      <h2>Paid calls</h2>
+      <div class="coin" id="calls">0</div>
+      <div class="sub" id="earned">USDZ earned: 0.00</div>
+    </section>
+    <section>
+      <h2>Airwallex balances</h2>
+      <table id="balances"><tr><td class="empty">waiting for the first read</td><td></td></tr></table>
+    </section>
+    <section>
+      <h2>Waiting for you</h2>
+      <div id="approvals" class="empty">Nothing to approve.</div>
+    </section>
+    <section>
+      <h2>Reconciliation</h2>
+      <div id="reconcile" class="empty">Not run yet.</div>
+    </section>
+  </div>
+  <section>
+    <h2>What the agent is doing</h2>
+    <ul id="feed"></ul>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const money = (m) => (m / 100).toFixed(2);
+
+  function addEvent(e) {
+    const li = document.createElement("li");
+    const time = new Date(e.at).toLocaleTimeString();
+    li.innerHTML = `<span class="phase" style="color: var(--${e.phase})">${e.phase}<br><span class="proof">${time}</span></span>
+      <span>${esc(e.title)}${e.proof ? `<span class="proof">${esc(e.proof)}</span>` : ""}</span>`;
+    $("feed").prepend(li);
+    if (e.detail && typeof e.detail.paidCalls === "number") {
+      $("calls").textContent = e.detail.paidCalls.toLocaleString();
+      $("earned").textContent = `USDZ earned: ${money(e.detail.earnedMinor ?? 0)}`;
+    }
+    if (["act", "escalate", "reconcile", "refuse"].includes(e.phase)) refresh();
+  }
+
+  async function refresh() {
+    const s = await fetch("/state").then((r) => r.json()).catch(() => null);
+    if (!s) return;
+    const rows = Object.entries(s.balances ?? {});
+    $("balances").innerHTML = rows.length ? rows.map(([c, m]) => `<tr><td>${esc(c)}</td><td>${money(m)}</td></tr>`).join("") : `<tr><td class="empty">none</td><td></td></tr>`;
+    const pending = s.pendingApprovals ?? [];
+    $("approvals").className = pending.length ? "" : "empty";
+    $("approvals").innerHTML = pending.length ? pending.map((p) =>
+      `<div class="approval"><span>${esc(p.label)}</span><button data-id="${esc(p.obligationId)}">Approve</button></div>`).join("") : "Nothing to approve.";
+    $("approvals").querySelectorAll("button").forEach((b) => b.onclick = async () => {
+      await fetch(`/approve/${encodeURIComponent(b.dataset.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approver: "dashboard" }) });
+      refresh();
+    });
+    if (s.reconcile) {
+      $("reconcile").className = "";
+      $("reconcile").innerHTML = `<div class="${s.reconcile.ok ? "ok" : "bad"}">${s.reconcile.ok ? "Every cent explained" : "Breaks found"}</div>` +
+        `<table>${s.reconcile.checks.map((c) => `<tr><td>${esc(c.name)}</td><td class="${c.ok ? "ok" : "bad"}">${c.ok ? "✓" : money(c.diffMinor)}</td></tr>`).join("")}</table>`;
+    }
+  }
+
+  new EventSource("/events").onmessage = (m) => addEvent(JSON.parse(m.data));
+  refresh();
+</script>
+</body>
+</html>
