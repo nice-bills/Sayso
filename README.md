@@ -11,6 +11,8 @@ npm install
 npm run demo:offline        # then open http://127.0.0.1:4300
 ```
 
+![Dashboard after an offline run](docs/dashboard.png)
+
 The offline run plays all five beats against simulators of Airwallex and Metal that follow the same rules our code depends on (request_id dedupe, CANCELLED as the failure state, mandate payee checks). Every proof it shows starts with `sim:`. Add `--manual` to approve flagged payments yourself on the dashboard.
 
 ## The five beats
