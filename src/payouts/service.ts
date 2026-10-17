@@ -329,6 +329,7 @@ export function publicView(p: Payout) {
     id: p.id, status: p.status, reasons: p.reasons, amount: toMajor(p.amountMinor).toFixed(2), currency: p.currency, method: p.method,
     payee: p.payeeName, reference: p.reference,
     price_usdz: toMajor(p.totalMinor).toFixed(2), fee_usdz: toMajor(p.feeMinor).toFixed(2), rate_used: p.rateUsed,
+    created_at: p.createdAt, source: p.buyer?.startsWith("internal:") ? "inbox" : p.buyer ? "agent" : null,
     expires_at: p.expiresAt, funding_tx: p.fundingTx, airwallex_transfer_id: p.transferId, refund_tx: p.refundTx, failure: p.failure,
   };
 }

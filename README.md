@@ -18,7 +18,8 @@ Built for the Airwallex Agentic Banking Hackathon (2026).
 ```
 npm install
 npm run demo:offline     # three agents pay over MCP, the inbox, a refund, the heist, reconciliation
-npm run serve:offline    # or run the service: API on :4021, back office on /ops/
+npm run serve:offline    # or open the app on :4021 and sign in with coinslot-demo
+npm run test:e2e         # the app's flows in a real browser
 ```
 
 Offline mode swaps Airwallex and Metal for simulators. They follow the rules our code depends on: `request_id` dedupe, `CANCELLED` as the failure state, and the mandate's payee checks. Every proof they produce starts with `sim:`.
@@ -45,8 +46,16 @@ Metal itself refuses to sign above `COINSLOT_MAX_USDZ`.
 | `POST /v1/quotes` | free | Price, payee check, risk. Returns a quote, `needs_review` or `rejected`, with reasons. |
 | `POST /v1/payouts/:id/pay` | x402: the quote total | Locks the quote. The payout runs once the payment settles. |
 | `GET /v1/payouts/:id` | free | Status, Airwallex transfer id, refund tx. Never returns bank details. |
-| `POST /v1/inbox` | free | Forward an invoice email (`from`, `subject`, `body`). |
-| `POST /v1/inbox/:id/approve` | free | The one tap. `verified_with_payee: true` is needed for held invoices. |
+| `POST /v1/inbox` | owner, or `x-inbox-secret` | Forward an invoice email (`from`, `subject`, `body`). |
+| `POST /v1/inbox/:id/approve` | owner | The one tap. `verified_with_payee: true` is needed for held invoices. |
+| `POST /v1/inbox/:id/details` | owner | Fill in what the extractor couldn't find; the invoice is checked again. |
+| `GET /v1/payouts`, `POST /v1/payouts/:id/review` | owner | Every payout; allow or block a held agent payout. |
+
+"Owner" means the app's session cookie (sign in with `OWNER_TOKEN`) or `Authorization: Bearer <OWNER_TOKEN>`. Agents never need it.
+
+## The app
+
+`/` is the app: an inbox of forwarded invoices with one-tap pay, a phone-call check for invoices that change bank details, a form for missing details, every payment with its progress, and how to connect an agent. `/ops/` is the live back office feed. Both sit behind the owner's sign-in, and the page renders invoice text as text under a strict CSP.
 
 ## Live run (sandbox keys and Metal testnet)
 
@@ -72,6 +81,8 @@ Network access needed: `api.sandbox.airwallex.com`, `*.metalntwx.com`, and optio
 | `src/bridge/` | The off-ramp ledger: one Airwallex credit per finalized Metal event. |
 | `src/airwallex/` | Typed REST client, signed and deduped webhooks, and the agent card. |
 | `src/reconcile.ts` | Metal swept == ramp credited == Airwallex deposits, and every currency's balance explained. |
+| `src/web/` | The app (no build step). `tests/app.e2e.ts` drives it in a browser. |
+| `src/auth.ts` | The owner's sign-in. |
 | `src/app.ts`, `src/serve.ts`, `src/demo.ts` | The service in one process, and the demo that drives it through MCP and the inbox. |
 | `src/treasury/`, `src/agent/` | The treasury policy, bound approvals, the email reader and the executor. |
 | `src/sim/offline.ts` | The offline simulators. |

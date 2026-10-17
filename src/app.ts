@@ -3,6 +3,7 @@
 // `offline: true` swaps Airwallex and Metal for the simulators; everything else is the same code.
 
 import express from "express";
+import { fileURLToPath } from "node:url";
 import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
 import { METAL_NETWORKS, registerMetalScheme, sellerToken } from "@metalntwx/metal-pay";
 import type { Address } from "viem";
@@ -144,6 +145,20 @@ export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string })
     }));
   }
   app.use(payoutApi(svc, mode));
+
+  // The app itself: static files under a strict CSP, since it renders text from strangers' emails.
+  app.use((_req, res, next) => {
+    res.setHeader("x-content-type-options", "nosniff");
+    res.setHeader("referrer-policy", "no-referrer");
+    next();
+  });
+  app.use("/", (req, res, next) => {
+    if (req.method === "GET" && /^\/(index\.html|app\.js|app\.css)?$/.test(req.path)) {
+      res.setHeader("content-security-policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+      res.setHeader("cache-control", "no-cache");
+    }
+    next();
+  }, express.static(fileURLToPath(new URL("./web", import.meta.url)), { index: "index.html" }));
 
   // Everything below moves the business's money or shows its payees, so it needs the owner.
   const auth = createAuth({ offline: opts.offline, log: (l) => emit("observe", l) });
