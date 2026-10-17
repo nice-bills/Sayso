@@ -18,7 +18,7 @@ const SWIFT_FEE: Record<string, number> = { EUR: 1285 };
 
 export class FakeAirwallex implements LoopAirwallex {
   readonly balances: Record<string, number>;
-  private readonly transfers = new Map<string, Transfer & { method: string; lookups: number }>();
+  private readonly transfers = new Map<string, Transfer & { method: string; lookups: number; beneficiary_id: string; refunded?: boolean }>();
   readonly frozenCards = new Set<string>();
 
   constructor(openingMinor: Record<string, number>, readonly midRates: Record<string, number> = { EUR: 0.92, GBP: 0.79 }) {
@@ -51,7 +51,7 @@ export class FakeAirwallex implements LoopAirwallex {
     const amountMinor = toMinor(Number(b.transfer_amount));
     const fee = b.transfer_method === "SWIFT" ? (SWIFT_FEE[b.transfer_currency] ?? 0) : 0;
     this.add(b.transfer_currency, -(amountMinor + fee));
-    const t = { id: `sim:tfr_${this.transfers.size + 1}`, request_id: b.request_id, status: "PROCESSING", transfer_amount: toMajor(amountMinor), transfer_currency: b.transfer_currency, method: b.transfer_method, lookups: 0 };
+    const t = { id: `sim:tfr_${this.transfers.size + 1}`, request_id: b.request_id, status: "PROCESSING", transfer_amount: toMajor(amountMinor), transfer_currency: b.transfer_currency, method: b.transfer_method, lookups: 0, beneficiary_id: b.beneficiary_id };
     this.transfers.set(b.request_id, t);
     return t;
   };
@@ -61,8 +61,33 @@ export class FakeAirwallex implements LoopAirwallex {
     const t = this.transfers.get(requestId);
     if (!t) return undefined;
     t.lookups += 1;
-    t.status = t.lookups === 1 ? "SENT" : "PAID";
+    const ben = JSON.stringify(this.beneficiaries.get(t.beneficiary_id) ?? "");
+    const fails = ben.includes(this.failMarker);
+    t.status = t.lookups === 1 ? "SENT" : fails ? "CANCELLED" : "PAID";
+    if (fails && t.lookups > 1 && t.status === "CANCELLED" && !t.refunded) {
+      t.refunded = true;
+      this.add(t.transfer_currency, toMinor(t.transfer_amount)); // the bank returns the money
+      t.failure_type = "ACCOUNT_CLOSED";
+    }
     return t;
+  };
+
+  readonly beneficiaries = new Map<string, unknown>();
+  /** Fails a payout to an account whose details contain this marker, like a closed account would. */
+  failMarker = "CLOSED";
+
+  validateBeneficiary = async (beneficiary: unknown) => {
+    const bank = (beneficiary as { bank_details?: Record<string, string> }).bank_details ?? {};
+    const iban = bank.iban?.replace(/\s+/g, "");
+    if (iban !== undefined && !/^[A-Z]{2}\d{2}[A-Z0-9]{8,30}$/.test(iban)) throw new AirwallexError(400, "invalid_iban", { field: "iban" }, "/beneficiaries/validate");
+    if (iban === undefined && !bank.account_number) throw new AirwallexError(400, "missing_account", {}, "/beneficiaries/validate");
+    return {};
+  };
+
+  createBeneficiary = async (body: unknown) => {
+    const id = `sim:ben_${this.beneficiaries.size + 1}`;
+    this.beneficiaries.set(id, body);
+    return { beneficiary_id: id };
   };
 
   simulateDeposit = async (_globalAccountId: string, amount: number) => {
@@ -129,5 +154,19 @@ export class FakeMandate implements MetalSettlementVerifier {
     const reason = amountCents > this.capMinor ? "ExceedsCap" : "PayeeNotAllowed";
     emit("refuse", `Metal refused a payout to ${to}: ${reason} (sim)`, { recorded: true }, tx);
     return { outcome: "refused", tx, reason };
+  }
+}
+
+/** Refunds, simulated: what a Metal refund mandate (per-refund cap, total budget) would allow. */
+export class FakeRefunder {
+  readonly refunds: Array<{ to: string; amountMinor: number; payoutId: string }> = [];
+  constructor(private readonly capMinor = 250_000, private budgetMinor = 1_000_000) {}
+
+  async refund(to: string, amountMinor: number, payoutId: string) {
+    if (amountMinor > this.capMinor) throw new Error("refund mandate refused: ExceedsCap");
+    if (amountMinor > this.budgetMinor) throw new Error("refund mandate refused: ExceedsBudget");
+    this.budgetMinor -= amountMinor;
+    this.refunds.push({ to, amountMinor, payoutId });
+    return { tx: `sim:0x${randomUUID().replaceAll("-", "")}` };
   }
 }
