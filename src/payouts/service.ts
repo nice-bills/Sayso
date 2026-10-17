@@ -193,7 +193,7 @@ export class PayoutService {
   async onFunded(id: string, payer: string, fundingTx: string, now = new Date()): Promise<Payout> {
     if (!this.book.transition(id, ["accepted"], "funded", { buyer: payer, fundingTx })) return this.book.get(id)!;
     const p = this.book.get(id)!;
-    emit("observe", `Received ${toMajor(p.totalMinor).toFixed(2)} USDZ from ${short(payer)} for payout ${id.slice(0, 8)}`, {}, fundingTx);
+    if (!payer.startsWith("internal:")) emit("observe", `Received ${toMajor(p.totalMinor).toFixed(2)} USDZ from ${short(payer)} for payout ${id.slice(0, 8)}`, {}, fundingTx);
 
     // Limits are re-checked against the payer who actually settled, not the one the request claimed.
     const limits = assess({

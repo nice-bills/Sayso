@@ -1,5 +1,5 @@
 // What the agent has earned and not yet swept: the USDZ balance of its Metal account, read from chain.
-// The x402 meter on the seller is only for the screen; this is the number the sweep trusts.
+// This is the number the sweep trusts, not anything the API counted.
 
 import { createPublicClient, erc20Abi, http, type Address } from "viem";
 import type { RampLedger } from "../bridge/ledger.js";

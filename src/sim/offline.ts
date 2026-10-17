@@ -109,7 +109,7 @@ export class FakeAirwallex implements LoopAirwallex {
   };
 }
 
-/** Customers paying per call over x402. Live, this is `npm run swarm` against the seller. */
+/** Per-call earnings, simulated (used by the treasury tests). */
 export class FakeSwarm implements EarningsSource {
   paidCalls = 0;
   private unsweptMinor = 0;

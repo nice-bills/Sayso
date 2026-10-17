@@ -91,7 +91,7 @@
   }
 
   async function refresh() {
-    const s = await fetch("/state").then((r) => r.json()).catch(() => null);
+    const s = await fetch("state").then((r) => r.json()).catch(() => null);
     if (!s) return;
     const rows = Object.entries(s.balances ?? {});
     $("balances").innerHTML = rows.length ? rows.map(([c, m]) => `<tr><td>${esc(c)}</td><td>${money(m)}</td></tr>`).join("") : `<tr><td class="empty">none</td><td></td></tr>`;
@@ -100,7 +100,7 @@
     $("approvals").innerHTML = pending.length ? pending.map((p) =>
       `<div class="approval"><span>${esc(p.label)}</span><button data-id="${esc(p.obligationId)}">Approve</button></div>`).join("") : "Nothing to approve.";
     $("approvals").querySelectorAll("button").forEach((b) => b.onclick = async () => {
-      await fetch(`/approve/${encodeURIComponent(b.dataset.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approver: "dashboard" }) });
+      await fetch(`approve/${encodeURIComponent(b.dataset.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approver: "dashboard" }) });
       refresh();
     });
     if (s.reconcile) {
@@ -110,7 +110,7 @@
     }
   }
 
-  new EventSource("/events").onmessage = (m) => addEvent(JSON.parse(m.data));
+  new EventSource("events").onmessage = (m) => addEvent(JSON.parse(m.data));
   refresh();
 </script>
 </body>

@@ -1,0 +1,182 @@
+// Coin Slot as one service: the x402 payout API, the invoice inbox, Airwallex webhooks, the
+// back office, and the background loop that keeps the float funded and payouts moving.
+// `offline: true` swaps Airwallex and Metal for the simulators; everything else is the same code.
+
+import express from "express";
+import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
+import { METAL_NETWORKS, registerMetalScheme, sellerToken } from "@metalntwx/metal-pay";
+import type { Address } from "viem";
+import { Airwallex, type Transfer } from "./airwallex/client.js";
+import { webhookRouter } from "./airwallex/webhooks.js";
+import { RampLedger } from "./bridge/ledger.js";
+import { SimulatedDepositCredit } from "./bridge/deposit-credit.js";
+import { sweepEpoch, type MetalSettlementVerifier } from "./bridge/ramp.js";
+import { dashboardRouter } from "./dashboard/server.js";
+import { emit } from "./events.js";
+import { Inbox } from "./inbox/inbox.js";
+import { imapFromEnv, pollImap } from "./inbox/imap.js";
+import { ChainEarnings, type EarningsSource } from "./metal/earnings.js";
+import { MandateRefunder, MandateSweepVerifier, MetalMandate, type PullResult } from "./metal/mandate.js";
+import { payoutApi, type PaymentMode } from "./payouts/http.js";
+import { PayoutError, PayoutService, publicView, type PayoutAirwallex, type Refunder } from "./payouts/service.js";
+import type { PayoutBook } from "./payouts/book.js";
+import { flowsFromBooks, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
+import { FakeAirwallex, FakeMandate, FakeRefunder } from "./sim/offline.js";
+import { Store } from "./store.js";
+import { fmt, toMinor } from "./treasury/money.js";
+
+/** Sweep cap per pull, and the USDZ left on the earnings account to cover refunds. */
+const SWEEP_CAP_MINOR = toMinor(5000);
+const REFUND_RESERVE_MINOR = toMinor(200);
+
+/** Offline earnings: what buyers paid (minus refunds) that has not been swept yet. */
+class BookEarnings implements EarningsSource {
+  constructor(private readonly book: PayoutBook, private readonly ledger: RampLedger) {}
+  async pending() {
+    const external = this.book.list(10_000).filter((p) => p.fundingTx && !p.buyer?.startsWith("internal:"));
+    const received = external.reduce((s, p) => s + p.totalMinor, 0);
+    const refunded = external.filter((p) => p.status === "refunded").reduce((s, p) => s + p.totalMinor, 0);
+    const swept = this.ledger.all().filter((x) => x.status !== "rejected").reduce((s, x) => s + x.amountMinor, 0);
+    const amountMinor = Math.min(received - refunded - swept - REFUND_RESERVE_MINOR, SWEEP_CAP_MINOR);
+    return amountMinor > 0 ? { epoch: `epoch-${this.ledger.all().length + 1}`, amountMinor } : undefined;
+  }
+}
+
+export interface CoinSlot {
+  offline: boolean;
+  app: express.Express;
+  svc: PayoutService;
+  inbox: Inbox;
+  awx: PayoutAirwallex;
+  /** Tries to pay a non-ramp address under the sweep mandate, so Metal records the refusal. */
+  attemptHeist(to: string, amountMinor: number): Promise<PullResult>;
+  tick(): Promise<void>;
+  reconcileNow(): Promise<ReturnType<typeof reconcile>>;
+  balances(): Promise<Record<string, number>>;
+}
+
+export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string }): Promise<CoinSlot> {
+  const dbPath = opts.dbPath ?? (opts.offline ? ":memory:" : process.env.COINSLOT_DB ?? "coinslot.db");
+  const store = new Store(dbPath);
+  const ledger = new RampLedger(dbPath);
+
+  let awx: PayoutAirwallex & ConstructorParameters<typeof SimulatedDepositCredit>[0];
+  let refunder: Refunder;
+  let verifier: MetalSettlementVerifier;
+  let heist: (to: string, cents: number) => Promise<PullResult>;
+  let mode: PaymentMode;
+  let earningsFor: (svc: PayoutService) => EarningsSource;
+
+  if (opts.offline) {
+    emit("observe", "Running OFFLINE: Airwallex and Metal are simulated; every proof starts with sim:");
+    awx = new FakeAirwallex({ USD: toMinor(2000) });
+    refunder = new FakeRefunder();
+    const sweepMandate = new FakeMandate("0xRamp000000000000000000000000000000000001", SWEEP_CAP_MINOR);
+    verifier = sweepMandate;
+    heist = (to, cents) => sweepMandate.attemptAndRecordRefusal(to, cents);
+    mode = { kind: "sim" };
+    earningsFor = (svc) => new BookEarnings(svc.book, ledger);
+  } else {
+    const rpc = process.env.METAL_RPC_URL;
+    if (!rpc) throw new Error("Set METAL_RPC_URL");
+    awx = Airwallex.fromEnv();
+    const sweep = MetalMandate.fromEnv();
+    const principal = (process.env.METAL_PRINCIPAL as Address | undefined) ?? (await sweep.account());
+    refunder = MandateRefunder.fromEnv();
+    verifier = new MandateSweepVerifier(sweep, store, principal, rpc);
+    heist = (to, cents) => sweep.attemptAndRecordRefusal(to as Address, cents);
+    const token = process.env.METAL_SELLER_TOKEN;
+    const facilitator = new HTTPFacilitatorClient({ url: METAL_NETWORKS.testnet.facilitatorUrl, ...(token ? { createAuthHeaders: sellerToken(token) } : {}) });
+    mode = { kind: "x402", server: registerMetalScheme(new x402ResourceServer(facilitator), { networks: ["testnet"] }), network: METAL_NETWORKS.testnet.network, payTo: principal };
+    earningsFor = () => {
+      const chain = new ChainEarnings(rpc, principal, ledger, SWEEP_CAP_MINOR);
+      return { pending: async () => { const e = await chain.pending(); return e && e.amountMinor > REFUND_RESERVE_MINOR ? { ...e, amountMinor: e.amountMinor - REFUND_RESERVE_MINOR } : undefined; } };
+    };
+  }
+
+  const svc = new PayoutService({ awx, store, refunder });
+  const inbox = new Inbox(store, svc);
+  const credit = new SimulatedDepositCredit(awx, process.env.AWX_GLOBAL_ACCOUNT_ID ?? "sim:ga_usd");
+  const earnings = earningsFor(svc);
+
+  const balances = async () => Object.fromEntries((await awx.currentBalances()).map((b) => [b.currency, toMinor(b.available_amount)]));
+  const opening = await balances();
+  let lastReconcile: ReturnType<typeof reconcile> | undefined;
+  let lastBalances = opening;
+
+  async function sweep() {
+    const e = await earnings.pending();
+    if (!e) return;
+    const r = await sweepEpoch({ ...e, currency: "USD" }, ledger, verifier, credit);
+    if (r.outcome === "credited") emit("act", `Moved ${fmt(e.amountMinor, "USD")} of earnings into the Airwallex float, exactly once`, { epoch: e.epoch }, r.sweep.airwallexDepositId ?? undefined);
+    else if (r.outcome === "rejected") emit("refuse", `Sweep ${e.epoch} not credited: ${r.sweep.reason}`);
+  }
+
+  async function reconcileNow() {
+    lastBalances = await balances();
+    const books = flowsFromBooks(store, ledger, "USD");
+    const currencies: Record<string, CurrencyFlows> = {};
+    for (const ccy of new Set([...Object.keys(opening), ...Object.keys(lastBalances), ...Object.keys(books)])) {
+      const b = books[ccy] ?? { depositsMinor: 0, boughtMinor: 0, soldMinor: 0, payoutsMinor: 0, feesMinor: 0, cardSpendMinor: 0 };
+      currencies[ccy] = { openingMinor: opening[ccy] ?? 0, closingMinor: lastBalances[ccy] ?? 0, ...b };
+    }
+    lastReconcile = reconcile({ rampCurrency: "USD", metalSweptMinor: ledger.verifiedOnChainMinor("USD"), rampCreditedMinor: ledger.creditedMinor("USD"), airwallexDepositsMinor: credit.depositedMinor(), currencies });
+    reportReconcile(lastReconcile);
+    return lastReconcile;
+  }
+
+  const imap = imapFromEnv();
+  async function tick() {
+    await sweep().catch((e) => emit("escalate", `Sweep failed: ${String(e).slice(0, 200)}`));
+    await svc.follow().catch((e) => emit("escalate", `Following payouts failed: ${String(e).slice(0, 200)}`));
+    if (imap) await pollImap(imap, inbox);
+    lastBalances = await balances().catch(() => lastBalances);
+  }
+
+  // ---------- HTTP ----------
+  const app = express();
+  if (!opts.offline && process.env.AWX_WEBHOOK_SECRET) {
+    app.use("/webhooks/airwallex", webhookRouter(process.env.AWX_WEBHOOK_SECRET, store, async (e) => {
+      if (e.name.startsWith("payout.transfer.")) await svc.onTransfer(e.data.object as unknown as Transfer);
+    }));
+  }
+  app.use(payoutApi(svc, mode));
+
+  // The inbox: forward an invoice here (from an email webhook, a mail rule, or the app).
+  app.post("/v1/inbox", express.json({ limit: "256kb" }), async (req, res) => {
+    const b = req.body as { message_id?: string; from?: string; subject?: string; body?: string };
+    if (!b?.body || !b.from) return void res.status(400).json({ error: "from and body are required" });
+    const item = await inbox.receive({ messageId: b.message_id ?? `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, from: b.from, subject: b.subject ?? "(no subject)", body: b.body, receivedAt: new Date() });
+    res.status(201).json(item);
+  });
+  app.get("/v1/inbox", (_req, res) => res.json(inbox.list()));
+  app.post("/v1/inbox/:id/approve", express.json(), async (req, res) => {
+    try {
+      res.json(await inbox.approve(req.params.id, String(req.body?.approver ?? "owner"), { verifiedWithPayee: req.body?.verified_with_payee === true }));
+    } catch (err) {
+      res.status(err instanceof PayoutError ? err.status : 500).json({ error: String((err as Error).message) });
+    }
+  });
+  app.post("/v1/inbox/:id/ignore", (req, res) => res.json(inbox.ignore(req.params.id)));
+
+  app.use("/ops", dashboardRouter({
+    state: () => ({
+      offline: opts.offline,
+      balances: lastBalances,
+      pendingApprovals: [
+        ...inbox.list().filter((i) => i.status === "awaiting_approval").map((i) => ({ obligationId: i.id, label: `Pay ${i.payout?.amount} ${i.payout?.currency} to ${i.payout?.payee}` })),
+        ...svc.book.list().filter((p) => p.status === "needs_review" && !inbox.list().some((i) => i.payoutId === p.id)).map((p) => ({ obligationId: p.id, label: `Review ${fmt(p.amountMinor, p.currency)} to ${p.payeeName}: ${p.reasons.join("; ")}` })),
+      ],
+      payouts: svc.book.list().map(publicView),
+      inbox: inbox.list(),
+      sweeps: ledger.all(),
+      reconcile: lastReconcile,
+    }),
+    approve: async (id, approver, body) => {
+      if (inbox.get(id)) return inbox.approve(id, approver, { verifiedWithPayee: body.verified_with_payee === true });
+      return publicView(svc.approveReview(id, approver));
+    },
+  }));
+
+  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances };
+}

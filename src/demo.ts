@@ -1,222 +1,96 @@
-// The demo, in five beats, against the real sandboxes or fully offline (`--offline`, or no keys).
-//   1. Customers pay the agent per call over x402 on Metal.
-//   2. Earnings sweep to the off-ramp under a Metal mandate and land on Airwallex exactly once.
-//   3. The agent plans its bills, converts only what it must, pays, and puts its compute on its own card.
-//   4. A "landlord" email asks for new bank details: escalated. A compromised agent's payout to the
-//      attacker's wallet is refused by Metal on chain.
-//   5. Reconciliation: every cent explained, by arithmetic.
-//
-// Flags: --offline  use the simulators;  --manual  wait for approvals on the dashboard instead of auto-approving.
+// The demo, driven the way real users drive Coin Slot: AI agents through the MCP tools, a business
+// through its invoice inbox. Runs against the live sandboxes, or fully offline with --offline.
+//   1. Three agents pay real-world invoices through Coin Slot's MCP tool (x402 on Metal -> Airwallex).
+//   2. A business forwards invoices; one tap pays them. A fake "landlord" asking for new bank details is held.
+//   3. A payout bounces (closed account): the agent is refunded in full under a Metal refund mandate.
+//   4. Earnings move into the Airwallex float under a ramp-only mandate, exactly once.
+//   5. A compromised agent tries to drain the earnings to an attacker: Metal refuses it on chain.
+//   6. Reconciliation: every cent explained.
 
-import { spawn } from "node:child_process";
-import { Agent, type AgentDeps } from "./agent/loop.js";
-import { approvalKey, onTransferState, termsOf } from "./agent/executor.js";
-import { Airwallex, type Transfer } from "./airwallex/client.js";
-import { webhookRouter } from "./airwallex/webhooks.js";
-import { AgentCard, type CardTransaction } from "./airwallex/card.js";
-import { RampLedger } from "./bridge/ledger.js";
-import { SimulatedDepositCredit } from "./bridge/deposit-credit.js";
-import { startDashboard } from "./dashboard/server.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import type { AddressInfo } from "node:net";
+import { buildCoinSlot } from "./app.js";
 import { emit } from "./events.js";
-import { ChainEarnings } from "./metal/earnings.js";
-import { MandateSweepVerifier, MetalMandate, type PullResult } from "./metal/mandate.js";
-import { flowsFromBooks, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
-import { ATTACKER_WALLET, beneficiaries, churnEmail, heistEmail, obligations, policyConfig } from "./scenario.js";
-import { FakeAirwallex, FakeMandate, FakeSwarm } from "./sim/offline.js";
-import { Store } from "./store.js";
-import { ApprovalGate, grant, hashEvidence } from "./treasury/approval.js";
-import { fmt, toMinor } from "./treasury/money.js";
-import type { Address } from "viem";
+import { designerInvoice, fakeLandlord, studioInvoice, vagueEmail } from "../samples/invoices.js";
 
-const args = new Set(process.argv.slice(2));
-const offline = args.has("--offline") || !process.env.AWX_CLIENT_ID || !process.env.METAL_RPC_URL;
-const manual = args.has("--manual");
+const offline = process.argv.includes("--offline") || !process.env.AWX_CLIENT_ID;
+const exit = process.argv.includes("--exit");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const beat = async (n: number, title: string) => {
-  emit("observe", `Beat ${n}: ${title}`);
-  await sleep(offline ? 600 : 0);
-};
+const beat = async (n: number, title: string) => { emit("observe", `Beat ${n}: ${title}`); await sleep(offline ? 500 : 0); };
 
-const CAP_MINOR = toMinor(500);
-const now = new Date();
-const store = new Store(offline ? ":memory:" : undefined);
-const ledger = new RampLedger(offline ? ":memory:" : process.env.COINSLOT_DB ?? "coinslot.db");
-const ben = beneficiaries(!offline);
+const cs = await buildCoinSlot({ offline });
+const server = cs.app.listen(Number(process.env.PORT ?? 4021));
+const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+emit("observe", `Coin Slot on ${base}; back office at ${base}/ops/`);
+const settle = async (n = 3) => { for (let i = 0; i < n; i++) await cs.tick(); };
 
-// --- wire live or offline services behind the same interfaces ---
-let awx: AgentDeps["awx"] & ConstructorParameters<typeof SimulatedDepositCredit>[0] & ConstructorParameters<typeof AgentCard>[0];
-let verifier: AgentDeps["verifier"];
-let earnings: AgentDeps["earnings"];
-let refuser: { attemptAndRecordRefusal(to: Address, cents: number): Promise<PullResult> };
-let runSwarm: () => Promise<void>;
-let advancePayouts: (ids: string[]) => Promise<void> = async () => {};
-
-if (offline) {
-  emit("observe", "Running OFFLINE: Airwallex and Metal are simulated; every proof starts with sim:");
-  const fake = new FakeAirwallex({ USD: toMinor(400), EUR: toMinor(10) });
-  const mandate = new FakeMandate("0xRamp000000000000000000000000000000000001", CAP_MINOR);
-  const swarm = new FakeSwarm(ledger);
-  awx = fake;
-  verifier = mandate;
-  earnings = swarm;
-  refuser = mandate;
-  runSwarm = () => swarm.run(8, 600);
-} else {
-  const live = Airwallex.fromEnv();
-  const mandate = MetalMandate.fromEnv();
-  const rpc = process.env.METAL_RPC_URL!;
-  const principal = (process.env.METAL_PRINCIPAL as Address | undefined) ?? (await mandate.account());
-  awx = live;
-  verifier = new MandateSweepVerifier(mandate, store, principal, rpc);
-  earnings = new ChainEarnings(rpc, principal, ledger, CAP_MINOR);
-  refuser = mandate;
-  runSwarm = () => liveSwarm();
-  // Sandbox transfers stay PROCESSING until simulated. VERIFY the transition names with the docs MCP.
-  advancePayouts = async (ids) => {
-    for (const id of ids) for (const next of ["SENT", "PAID"]) await live.simulateTransfer(id, { next_status: next }).catch((e) => emit("observe", `simulate ${next} on ${id}: ${String(e).slice(0, 120)}`));
-  };
+/** One buying agent: its own MCP connection to Coin Slot, paying with its own Metal identity. */
+async function agent(name: string, payerOrKey: string) {
+  const env: Record<string, string> = { ...(process.env as Record<string, string>), COINSLOT_URL: base, COINSLOT_MAX_USDZ: "500" };
+  if (offline) env.COINSLOT_SIM_PAYER = payerOrKey; else env.COINSLOT_BUYER_KEY = payerOrKey;
+  const client = new Client({ name, version: "1.0.0" });
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", "tsx", "src/mcp/server.ts"], env, stderr: "ignore" }));
+  return client;
 }
 
-const globalAccountId = process.env.AWX_GLOBAL_ACCOUNT_ID ?? "sim:ga_usd";
-const credit = new SimulatedDepositCredit(awx, globalAccountId);
-const deps: AgentDeps = {
-  awx, store, ledger, verifier, credit, earnings,
-  gate: new ApprovalGate(), approvals: new Map(),
-  evidenceHash: (id) => hashEvidence(`invoice:${id}`), reference: (id) => `Coin Slot ${id}`.slice(0, 35),
-  baseCurrency: "USD", cfg: policyConfig,
-  obligations: obligations(now, ben), allowlist: new Set(Object.values(ben).filter(Boolean)),
-  forecast: { expectedInflowMinor: toMinor(300), confidence: 0.85 },
-};
-const agent = new Agent(deps);
-const card = new AgentCard(awx, store, undefined, process.env.AWX_CARD_ID);
-let lastReconcile: ReturnType<typeof reconcile> | undefined;
-
-// --- approvals: a person approves the exact terms on screen ---
-const pendingApprovals = () => (agent.lastPlan?.actions ?? [])
-  .filter((a): a is Extract<typeof a, { kind: "convert" | "pay" }> => (a.kind === "convert" || a.kind === "pay") && a.needsApproval && !deps.approvals.has(approvalKey(a.obligationId, a.kind)))
-  .filter((a) => { const op = store.latestOp(a.obligationId, a.kind); return !op || op.status === "failed"; })
-  .filter((a, i, all) => all.findIndex((b) => b.obligationId === a.obligationId) === i)
-  .map((a) => {
-    const o = deps.obligations.find((x) => x.id === a.obligationId);
-    return { obligationId: a.obligationId, label: `Pay ${o ? fmt(o.amountMinor, o.currency) : ""} to ${o?.payee ?? a.obligationId}` };
-  });
-
-function approve(obligationId: string, approver: string) {
-  const granted: string[] = [];
-  for (const a of agent.lastPlan?.actions ?? []) {
-    if ((a.kind === "convert" || a.kind === "pay") && a.obligationId === obligationId && a.needsApproval) {
-      deps.approvals.set(approvalKey(a.obligationId, a.kind), grant(termsOf(a, deps.evidenceHash(a.obligationId)), approver, 10 * 60_000));
-      granted.push(a.kind);
-    }
-  }
-  if (granted.length) emit("decide", `${approver} approved ${obligationId} (${granted.join(" + ")}), bound to the exact amount and beneficiary`);
-  return { granted };
-}
-
-const server = startDashboard({
-  state: () => ({ offline, balances: agent.balancesMinor, pendingApprovals: pendingApprovals(), plan: agent.lastPlan, ops: store.ops(), sweeps: ledger.all(), flagged: agent.flagged, reconcile: lastReconcile }),
-  approve,
-}, undefined, (app) => {
-  // Live payouts settle through webhooks when the dashboard is reachable from Airwallex (e.g. via a tunnel).
-  const secret = process.env.AWX_WEBHOOK_SECRET;
-  if (!secret || offline) return;
-  app.use("/webhooks/airwallex", webhookRouter(secret, store, async (e) => {
-    const o = e.data.object;
-    if (e.name.startsWith("payout.transfer.")) {
-      const t = o as unknown as Transfer;
-      const ben = deps.obligations.find((x) => x.id === store.opByAirwallexId(t.id)?.obligationId)?.beneficiaryId;
-      onTransferState(deps, t, ben !== undefined && deps.allowlist.has(ben));
-    } else {
-      emit("observe", `Webhook ${e.name}`, { id: o.id });
-    }
-  }));
+const result = (r: Awaited<ReturnType<Client["callTool"]>>) => JSON.parse((r.content as Array<{ text: string }>)[0]!.text);
+const payee = (name: string, iban: string, city: string) => ({
+  payee_name: name, payee_country: iban.slice(0, 2), payee_city: city, payee_street: "1 Main Street", payee_postcode: "10000", bank_country: iban.slice(0, 2), bank: { iban },
 });
 
-// --- the five beats ---
-await sleep(offline ? 1500 : 0); // time to open the dashboard
-const opening = await agent.observe();
-const openingMinor = { ...opening.balancesMinor };
-
-await beat(1, "customers pay per call over x402 on Metal");
-await runSwarm();
-
-await beat(2, "sweep earnings to Airwallex under a Metal mandate");
-await agent.sweep();
-
-await beat(3, "plan the bills, convert only what is needed, pay");
-agent.inbox.push(churnEmail);
-await agent.tick(now);
-const waiting = pendingApprovals();
-if (waiting.length) {
-  if (manual) {
-    emit("escalate", `Waiting for approval on the dashboard: ${waiting.map((w) => w.obligationId).join(", ")}`);
-    for (let i = 0; i < 300 && pendingApprovals().length; i++) await sleep(1000);
-  } else {
-    await sleep(offline ? 2500 : 0);
-    for (const w of waiting) approve(w.obligationId, "demo operator");
-  }
-  await agent.tick(now);
+// ---- 1. agents pay invoices over MCP ----
+await beat(1, "three AI agents pay real-world invoices through Coin Slot's MCP tool");
+const buyers = offline
+  ? ["0xA9e0000000000000000000000000000000000001", "0xA9e0000000000000000000000000000000000002", "0xA9e0000000000000000000000000000000000003"]
+  : (process.env.METAL_BUYER_KEYS ?? "").split(",").filter(Boolean);
+const jobs = [
+  { amount: "180.00", currency: "EUR", reference: "Translation Oct", ...payee("Lingua Freelance", "FR1420041010050500013M02606", "Paris") },
+  { amount: "95.50", currency: "EUR", reference: "GPU rental 44", ...payee("Rechenzentrum Nord GmbH", "DE75512108001245126199", "Hamburg") },
+  { amount: "240.00", currency: "EUR", reference: "Data labelling", ...payee("Etiqueta SL", "ES9121000418450200051332", "Madrid") },
+];
+const agents = await Promise.all(buyers.slice(0, 3).map((b, i) => agent(`buyer-agent-${i + 1}`, b)));
+for (const [i, a] of agents.entries()) {
+  const r = result(await a.callTool({ name: "pay_invoice", arguments: { ...jobs[i]!, max_usdz: "400" } }));
+  emit("observe", `buyer-agent-${i + 1}: ${r.paid ? `paid quote ${String(r.quote_id).slice(0, 8)}, HTTP ${r.http_status}` : `not paid: ${r.reason ?? r.status}`}`);
 }
-await agent.followPayouts();
-await advancePayouts(store.ops().filter((o) => o.kind === "pay" && o.status === "submitted" && o.airwallexId).map((o) => o.airwallexId!));
-await agent.followPayouts();
-await computeBill();
+await settle();
 
-await beat(4, "a fake landlord asks for new bank details");
-agent.inbox.push(heistEmail);
-await agent.readInbox();
-const target = (agent.flagged.at(-1)?.addresses[0] ?? ATTACKER_WALLET) as Address;
-emit("decide", `Stress test: suppose the agent were fooled and tried to pay ${target}. Metal's mandate decides, not the agent.`);
-await refuser.attemptAndRecordRefusal(target, toMinor(60));
+// ---- 2. the invoice inbox ----
+await beat(2, "a business forwards invoices; one tap pays each");
+const post = (path: string, body: unknown) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<{ id: string; status: string; error?: string }>);
+const items = [];
+for (const e of [studioInvoice, designerInvoice, fakeLandlord, vagueEmail]) items.push(await post("/v1/inbox", { message_id: e.messageId, from: e.from, subject: e.subject, body: e.body }));
+for (const it of items.filter((i) => i.status === "awaiting_approval")) await post(`/v1/inbox/${encodeURIComponent(it.id)}/approve`, { approver: "will" });
+const held = items.find((i) => i.status === "needs_verification");
+if (held) {
+  const r = await post(`/v1/inbox/${encodeURIComponent(held.id)}/approve`, { approver: "will" });
+  emit("refuse", `Approving the "landlord" invoice without confirming by phone: ${r.error}`);
+}
+await settle();
 
-await beat(5, "reconcile every cent");
-await agent.observe();
-lastReconcile = reconcileNow();
-reportReconcile(lastReconcile);
-
-emit("observe", `Demo complete. ${offline ? "Offline run: no real money moved." : "Live sandbox run."} Dashboard stays up; Ctrl+C to exit.`);
-if (args.has("--exit")) server.close();
-
-// --- helpers ---
-async function computeBill() {
-  if (!card.cardId) await card.issue("agent@coinslot.example");
-  const merchant = { name: "ANTHROPIC PBC", mcc: "7372", amountMinor: toMinor(12.4) };
-  const { transaction_id } = await card.simulateBill(merchant.name, merchant.mcc, merchant.amountMinor);
-  // Live, the issuing.transaction webhook carries this; the sandbox simulation returns the id directly.
-  const tx: CardTransaction = { id: transaction_id, card_id: card.cardId!, amountMinor: merchant.amountMinor, currency: "USD", merchantName: merchant.name, mcc: merchant.mcc, status: "APPROVED" };
-  await card.onTransaction(tx, now);
+// ---- 3. a bounced payout is refunded ----
+await beat(3, "a payout bounces; the agent gets every cent back");
+if (offline && agents[0]) {
+  const r = result(await agents[0].callTool({ name: "pay_invoice", arguments: { amount: "60.00", currency: "EUR", reference: "Old supplier", ...payee("Closed Account Co (CLOSED)", "DE02100100109307118603", "Berlin"), max_usdz: "100" } }));
+  emit("observe", `buyer-agent-1 paid quote ${String(r.quote_id).slice(0, 8)}`);
+  await settle();
+} else {
+  emit("observe", "Live: bounce a payout with the Airwallex transfer simulation (next_status CANCELLED) to see the refund");
 }
 
-function reconcileNow() {
-  const books = flowsFromBooks(store, ledger, "USD");
-  const closing = agent.balancesMinor;
-  const currencies: Record<string, CurrencyFlows> = {};
-  for (const ccy of new Set([...Object.keys(openingMinor), ...Object.keys(closing), ...Object.keys(books)])) {
-    const b = books[ccy] ?? { depositsMinor: 0, boughtMinor: 0, soldMinor: 0, payoutsMinor: 0, feesMinor: 0, cardSpendMinor: 0 };
-    currencies[ccy] = { openingMinor: openingMinor[ccy] ?? 0, closingMinor: closing[ccy] ?? 0, ...b };
-  }
-  return reconcile({
-    rampCurrency: "USD",
-    metalSweptMinor: ledger.verifiedOnChainMinor("USD"),
-    rampCreditedMinor: ledger.creditedMinor("USD"),
-    airwallexDepositsMinor: credit.depositedMinor(),
-    currencies,
-  });
-}
+// ---- 4. sweep ----
+await beat(4, "earnings have been moving into the Airwallex float on every tick, under a ramp-only Metal mandate");
+await settle(1);
 
-/** Live beat 1: run the buyer swarm against the running seller and mirror its meter. */
-async function liveSwarm() {
-  const sellerUrl = process.env.SELLER_URL ?? "http://127.0.0.1:4021/v1/answer";
-  const meterUrl = new URL("/meter", sellerUrl).toString();
-  if (!process.env.METAL_BUYER_KEYS) {
-    emit("observe", "METAL_BUYER_KEYS not set: skipping the swarm, sweeping whatever the account already earned");
-    return;
-  }
-  const child = spawn(process.execPath, ["--import", "tsx", "src/metal/swarm.ts"], { stdio: "inherit", env: process.env });
-  const poll = setInterval(async () => {
-    const m = (await fetch(meterUrl).then((r) => r.json()).catch(() => null)) as { paidCalls: number } | null;
-    if (m) emit("observe", `${m.paidCalls} paid calls (x402 on Metal testnet)`, { paidCalls: m.paidCalls, earnedMinor: m.paidCalls });
-  }, 2000);
-  await new Promise((r) => child.on("exit", r));
-  clearInterval(poll);
-}
+// ---- 5. heist ----
+await beat(5, "a compromised agent tries to drain the earnings to an attacker");
+await cs.attemptHeist("0x9f3a6C0b9a2b9E3d7F1c5aE4B2d8C6e0F1a2B3c4", 25_000);
+
+// ---- 6. reconcile ----
+await beat(6, "reconcile every cent");
+await cs.reconcileNow();
+
+for (const a of agents) await a.close();
+emit("observe", `Demo complete. ${offline ? "Offline: no real money moved." : "Live sandbox run."} Back office: ${base}/ops/`);
+if (exit) { server.close(); process.exit(0); }
