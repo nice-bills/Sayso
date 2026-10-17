@@ -14,7 +14,8 @@
     "backtest": "tsx scripts/backtest.ts",
     "serve": "tsx --env-file-if-exists=.env src/serve.ts",
     "serve:offline": "tsx src/serve.ts --offline",
-    "mcp": "tsx --env-file-if-exists=.env src/mcp/server.ts"
+    "mcp": "tsx --env-file-if-exists=.env src/mcp/server.ts",
+    "test:e2e": "e2e run"
   },
   "license": "MIT",
   "dependencies": {
@@ -33,9 +34,11 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@e2e-dev/web": "^0.15.2",
     "@types/express": "^5.0.6",
     "@types/mailparser": "^3.9.0",
     "@types/node": "^26.6.5",
+    "e2e": "^0.21.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
