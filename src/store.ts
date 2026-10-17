@@ -43,6 +43,12 @@ export class Store {
         name TEXT NOT NULL,
         created_at TEXT NOT NULL,
         body TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS mandate_pulls (
+        epoch TEXT PRIMARY KEY,
+        tx_hash TEXT,
+        outcome TEXT NOT NULL,
+        detail TEXT
       );`);
   }
 
@@ -73,6 +79,17 @@ export class Store {
   recordEvent(eventId: string, name: string, createdAt: string, body: string): boolean {
     const r = this.db.prepare("INSERT OR IGNORE INTO webhook_events (event_id, name, created_at, body) VALUES (?, ?, ?, ?)").run(eventId, name, createdAt, body);
     return Number(r.changes) === 1;
+  }
+
+  /** A mandate pull, recorded as soon as its transaction is known, so a lost receipt is re-checked, never re-pulled. */
+  recordPull(epoch: string, txHash: string | null, outcome: string, detail?: string): void {
+    this.db.prepare("INSERT INTO mandate_pulls (epoch, tx_hash, outcome, detail) VALUES (?, ?, ?, ?) ON CONFLICT(epoch) DO UPDATE SET tx_hash = COALESCE(excluded.tx_hash, tx_hash), outcome = excluded.outcome, detail = excluded.detail")
+      .run(epoch, txHash, outcome, detail ?? null);
+  }
+
+  pullFor(epoch: string): { txHash: string | null; outcome: string } | undefined {
+    const r = this.db.prepare("SELECT tx_hash, outcome FROM mandate_pulls WHERE epoch = ?").get(epoch) as { tx_hash: string | null; outcome: string } | undefined;
+    return r ? { txHash: r.tx_hash, outcome: r.outcome } : undefined;
   }
 
   private row(r: unknown): Operation | undefined {
