@@ -11,6 +11,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@metalntwx/metal-pay": "^0.2.0",
     "@x402/core": "2.21.0",
     "@x402/evm": "2.21.0",
