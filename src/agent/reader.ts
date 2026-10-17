@@ -47,6 +47,30 @@ export async function readMessage(client: Anthropic, message: string): Promise<F
   return response.parsed_output;
 }
 
+/**
+ * Keyless reader, used until Claude credits arrive. Deliberately conservative: anything that
+ * looks like a bank-details change or pressure is flagged, so it can only over-escalate.
+ */
+export function heuristicRead(message: string): Findings {
+  const text = message.toLowerCase();
+  const quote = (re: RegExp) => message.match(re)?.[0];
+  const bank = /(new|updated|changed|different)\s+(bank|account|iban|wallet|payment)\s*(details|number|address)?|\biban\b|sort code|routing number|0x[0-9a-f]{40}/i;
+  const pressure = /urgent|immediately|today only|asap|confidential|do not tell|don't tell|final notice|right away/i;
+  const contradicts = /(pay(ing)?|payment).{0,30}(late|delay|next month)|cancel(l)?ing|pausing (our|the) (usage|calls)|traffic (drop|down)|churn/i;
+  const requestsNewBankDetails = bank.test(message);
+  const pressureTactics = pressure.test(message);
+  const forecastSignal = contradicts.test(message) ? "contradicts" : "none";
+  const citations = [quote(bank), quote(pressure), quote(contradicts)].filter((q): q is string => Boolean(q));
+  const kind = requestsNewBankDetails ? "bank_details_change" : /invoice|amount due|bill/.test(text) ? "invoice" : forecastSignal === "contradicts" ? "earnings_signal" : "other";
+  return { kind, claimedPayee: null, requestsNewBankDetails, pressureTactics, forecastSignal, citations, summary: "keyword reader (no model)" };
+}
+
+/** Claude when ANTHROPIC_API_KEY is set, otherwise the keyword reader. */
+export async function readAuto(message: string): Promise<Findings & { reader: "claude" | "keywords" }> {
+  if (!process.env.ANTHROPIC_API_KEY) return { ...heuristicRead(message), reader: "keywords" };
+  return { ...(await readMessage(new Anthropic(), message)), reader: "claude" };
+}
+
 export type FindingsEffect = { escalate: boolean; reason: string | null; forecast: Forecast };
 
 /** The rule that turns findings into policy inputs. Pure code: findings can only tighten. */

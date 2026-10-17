@@ -109,7 +109,8 @@ export class Airwallex {
     transfer_currency: string;
     transfer_method: "LOCAL" | "SWIFT";
     reference: string;
-    reason: string;
+    /** Check the allowed values with the docs MCP before the first live run. */
+    reason?: string;
     source_currency?: string;
   }) => this.call<Transfer>("POST", "/transfers/create", body);
   transfers = (query: Record<string, string> = {}) => this.call<{ items: Transfer[] }>("GET", "/transfers", undefined, query);
