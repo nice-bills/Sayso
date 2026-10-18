@@ -25,7 +25,7 @@ Narrate as it happens:
 - The agent pays over **x402 on Metal**. Metal itself refuses to sign above the agent's cap.
 - Only after the payment **settles on chain** does Sayso touch fiat. It converts just the shortfall and sends EUR through **Airwallex**, with the payout id as the `request_id`, so it can never pay twice.
 
-Show: Home, with the app beside the terminal. Each step lands in **Live activity** as it happens: quoted, paid in USDZ, converted, sent, delivered. Then the Agents tab, where the payout's timeline reads Paid in USDZ, Sent by Airwallex, Delivered. Open Details: Metal explorer link, Airwallex transfer id. Switch to the Airwallex dashboard to show the same transfer.
+Show: Home, with the app beside the terminal. Each step lands in **What's happening** as it happens: quoted, paid in USDZ, converted, sent, delivered. Then the Agents tab, where the payout's timeline reads Paid in USDZ, Sent by Airwallex, Delivered. Open Details: Metal explorer link, Airwallex transfer id. Switch to the Airwallex dashboard to show the same transfer.
 
 ## 1:20 A marketplace pays its sellers (25s)
 

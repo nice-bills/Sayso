@@ -40,6 +40,7 @@ test('a bank-details change waits for a confirmed phone call', async ({ app, scr
 
 test('missing details can be filled in, then it is ready to pay', async ({ app, screen }) => {
   await signIn(app, screen);
+  await screen.getByRole('button', 'Add missing details').tap();
   await screen.getByLabel('Payee name').fill('Kreuzberg Studio GmbH');
   await screen.getByLabel('Amount').fill('120.00');
   await screen.getByLabel('Currency').fill('EUR');

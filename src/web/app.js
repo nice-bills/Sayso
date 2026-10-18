@@ -150,47 +150,51 @@ function landing() {
     try { await api("/auth/login", { token }); state.signedIn = true; await load(); goLive(); render(); }
     catch (x) { err.textContent = x.message === "wrong token" ? "That token isn't right." : x.message; }
   };
-  return h("div", { class: "landing wrap" },
-    h("div", { class: "landing-top" }, brand(), h("span", { class: "muted small" }, "Airwallex + Metal")),
-    h("div", { class: "landing-grid" },
-      h("div", { class: "pitch" },
-        h("span", { class: "eyebrow" }, "Payments for the agent era"),
-        h("h1", {}, "Your agent handles the bills. ", h("em", {}, "You keep the say.")),
-        h("p", { class: "lede" }, "Agents forward invoices and pay over x402 on Metal. Sayso checks every payee with Airwallex, delivers local currency, and stops to ask you before anything risky moves. The rules are code, not a prompt."),
-        h("form", { class: "signin", onsubmit: submit },
-          h("label", { for: "token" }, "Owner token"),
-          h("div", { class: "signin-row" },
-            h("input", { id: "token", class: "field", type: "password", autocomplete: "current-password", placeholder: "Paste your owner token", oninput: (e) => { token = e.target.value; } }),
-            h("button", { class: "btn pay", type: "submit" }, "Sign in"),
-          ),
-          err,
-          h("p", { class: "small muted" }, "The token is in your server's log, or set OWNER_TOKEN. Running offline? It's ", h("code", {}, "sayso-demo"), "."),
+  return h("div", { class: "landing" },
+    h("header", { class: "landing-nav wrap" }, brand(), h("a", { class: "btn", href: "#token" }, "Sign in")),
+    h("section", { class: "landing-hero wrap" },
+      h("span", { class: "badge" }, h("span", { class: "dot live" }), "Running on Airwallex and Metal"),
+      h("h1", {}, "Your agents pay the bills. ", h("span", { class: "fade" }, "You keep the say.")),
+      h("p", { class: "lede" }, "Any AI agent can pay a real invoice in local currency. Sayso checks the payee with their bank first, and anything risky waits for you."),
+      h("form", { class: "signin", onsubmit: submit },
+        h("label", { for: "token", class: "sr" }, "Owner token"),
+        h("div", { class: "signin-row" },
+          h("input", { id: "token", class: "field", type: "password", autocomplete: "current-password", placeholder: "Owner token", oninput: (e) => { token = e.target.value; } }),
+          h("button", { class: "btn pay", type: "submit" }, "Sign in"),
         ),
+        err,
+        h("p", { class: "small muted" }, "Running the offline demo? The token is ", h("code", {}, "sayso-demo"), "."),
       ),
-      chatDemo(),
     ),
-    h("ul", { class: "points" },
-      point("inbox", "Forward an invoice", "By email, or from any agent over MCP. Sayso reads it and checks the payee with Airwallex."),
-      point("shield", "Risky ones wait for you", "Changed bank details, pressure tactics or a name the bank doesn't know: nothing moves until you've called the payee."),
-      point("bolt", "Agents pay their own way", "An agent pays in USDZ over x402 and Airwallex delivers fiat. If the bank bounces it, the agent gets every cent back."),
-    ),
+    h("section", { class: "stage wrap" }, chatDemo()),
+    h("section", { class: "band" }, h("div", { class: "wrap" },
+      h("p", { class: "statement" },
+        "Agents can earn money now, but they can't pay a freelancer in Lyon. Sayso takes their payment on Metal and delivers euros or pounds through Airwallex. ",
+        h("span", { class: "fade" }, "The rules that protect the money are code, not a prompt, so a clever email can't talk its way past them.")),
+      h("div", { class: "facts" },
+        fact("100%", "refunded to the agent when a bank bounces a payout"),
+        fact("1 tap", "from you approves a payment; an agent never can"),
+        fact("0", "payouts sent twice, because Airwallex dedupes every request"),
+      ),
+    )),
+    h("footer", { class: "landing-foot wrap small muted" }, "Sayso, built for the Airwallex and Metal hackathon."),
   );
 }
-function point(ic, title, text) { return h("li", {}, h("span", { class: "n" }, icon(ic, 18)), h("div", {}, h("b", {}, title), h("span", { class: "muted" }, text))); }
+function fact(big, text) { return h("div", { class: "fact" }, h("div", { class: "fact-big" }, big), h("div", { class: "fact-text" }, text)); }
 
-/** The landing page's picture: a short conversation with an agent that pays through Sayso. */
+/** The landing page's product shot: a short conversation with an agent that pays through Sayso. */
 function chatDemo() {
   const msg = (who, ...kids) => h("div", { class: `msg ${who}` }, ...kids);
-  const tool = (name) => h("div", { class: "tool" }, icon("bolt", 13), "sayso · ", name);
+  const tool = (name) => h("div", { class: "tool" }, "Used Sayso: ", name);
   return h("div", { class: "chat", "aria-label": "Example: an agent paying invoices through Sayso" },
-    h("div", { class: "chat-head" }, h("span", { class: "avatar" }, icon("bot", 16)), h("div", {}, h("b", {}, "Your agent"), h("div", { class: "small muted" }, "connected to Sayso over MCP"))),
+    h("div", { class: "chat-head" }, h("span", { class: "avatar" }, icon("bot", 15)), h("b", {}, "Your assistant")),
     h("div", { class: "chat-body" },
       msg("you", "Pay the Kreuzberg Studio invoice that came in this morning."),
-      msg("agent", tool("pay_invoice"), "Sent it to Sayso: €280.00 to Kreuzberg Studio GmbH, IBAN ending 3000. You'll get a tap to approve."),
-      msg("sayso", h("div", { class: "small muted" }, "Sayso · approval"), h("div", { class: "fake-pay" }, "Pay €280.00")),
-      msg("agent", tool("payment_status"), "Delivered by Airwallex. Ref INV-2026-114."),
-      msg("you", "Also pay the rent one. They said the bank details changed."),
-      msg("agent warn", tool("pay_invoice"), "Sayso held it. The bank says that account belongs to someone else, so call the landlord on a number you already have first."),
+      msg("agent", tool("pay invoice"), "Done. €280.00 to Kreuzberg Studio GmbH is waiting for your tap."),
+      msg("sayso", h("div", { class: "small muted" }, "Sayso"), h("div", { class: "fake-pay" }, "Pay €280.00")),
+      msg("agent", "Delivered by Airwallex. Reference INV-2026-114."),
+      msg("you", "Also pay the rent. They said their bank details changed."),
+      msg("agent warn", tool("pay invoice"), "Sayso is holding that one. The bank says the account isn't the landlord's, so call them on a number you already have."),
     ),
   );
 }
@@ -204,9 +208,9 @@ function appView() {
   return h("div", { class: "shell" },
     h("header", { class: "top" }, h("div", { class: "wrap" },
       brand(),
-      h("nav", { class: "tabs", role: "tablist" }, tabs.map(([id, label, ic, n]) => h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === id && !state.focus), onclick: () => { state.tab = id; sessionSet("tab", id); leaveFocus(); render(); window.scrollTo(0, 0); } }, icon(ic, 18), h("span", { class: "tab-label" }, label), n ? h("span", { class: "count" }, n) : null))),
+      h("nav", { class: "tabs", role: "tablist" }, tabs.map(([id, label, ic, n]) => h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === id && !state.focus), onclick: () => { state.tab = id; sessionSet("tab", id); leaveFocus(); render(); window.scrollTo(0, 0); } }, icon(ic, 20), h("span", { class: "tab-label" }, label), n ? h("span", { class: "count" }, n) : null))),
       h("div", { class: "top-right" },
-        s ? h("span", { class: `pill ${s.offline ? "" : "go"}`, title: s.offline ? "Airwallex and Metal are simulated" : "Real Airwallex and Metal APIs" }, h("span", { class: `dot${s.offline ? "" : " live"}` }), s.offline ? "Offline demo" : s.sandbox ? "Live · sandbox" : "Live") : null,
+        s ? h("span", { class: "mode", title: s.offline ? "Airwallex and Metal are simulated" : "Real Airwallex and Metal APIs" }, h("span", { class: `dot${s.offline ? "" : " live"}` }), s.offline ? "Offline demo" : s.sandbox ? "Sandbox" : "Live") : null,
         h("a", { class: "btn quiet icon-btn", href: "/ops/", target: "_blank", rel: "noopener", title: "Back office", "aria-label": "Back office" }, icon("ledger", 18)),
         h("button", { class: "btn quiet icon-btn", title: "Sign out", "aria-label": "Sign out", onclick: async () => { await api("/auth/logout", {}); state.signedIn = false; render(); } }, icon("out", 18)),
       ),
@@ -226,67 +230,55 @@ function homeView() {
   // Keep what you just approved in view, so you can watch it go through.
   const recent = state.inbox.filter((i) => state.recent.has(i.id) && !NEEDS(i));
   const s = state.summary;
-  const balances = Object.entries(s?.balances ?? {}).filter(([, m]) => m !== 0);
-  const delivered = state.payouts.filter((p) => p.status === "paid");
-  const agentPays = state.payouts.filter((p) => p.source === "agent");
-  const moving = state.payouts.filter((p) => ["accepted", "funded", "submitted"].includes(p.status));
+  const usd = (s?.balances ?? {}).USD;
   return h("div", {},
     h("section", { class: "hero" },
-      h("div", { class: "status" }, h("span", { class: `dot${s && !s.offline ? " live" : ""}` }),
-        !s ? "Connecting…" : s.offline ? "Offline demo: Airwallex and Metal are simulated" : `Live on Airwallex${s.sandbox ? " sandbox" : ""} and Metal${s.sandbox ? " testnet" : ""}`),
-      h("h2", { class: "hero-title" }, n ? `${n} ${n === 1 ? "payment needs" : "payments need"} you` : "All clear."),
-      h("p", { class: "muted" }, n ? "Everything else is handled. Your agents keep working while you decide." : "Your agents are handling it. Anything that needs a person shows up here."),
-    ),
-    h("div", { class: "stats" },
-      h("div", { class: "card stat" }, h("div", { class: "lbl" }, "Airwallex balance"),
-        balances.length ? h("div", { class: "big" }, money(balances[0][1] / 100, balances[0][0])) : h("div", { class: "big muted" }, "—"),
-        balances.length > 1 ? h("div", { class: "small muted" }, balances.slice(1).map(([c, m]) => money(m / 100, c)).join(" · ")) : null),
-      h("div", { class: "card stat" }, h("div", { class: "lbl" }, "Delivered"), h("div", { class: "big" }, delivered.length), h("div", { class: "small muted" }, byCcy(delivered) || "nothing yet")),
-      h("div", { class: "card stat" }, h("div", { class: "lbl" }, "Paid by agents"), h("div", { class: "big" }, agentPays.length), h("div", { class: "small muted" }, moving.length ? `${moving.length} on the way now` : "over x402 on Metal")),
+      h("h2", { class: "hero-title" }, n ? `${n} ${n === 1 ? "payment needs" : "payments need"} you` : "All clear"),
+      h("p", { class: "muted" },
+        !s ? "Connecting…" : s.offline ? "Offline demo with simulated Airwallex and Metal." : `Live on the Airwallex${s.sandbox ? " sandbox" : ""} and Metal${s.sandbox ? " testnet" : ""}.`,
+        usd ? ` ${money(usd / 100, "USD")} available.` : ""),
     ),
     h("div", { class: "home-grid" },
       h("section", {},
         h("h3", { class: "section" }, "Needs you"),
         h("div", { class: "list" },
-          n ? [reviews.map(payoutRow), needs.map(invoiceCard)] : h("div", { class: "empty" }, icon("check", 22), h("div", {}, "Nothing needs you right now.")),
-          recent.length ? [h("h4", { class: "section sub-section" }, "Just approved"), recent.map(invoiceCard)] : null,
+          n ? [reviews.map(payoutRow), needs.map(invoiceCard)] : h("div", { class: "empty" }, "Nothing needs you. Your agents will bring the next invoice here."),
+          recent.length ? [h("h3", { class: "section sub-section" }, "Just approved"), recent.map(invoiceCard)] : null,
         ),
       ),
-      h("section", {},
-        h("h3", { class: "section" }, h("span", { class: "dot live" }), "Live activity"),
+      h("section", { class: "activity" },
+        h("h3", { class: "section" }, "What's happening"),
         activityFeed(),
       ),
     ),
   );
 }
 
-const PHASE = {
-  observe: ["Noticed", "eye", "info"], decide: ["Decided", "spark", "coin"], act: ["Did", "bolt", "go"],
-  reconcile: ["Checked", "check", "go"], escalate: ["Flagged", "hand", "warn"], refuse: ["Refused", "shield", "stop"],
-};
+// Each step's tone: green moved money, amber waits for a person, red was refused.
+const TONE = { observe: "", decide: "", act: "go", reconcile: "go", escalate: "warn", refuse: "stop" };
 const sentence = (t) => t.charAt(0).toUpperCase() + t.slice(1);
-const NOISE = /^(Sayso on |Running OFFLINE|Seeded sample)/;
+const NOISE = /^(Sayso on |Running OFFLINE|Seeded sample|Airwallex sandbox: payee name)/;
 
 function activityFeed() {
-  const evs = state.events.filter((e) => !NOISE.test(e.title)).slice(-40).reverse();
-  if (!evs.length) return h("div", { class: "empty" }, "Waiting for the first thing to happen…");
+  const evs = state.events.filter((e) => !NOISE.test(e.title)).slice(-30).reverse();
+  if (!evs.length) return h("p", { class: "muted small" }, "Steps appear here as your agents and Sayso take them.");
+  // A time is shown once per run of steps that share it, so a burst doesn't repeat "just now".
+  let last;
   return h("ol", { class: "feed" }, evs.map((e) => {
-    const [verb, ic, tone] = PHASE[e.phase] ?? [e.phase, "eye", ""];
-    return h("li", { class: `ev ${tone}` },
-      h("span", { class: "ev-icon" }, icon(ic, 15)),
-      h("div", { class: "ev-body" },
-        h("div", { class: "ev-title" }, sentence(e.title.replace(/ \(sim\)$/, ""))),
-        h("div", { class: "ev-meta" }, verb, " · ", ago(e.at), proof(e.proof)),
-      ),
+    const when = ago(e.at), shown = when !== last ? when : null;
+    last = when;
+    const meta = [shown, proof(e.proof)].filter(Boolean);
+    return h("li", { class: `ev ${TONE[e.phase] ?? ""}` },
+      h("span", { class: "ev-dot", "aria-hidden": "true" }),
+      h("div", {}, h("div", { class: "ev-title" }, sentence(e.title.replace(/ \(sim\)$/, ""))), meta.length ? h("div", { class: "ev-meta" }, meta) : null),
     );
   }));
 }
 
 function proof(p) {
-  if (!p) return null;
-  if (p.startsWith("sim:")) return [" · ", h("span", { class: "muted" }, "simulated")];
-  if (/^https?:\/\//.test(p)) return [" · ", h("a", { href: p, target: "_blank", rel: "noopener noreferrer", class: "proof" }, "proof ", icon("ext", 12))];
-  return [" · ", h("code", { class: "proof", title: p }, p.length > 18 ? `${p.slice(0, 10)}…${p.slice(-4)}` : p)];
+  if (!p || p.startsWith("sim:")) return null;
+  if (/^https?:\/\//.test(p)) return h("a", { href: p, target: "_blank", rel: "noopener noreferrer", class: "proof" }, "Proof", icon("ext", 12));
+  return h("code", { class: "proof", title: p }, p.length > 18 ? `${p.slice(0, 10)}…${p.slice(-4)}` : p);
 }
 
 // ---------- one invoice, opened from an approval link ----------
@@ -319,7 +311,7 @@ function inboxView() {
     state.showAdd ? addSheet() : null,
     h("div", { class: "list" },
       active.length ? active.map(invoiceCard) : h("div", { class: "empty" }, icon("check", 22), h("div", {}, "You're all caught up. Forward an invoice, or add one here.")),
-      done.length ? h("h3", { class: "muted small", style: "margin:12px 0 0" }, "Done") : null,
+      done.length ? h("h3", { class: "section sub-section" }, "Done") : null,
       done.map(invoiceCard),
     ),
   );
@@ -369,15 +361,16 @@ function invoiceCard(item) {
   const [label, tone] = item.status === "paying" && p ? PAYOUT_PILL[p.status] ?? [p.status, ""] : INBOX_PILL[item.status] ?? [item.status, ""];
   const done = !ACTIVE.includes(item.status);
   return h("article", { class: `inv${done && item.status !== "paying" ? " done" : ""}`, "data-status": item.status },
-    h("div", { class: "meta" }, h("span", {}, agentOf(item) ? h("span", { class: "via" }, icon("bot", 13), agentOf(item)) : sender(item.from), " · ", item.subject), h("span", {}, ago(item.receivedAt))),
-    h("div", { class: "line", style: "display:flex;justify-content:space-between;gap:12px;align-items:flex-start" },
+    h("div", { class: "meta" }, h("span", {}, agentOf(item) ? h("span", { class: "via" }, icon("bot", 14), `Forwarded by ${agentOf(item)}`) : sender(item.from)), h("span", {}, ago(item.receivedAt))),
+    h("div", { class: "line" },
       h("div", { class: "what" }, known ? [h("span", { class: "amt" }, money(f.amount, f.currency)), " to ", f.payeeName ?? "someone"] : item.subject),
       h("span", { class: `pill ${tone}` }, label),
     ),
-    h("div", { class: "sub" }, [f.reference && `Ref ${f.reference}`, f.dueDate && `Due ${f.dueDate}`, bankLine(f, item.status !== "needs_verification")].filter(Boolean).join(" · ")),
+    h("div", { class: "sub" }, [f.reference && `Ref ${f.reference}`, f.dueDate && `Due ${f.dueDate}`, bankLine(f, item.status !== "needs_verification")].filter(Boolean).map((x) => h("span", {}, x))),
     item.status === "awaiting_approval" ? approveBlock(item) : null,
     item.status === "needs_verification" ? verifyBlock(item) : null,
-    item.status === "needs_details" ? detailsBlock(item) : null,
+    item.status === "needs_details" ? (state.open[item.id] ? detailsBlock(item)
+      : [h("div", { class: "sub" }, `Sayso couldn't find the ${item.missing.join(", ")}.`), h("div", { class: "actions" }, h("button", { class: "btn", onclick: () => { state.open[item.id] = true; render(); } }, "Add missing details"), ignoreButton(item))]) : null,
     item.status === "paying" && p ? [timeline(p, true), failure(p)] : null,
     item.status === "rejected" && p?.reasons?.length ? h("div", { class: "alert" }, h("b", {}, "Sayso won't pay this: "), p.reasons.join("; ")) : null,
     item.status === "duplicate" ? h("div", { class: "sub" }, "This matches an invoice already in your inbox, so it wasn't queued again.") : null,
@@ -537,11 +530,7 @@ function paymentsView() {
   return h("div", {},
     h("div", { class: "head" }, h("div", {}, h("h2", {}, "Payments"), h("div", { class: "muted small" }, rec ? (rec.ok ? "Books reconcile to the cent." : "Books don't reconcile. Check the back office.") : "Every payout, from agents and from your inbox.")),
     ),
-    h("div", { class: "stats" },
-      stat(delivered.length, "delivered", byCcy(delivered)),
-      stat(moving.length, "on the way", byCcy(moving)),
-      stat(all.filter((p) => p.status === "refunded").length, "bounced and refunded", ""),
-    ),
+    h("p", { class: "summary" }, `${delivered.length} delivered, ${moving.length} on the way, ${all.filter((p) => p.status === "refunded").length} bounced and refunded.`, delivered.length ? ` ${byCcy(delivered)} so far.` : ""),
     h("div", { class: "filters", style: "margin-bottom:12px" }, filters.map(([id, label]) => h("button", { class: "chip", "aria-pressed": String(state.filter === id), onclick: () => { state.filter = id; render(); } }, label))),
     h("div", { class: "list" }, shown.length ? shown.map(payoutRow) : h("div", { class: "empty" }, icon("payments", 22), h("div", {}, "Nothing here yet."))),
   );
@@ -551,41 +540,31 @@ function byCcy(ps) {
   for (const p of ps) t[p.currency] = (t[p.currency] ?? 0) + Number(p.amount);
   return Object.entries(t).map(([c, a]) => money(a, c)).join(" · ");
 }
-function stat(big, lbl, sub) { return h("div", { class: "card stat" }, h("div", { class: "lbl" }, lbl), h("div", { class: "big" }, big), sub ? h("div", { class: "small muted" }, sub) : null); }
 
 // ---------- agents ----------
 function agentsView() {
   const agentPays = state.payouts.filter((p) => p.source === "agent");
   const received = agentPays.filter((p) => p.status !== "refunded").reduce((s, p) => s + Number(p.price_usdz), 0);
-  const earned = agentPays.filter((p) => p.status !== "refunded").reduce((s, p) => s + Number(p.fee_usdz), 0);
   const swept = (state.summary?.sweeps ?? []).filter((s) => s.status === "credited").reduce((s, x) => s + x.amountMinor, 0) / 100;
   const origin = location.origin;
   const mcp = `claude mcp add sayso \\\n  -e SAYSO_URL=${origin} \\\n  -e SAYSO_BUYER_KEY=0x… \\\n  -e SAYSO_MAX_USDZ=500 \\\n  -- npx tsx src/mcp/server.ts`;
   const curl = `curl -X POST ${origin}/v1/quotes \\\n  -H 'content-type: application/json' \\\n  -d '{"amount":"180.00","currency":"EUR","reference":"Oct",\n       "payee":{"name":"Lingua Freelance","bank":{"iban":"FR14…"},\n       "bank_country_code":"FR","address":{"country_code":"FR","city":"Paris"}}}'`;
   return h("div", {},
-    h("div", { class: "head" }, h("div", {}, h("h2", {}, "Agents"), h("div", { class: "muted small" }, "Connect the agents you already use. They forward invoices and pay over x402. Only you approve."))),
-    h("div", { class: "stats" },
-      stat(agentPays.length, "agent payouts", byCcy(agentPays.filter((p) => p.status === "paid")) || ""),
-      stat(usdz(received), "received over x402", `${usdz(earned)} in fees`),
-      stat(money(swept, "USD"), "swept into Airwallex", "under the ramp-only Metal mandate"),
-    ),
+    h("div", { class: "head" }, h("h2", {}, "Agents")),
+    h("p", { class: "summary" }, `Agents have paid ${agentPays.length} ${agentPays.length === 1 ? "invoice" : "invoices"} with ${usdz(received)} over x402, and ${money(swept, "USD")} of Sayso's earnings has moved into Airwallex.`),
     connectAgents(origin),
-    h("div", { class: "card", style: "margin-bottom:12px" },
-      h("h3", { class: "card-title" }, icon("bolt", 18), "How an agent pays"),
-      h("ul", { class: "points", style: "margin-top:12px" },
-        point("eye", "Quote, for free", "Sayso prices the payout, checks the payee with Airwallex, and runs the risk rules."),
-        point("bolt", "Pay over x402", "The 402 response names the exact price. Metal won't sign above the agent's own cap."),
-        point("check", "Airwallex delivers", "Fiat moves only after the payment settles on Metal. If the bank bounces it, the agent gets everything back."),
-      ),
+    h("h3", { class: "section" }, "Recent agent payouts"),
+    h("div", { class: "list" }, agentPays.length ? agentPays.slice(0, 10).map(payoutRow) : h("div", { class: "empty" }, "No agent has paid yet. Connect one above, and its payouts show up here.")),
+    h("details", { class: "dev" },
+      h("summary", {}, "Developer setup"),
+      h("p", { class: "small muted" }, "For an agent with its own Metal wallet: it gets a free quote, pays the exact price over x402, and Metal won't sign above the cap you set."),
+      snippet("Run the MCP server next to the agent", mcp),
+      snippet("Or call the API", curl),
     ),
-    snippet("Or run the MCP server next to an agent with its own wallet", mcp),
-    snippet("Or call the API", curl),
-    h("h3", { class: "muted small", style: "margin:20px 0 8px" }, "Recent agent payouts"),
-    h("div", { class: "list" }, agentPays.length ? agentPays.slice(0, 10).map(payoutRow) : h("div", { class: "empty" }, icon("bot", 22), h("div", {}, "No agent has paid yet."))),
   );
 }
 function snippet(title, text) {
-  return h("div", { class: "card", style: "margin-bottom:12px" },
+  return h("div", { class: "snippet" },
     h("button", { class: "btn quiet small copy", onclick: async () => { try { await navigator.clipboard.writeText(text); toast("Copied."); } catch { toast("Couldn't copy here."); } } }, "Copy"),
     h("b", {}, title), h("pre", {}, text));
 }
@@ -601,9 +580,9 @@ function connectAgents(origin) {
       delete state.drafts.__agent;
     });
   };
-  return h("div", { class: "card", style: "margin-bottom:12px" },
-    h("h3", { class: "card-title" }, icon("bot", 18), "Connect your agent"),
-    h("p", { class: "small muted", style: "margin:4px 0 12px" }, "Claude, ChatGPT, OpenClaw, or the assistant you text from iMessage. It can forward invoices and check on payments. It can't approve them: you get a link and tap it yourself."),
+  return h("div", { class: "card connect" },
+    h("h3", { class: "card-title" }, "Connect your agent"),
+    h("p", { class: "small muted", style: "margin:4px 0 12px" }, "Claude, ChatGPT, OpenClaw, or the assistant you text from iMessage. It can forward invoices and check on payments. Approving stays with you."),
     nk ? h("div", { class: "sheet" },
       h("div", { class: "alert", style: "background:var(--go-bg)" }, h("b", { style: "color:var(--go)" }, `Key for ${nk.agent.name}. `), "Copy it now; it won't be shown again."),
       h("pre", {}, nk.key),
