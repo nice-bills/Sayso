@@ -39,7 +39,7 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 - **MCP, two ways.** A local server for agents with their own Metal wallet (`pay_invoice`, `pay_batch`, `pay_quote`, `quote_payout`, `payout_status`, `batch_status`). A hosted endpoint for any agent, with per-agent keys and caps (`forward_invoice`, `list_invoices`, `quote_payout`, `payout_status`). Approving is deliberately not a tool.
 - **Everywhere else:** a Claude Code plugin with a skill that teaches the approval flow, a skill for OpenClaw-style agents, AgentMail email intake (Svix-signed webhooks), and ntfy phone notifications that open the approval page.
 - **App:** a phone-friendly inbox, payments with live progress, an agents page, and a back office feed. Owner sign-in, strict CSP, invoice text always rendered as text.
-- **Quality:** TypeScript, SQLite, 69 unit and integration tests, 5 browser end-to-end tests, and a full offline mode with simulators that follow the same rules as the real services.
+- **Quality:** TypeScript, SQLite, 68 unit and integration tests, 5 browser end-to-end tests, and a full offline mode with simulators that follow the same rules as the real services.
 
 ## What's simulated, honestly
 
