@@ -11,6 +11,9 @@ Coin Slot is a payout rail between agent money and the real economy.
 - **For agents.** An agent holding USDZ on Metal asks Coin Slot, over MCP or plain HTTP, to pay "€180 to this IBAN". Coin Slot quotes for free, the agent pays the quote over **x402 on Metal**, and Coin Slot delivers the money in local currency through **Airwallex**. If the bank bounces it, the agent gets every cent back.
 - **For businesses.** Forward an invoice email. Coin Slot reads it, checks the payee with Airwallex, and asks one question: "Pay €280 to Kreuzberg Studio?" One tap pays it. An invoice that changes bank details or pushes urgency is held until a person confirms the details with the payee directly.
 
+- **For marketplaces.** One agent call pays up to 100 sellers or contractors with a single x402 payment. Each line is checked on its own, and a bounced line is refunded on its own.
+- **From anywhere.** Any agent connects by URL with its own key: Claude Code (plugin included), claude.ai, ChatGPT, Cursor, OpenClaw, or the assistant someone texts from iMessage. Text it a photo of an invoice and get back "Pay €280 to Kreuzberg Studio? [tap]". Agents can propose payments but never approve them. Invoices can also be emailed to an AgentMail address.
+
 ## Why it matters
 
 Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a print shop in London. Businesses lose real money to invoice fraud ("our bank details have changed"). Coin Slot answers both with the same idea: **a prompt is not a financial control.** The model reads emails. Code and on-chain mandates decide what moves.
@@ -33,14 +36,26 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 - **Airwallex:** FX rates and conversions (only the shortfall is converted), beneficiary validation and creation, transfers with `request_id` idempotency, signed webhooks for transfer status, balances, and deposit simulation for the off-ramp.
 - **Metal:** x402 payments with `@metalntwx/metal-pay` on Metal testnet (USDZ), and two mandates through the official `metal-agent` CLI: a ramp-only sweep mandate and a capped refund mandate. On-chain refusals are recorded for the heist.
 - **Claude:** reads invoice emails into structured fields with a strict schema (Claude Opus 5.5 with structured outputs). A pattern extractor takes over with no key; neither one decides money.
-- **MCP:** `quote_payout`, `pay_invoice` (with a hard `max_usdz`), `pay_quote`, `payout_status`.
+- **MCP, two ways.** A local server for agents with their own Metal wallet (`pay_invoice`, `pay_batch`, `pay_quote`, `quote_payout`, `payout_status`, `batch_status`). A hosted endpoint for any agent, with per-agent keys and caps (`forward_invoice`, `list_invoices`, `quote_payout`, `payout_status`). Approving is deliberately not a tool.
+- **Everywhere else:** a Claude Code plugin with a skill that teaches the approval flow, a skill for OpenClaw-style agents, AgentMail email intake (Svix-signed webhooks), and ntfy phone notifications that open the approval page.
 - **App:** a phone-friendly inbox, payments with live progress, an agents page, and a back office feed. Owner sign-in, strict CSP, invoice text always rendered as text.
-- **Quality:** TypeScript, SQLite, 62 unit and integration tests, 5 browser end-to-end tests, and a full offline mode with simulators that follow the same rules as the real services.
+- **Quality:** TypeScript, SQLite, 69 unit and integration tests, 5 browser end-to-end tests, and a full offline mode with simulators that follow the same rules as the real services.
 
 ## What's simulated, honestly
 
 - There is no sandbox bridge from Metal to Airwallex. The off-ramp is a Metal mandate sweep followed by Airwallex's deposit simulation, behind one interface. Every simulated proof starts with `sim:` in offline mode.
 - Bounces in the live sandbox use Airwallex's transfer simulation.
+
+## Tracks
+
+| Track | How Coin Slot covers it |
+| --- | --- |
+| 1 Adaptive Treasury | Converts only the shortfall, sweeps earnings into the float, reconciles to the cent. |
+| 2 Intent-Bound Purchase | Agents pay only at or below `max_usdz`; Metal won't sign above the agent's cap. |
+| 3 Payment Ops Incident | Bounced payouts are refunded automatically; ambiguous transfers are looked up before any retry. |
+| 8 Marketplace Settlement | Batch payouts: many sellers, one x402 payment, per-line refunds. |
+| 9 Approval-Bound | Agents propose; the owner approves each payment from a link bound to its amount and payee. |
+| 10 Agentic Checkout | Coin Slot's own checkout is x402: the 402 response is the price, and the agent pays it. |
 
 ## Challenges
 
@@ -51,7 +66,6 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 ## What's next
 
 - Real inbound email addresses per business, and approvals by push notification.
-- Batch payouts for agent platforms paying many contractors.
 - A Visa card path for merchants that only take cards.
 
 ## Links

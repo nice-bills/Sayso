@@ -19,7 +19,7 @@ Built for the Airwallex Agentic Banking Hackathon (2026). Demo script: [docs/DEM
 
 ```
 npm install
-npm run demo:offline     # three agents pay over MCP, the inbox, a refund, the heist, reconciliation
+npm run demo:offline     # agents pay over MCP, a batch payout, the inbox, a refund, the heist, reconciliation
 npm run serve:offline    # or open the app on :4021 and sign in with coinslot-demo
 npm run test:e2e         # the app's flows in a real browser
 ```
@@ -27,6 +27,10 @@ npm run test:e2e         # the app's flows in a real browser
 Offline mode swaps Airwallex and Metal for simulators. They follow the rules our code depends on: `request_id` dedupe, `CANCELLED` as the failure state, and the mandate's payee checks. Every proof they produce starts with `sim:`.
 
 ## Use it from an agent (MCP)
+
+Any agent can connect: Claude Code (also as a plugin), claude.ai, ChatGPT, Cursor, OpenClaw, or the assistant you text from iMessage. See [docs/CONNECT.md](docs/CONNECT.md). Agents forward invoices; only the owner approves, from a one-tap link.
+
+For an agent with its own Metal wallet, run the local server:
 
 ```
 claude mcp add coinslot -e COINSLOT_URL=http://127.0.0.1:4021 -e COINSLOT_BUYER_KEY=0x... -- npx tsx src/mcp/server.ts
@@ -36,6 +40,7 @@ claude mcp add coinslot -e COINSLOT_URL=http://127.0.0.1:4021 -e COINSLOT_BUYER_
 | --- | --- |
 | `quote_payout` | Prices a payout, for free. |
 | `pay_invoice` | Quotes, then pays only if the price is at most `max_usdz`. |
+| `pay_batch` | Pays many people with one USDZ payment, if the batch costs at most `max_usdz`. |
 | `pay_quote` | Pays an existing quote by id. |
 | `payout_status` | Reports where a payout is. |
 
@@ -48,6 +53,11 @@ Metal itself refuses to sign above `COINSLOT_MAX_USDZ`.
 | `POST /v1/quotes` | free | Price, payee check, risk. Returns a quote, `needs_review` or `rejected`, with reasons. |
 | `POST /v1/payouts/:id/pay` | x402: the quote total | Locks the quote. The payout runs once the payment settles. |
 | `GET /v1/payouts/:id` | free | Status, Airwallex transfer id, refund tx. Never returns bank details. |
+| `POST /v1/batches` | free | Up to 100 payouts quoted under one price. Lines it won't pay are set aside with reasons. |
+| `POST /v1/batches/:id/pay` | x402: the batch total | One payment funds every line. A line that bounces is refunded on its own. |
+| `POST /mcp` | agent key | The hosted MCP endpoint: `forward_invoice`, `list_invoices`, `quote_payout`, `payout_status`. |
+| `POST /v1/agent/invoices` | agent key | The same forwarding as REST, for skill-based agents. |
+| `POST /webhooks/agentmail` | Svix signature | Invoices emailed to your AgentMail address. |
 | `POST /v1/inbox` | owner, or `x-inbox-secret` | Forward an invoice email (`from`, `subject`, `body`). |
 | `POST /v1/inbox/:id/approve` | owner | The one tap. `verified_with_payee: true` is needed for held invoices. |
 | `POST /v1/inbox/:id/details` | owner | Fill in what the extractor couldn't find; the invoice is checked again. |
@@ -84,7 +94,9 @@ Network access needed: `api.sandbox.airwallex.com`, `*.metalntwx.com`, and optio
 | `src/airwallex/` | Typed REST client, signed and deduped webhooks, and the agent card. |
 | `src/reconcile.ts` | Metal swept == ramp credited == Airwallex deposits, and every currency's balance explained. |
 | `src/web/` | The app (no build step). `tests/app.e2e.ts` drives it in a browser. |
-| `src/auth.ts` | The owner's sign-in. |
+| `src/auth.ts`, `src/agents/` | The owner's sign-in, and agent keys. |
+| `src/mcp/hosted.ts` | The hosted MCP endpoint and its REST twin. |
+| `plugins/coinslot/`, `integrations/` | The Claude Code plugin and the skill for OpenClaw-style agents. |
 | `src/app.ts`, `src/serve.ts`, `src/demo.ts` | The service in one process, and the demo that drives it through MCP and the inbox. |
 | `src/treasury/`, `src/agent/` | The treasury policy, bound approvals, the email reader and the executor. |
 | `src/sim/offline.ts` | The offline simulators. |

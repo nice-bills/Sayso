@@ -49,10 +49,14 @@ test('missing details can be filled in, then it is ready to pay', async ({ app, 
   await expect(screen.getByRole('button', 'Pay €120.00')).toBeVisible();
 });
 
-test('agent payouts show up with how to connect an agent', async ({ app, screen }) => {
+test('connecting an agent shows its key once, and agent payouts are listed', async ({ app, screen }) => {
   await signIn(app, screen);
   await screen.getByRole('tab', 'Agents').tap();
-  await expect(screen.getByText('Connect an agent (MCP)')).toBeVisible();
+  await screen.getByLabel('Agent name').fill('My phone assistant');
+  await screen.getByRole('button', 'Create a key').tap();
+  await expect(screen.getByRole('button', 'Copy key')).toBeVisible();
+  await screen.getByRole('button', 'Done').tap();
+  await expect(screen.getByText('My phone assistant')).toBeVisible();
   await expect(screen.getByText('Lingua Freelance')).toBeVisible();
   await expect(screen.getByText('Rechenzentrum Nord GmbH')).toBeVisible();
 });

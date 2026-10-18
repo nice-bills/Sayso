@@ -1,11 +1,12 @@
 // The demo, driven the way real users drive Coin Slot: AI agents through the MCP tools, a business
 // through its invoice inbox. Runs against the live sandboxes, or fully offline with --offline.
 //   1. Three agents pay real-world invoices through Coin Slot's MCP tool (x402 on Metal -> Airwallex).
-//   2. A business forwards invoices; one tap pays them. A fake "landlord" asking for new bank details is held.
-//   3. A payout bounces (closed account): the agent is refunded in full under a Metal refund mandate.
-//   4. Earnings move into the Airwallex float under a ramp-only mandate, exactly once.
-//   5. A compromised agent tries to drain the earnings to an attacker: Metal refuses it on chain.
-//   6. Reconciliation: every cent explained.
+//   2. A marketplace agent pays four sellers with one x402 payment (batch payouts).
+//   3. A business forwards invoices; one tap pays them. A fake "landlord" asking for new bank details is held.
+//   4. A payout bounces (closed account): the agent is refunded in full under a Metal refund mandate.
+//   5. Earnings move into the Airwallex float under a ramp-only mandate, exactly once.
+//   6. A compromised agent tries to drain the earnings to an attacker: Metal refuses it on chain.
+//   7. Reconciliation: every cent explained.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -56,8 +57,20 @@ for (const [i, a] of agents.entries()) {
 }
 await settle();
 
-// ---- 2. the invoice inbox ----
-await beat(2, "a business forwards invoices; one tap pays each");
+// ---- 2. batch payouts ----
+await beat(2, "a marketplace agent settles four sellers with one payment");
+if (agents[1]) {
+  const sellers = [
+    ["Atelier Nord", "DE89370400440532013000", "Hamburg", "64.00"], ["Keramik Sud", "DE75512108001245126199", "Munich", "38.50"],
+    ["Linen & Co", "FR1420041010050500013M02606", "Lyon", "52.00"], ["Papel SL", "ES9121000418450200051332", "Valencia", "27.25"],
+  ];
+  const r = result(await agents[1].callTool({ name: "pay_batch", arguments: { reference: "Sellers week 44", max_usdz: "250", items: sellers.map(([n, iban, city, amount]) => ({ amount, currency: "EUR", reference: "Sellers week 44", ...payee(n!, iban!, city!) })) } }));
+  emit("observe", `buyer-agent-2 (marketplace): ${r.paid ? `paid ${r.payouts?.length} sellers with one payment of ${r.price_usdz} USDZ` : `not paid: ${r.reason ?? r.error}`}`);
+  await settle();
+}
+
+// ---- 3. the invoice inbox ----
+await beat(3, "a business forwards invoices; one tap pays each");
 const post = (path: string, body: unknown) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${cs.ownerToken}` }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<{ id: string; status: string; error?: string }>);
 const items = [];
 for (const e of [studioInvoice, designerInvoice, fakeLandlord, vagueEmail]) items.push(await post("/v1/inbox", { message_id: e.messageId, from: e.from, subject: e.subject, body: e.body }));
@@ -69,8 +82,8 @@ if (held) {
 }
 await settle();
 
-// ---- 3. a bounced payout is refunded ----
-await beat(3, "a payout bounces; the agent gets every cent back");
+// ---- 4. a bounced payout is refunded ----
+await beat(4, "a payout bounces; the agent gets every cent back");
 if (offline && agents[0]) {
   const r = result(await agents[0].callTool({ name: "pay_invoice", arguments: { amount: "60.00", currency: "EUR", reference: "Old supplier", ...payee("Closed Account Co (CLOSED)", "DE02100100109307118603", "Berlin"), max_usdz: "100" } }));
   emit("observe", `buyer-agent-1 paid quote ${String(r.quote_id).slice(0, 8)}`);
@@ -79,16 +92,16 @@ if (offline && agents[0]) {
   emit("observe", "Live: bounce a payout with the Airwallex transfer simulation (next_status CANCELLED) to see the refund");
 }
 
-// ---- 4. sweep ----
-await beat(4, "earnings have been moving into the Airwallex float on every tick, under a ramp-only Metal mandate");
+// ---- 5. sweep ----
+await beat(5, "earnings have been moving into the Airwallex float on every tick, under a ramp-only Metal mandate");
 await settle(1);
 
-// ---- 5. heist ----
-await beat(5, "a compromised agent tries to drain the earnings to an attacker");
+// ---- 6. heist ----
+await beat(6, "a compromised agent tries to drain the earnings to an attacker");
 await cs.attemptHeist("0x9f3a6C0b9a2b9E3d7F1c5aE4B2d8C6e0F1a2B3c4", 25_000);
 
-// ---- 6. reconcile ----
-await beat(6, "reconcile every cent");
+// ---- 7. reconcile ----
+await beat(7, "reconcile every cent");
 await cs.reconcileNow();
 
 for (const a of agents) await a.close();

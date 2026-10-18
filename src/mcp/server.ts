@@ -54,6 +54,23 @@ server.registerTool("pay_invoice", {
   return text({ paid: true, quote_id: q.id, ...(await pay(q.id)) });
 });
 
+server.registerTool("pay_batch", {
+  description: "Pay many people at once (e.g. a marketplace's sellers or a team of contractors) with ONE USDZ payment over x402. Each line is checked like a single payout; lines Coin Slot won't pay are set aside with reasons and not charged. Pays only if the batch price is at most max_usdz. A line that bounces is refunded on its own.",
+  inputSchema: { items: z.array(z.object(invoiceShape)).min(1).max(100), reference: z.string().optional(), max_usdz: z.string().describe("The most this agent will pay for the whole batch, fees included") },
+}, async ({ items, reference, max_usdz }) => {
+  const res = await fetch(`${base}/v1/batches`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reference: reference ?? "Batch payout", items: items.map((i) => toRequest(i as Invoice)) }) });
+  const b = (await res.json()) as { id?: string; price_usdz?: string; pay_url?: string | null; set_aside?: unknown[]; error?: string };
+  if (!b.pay_url) return text({ paid: false, ...b });
+  if (Number(b.price_usdz) > Number(max_usdz)) return text({ paid: false, reason: `batch price ${b.price_usdz} USDZ is above max_usdz ${max_usdz}`, batch: b });
+  const paid = await payingFetch()(`${base}${b.pay_url}`, { method: "POST" });
+  return text({ paid: paid.status < 400, http_status: paid.status, ...((await paid.json().catch(() => ({}))) as object) });
+});
+
+server.registerTool("batch_status", {
+  description: "Progress of a batch payout: how many lines are paid, on their way, or refunded.",
+  inputSchema: { batch_id: z.string() },
+}, async ({ batch_id }) => text(await (await fetch(`${base}/v1/batches/${batch_id}`)).json()));
+
 server.registerTool("pay_quote", {
   description: "Pay an existing Coin Slot quote by id.",
   inputSchema: { quote_id: z.string() },

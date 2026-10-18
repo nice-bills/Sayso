@@ -24,6 +24,7 @@ import { agentMailRouter } from "./inbox/agentmail.js";
 import { ChainEarnings, type EarningsSource } from "./metal/earnings.js";
 import { MandateRefunder, MandateSweepVerifier, MetalMandate, type PullResult } from "./metal/mandate.js";
 import { payoutApi, type PaymentMode } from "./payouts/http.js";
+import { BatchBook } from "./payouts/batch.js";
 import { PayoutError, PayoutService, publicView, type PayoutAirwallex, type Refunder } from "./payouts/service.js";
 import type { PayoutBook } from "./payouts/book.js";
 import { flowsFromBooks, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
@@ -150,7 +151,8 @@ export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string })
     }));
   }
   if (process.env.AGENTMAIL_WEBHOOK_SECRET) app.use(agentMailRouter(process.env.AGENTMAIL_WEBHOOK_SECRET, (e) => inbox.receive(e)));
-  app.use(payoutApi(svc, mode));
+  const batches = new BatchBook(store, svc);
+  app.use(payoutApi(svc, mode, batches));
 
   const webDir = fileURLToPath(new URL("./web", import.meta.url));
   // The app itself: static files under a strict CSP, since it renders text from strangers' emails.
