@@ -154,16 +154,194 @@ document.addEventListener("focusout", () => setTimeout(() => { if (dirty) render
 
 function brand() { return h("div", { class: "brand" }, "sayso"); }
 
-// ---------- landing: colour chapters ----------
-// Each section is one flat field, and the hero's folders are tabbed to match the chapters below.
-const CHAPTERS = [
-  ["how", "how it moves", "orange"],
-  ["refuses", "what it refuses", "sage"],
-  ["try", "try an invoice", "white"],
-  ["signin", "sign in", "yellow"],
+// ---------- landing: the product performs ----------
+// Each section is a working piece of Sayso at its real size, not a picture of it.
+function landing() {
+  return h("div", { class: "landing" },
+    h("section", { class: "l-hero" },
+      h("header", { class: "l-top" }, brand(), h("a", { class: "l-link", href: "#signin", onclick: toToken }, "Sign in")),
+      h("div", { class: "l-hero-grid" },
+        h("div", { class: "l-hero-copy" },
+          h("h1", {}, h("span", { class: "soft" }, "Your agents pay the bills."), " ", h("span", {}, "You keep the say.")),
+          h("p", { class: "l-lede" }, "Any AI agent can pay a real invoice in local currency through Airwallex. Sayso checks the payee with their bank first, and anything risky waits for your tap."),
+          h("div", { class: "l-actions" },
+            h("a", { class: "l-btn", href: "#signin", onclick: toToken }, "Sign in"),
+            h("a", { class: "l-text-link", href: "#how" }, "See how it moves", h("span", { "aria-hidden": "true", class: "arrow" }, "→")),
+          ),
+        ),
+        heroDemo(),
+      ),
+    ),
+    howSection(),
+    refusesSection(),
+    trySection(),
+    signinSection(),
+    footer(),
+  );
+}
+/** Restart a one-shot animation on an element that is already on the page. */
+const bump = (el) => { el.classList.remove("flash-now"); void el.offsetWidth; el.classList.add("flash-now"); };
+const toToken = () => setTimeout(() => document.getElementById("token")?.focus({ preventScroll: true }), 600);
+
+/** The hero's fragment: an invoice an agent forwarded. Tap Pay and watch it go. */
+function heroDemo() {
+  const steps = ["Approved", "Sent by Airwallex", "Delivered"];
+  const pill = h("span", { class: "pill coin" }, "Ready to pay");
+  const bar = h("div", { class: "steps hidden", style: "grid-template-columns:repeat(3,minmax(0,1fr))" }, steps.map((t) => h("div", { class: "step" }, t)));
+  const feed = h("ol", { class: "d-feed" }, h("li", {}, h("span", { class: "ev-dot" }), "Claude forwarded an invoice from Kreuzberg Studio"));
+  const note = h("p", { class: "d-note" }, "From your Airwallex balance by SEPA, about $312.18.");
+  let timers = [];
+  const log = (text, tone) => { feed.prepend(h("li", { class: `enter ${tone ?? ""}` }, h("span", { class: "ev-dot" }), text)); };
+  const reset = () => {
+    timers.forEach(clearTimeout); timers = [];
+    pay.disabled = false; pay.textContent = "Pay €280.00"; pay.classList.remove("hidden"); again.classList.add("hidden");
+    pill.className = "pill coin"; pill.textContent = "Ready to pay";
+    bar.classList.add("hidden"); bar.querySelectorAll(".step").forEach((s) => { s.className = "step"; });
+    note.textContent = "From your Airwallex balance by SEPA, about $312.18.";
+  };
+  const stage = (i) => {
+    bar.querySelectorAll(".step").forEach((s, j) => { s.className = `step ${j < i ? "done" : j === i ? "now" : ""}`; });
+  };
+  const run = () => {
+    pay.disabled = true; pay.textContent = "Paying…";
+    timers.push(setTimeout(() => { pay.classList.add("hidden"); bar.classList.remove("hidden"); stage(1); pill.className = "pill info"; bump(pill); pill.textContent = "On its way"; note.textContent = "Airwallex accepted the transfer. Reference INV-2026-114."; log("You approved €280.00 to Kreuzberg Studio"); }, 500));
+    timers.push(setTimeout(() => log("Airwallex sent €280.00 by SEPA", "go"), 1500));
+    timers.push(setTimeout(() => { stage(3); pill.className = "pill go"; bump(pill); pill.textContent = "Delivered"; note.textContent = "Delivered to Kreuzberg Studio GmbH."; log("Delivered €280.00 to Kreuzberg Studio GmbH", "go"); again.classList.remove("hidden"); }, 3200));
+  };
+  const pay = h("button", { class: "btn pay", type: "button", onclick: run }, "Pay €280.00");
+  const again = h("button", { class: "btn quiet hidden", type: "button", onclick: reset }, "Run it again");
+  return h("div", { class: "demo", "data-ui": "", "aria-label": "A working example of Sayso" },
+    h("div", { class: "d-col" },
+      h("article", { class: "inv", "data-status": "awaiting_approval" },
+        h("div", { class: "meta" }, h("span", { class: "via" }, icon("bot", 14), "Forwarded by Claude"), h("span", {}, "just now")),
+        h("div", { class: "line" }, h("div", { class: "what" }, h("span", { class: "amt" }, "€280.00"), " to Kreuzberg Studio GmbH"), pill),
+        h("div", { class: "sub" }, h("span", {}, "Ref INV-2026-114"), h("span", {}, "IBAN ending 3000")),
+        bar,
+        h("div", { class: "actions" }, pay, again),
+        note,
+      ),
+      h("article", { class: "inv", "data-status": "needs_verification" },
+        h("div", { class: "meta" }, h("span", {}, "Berlin Office Lettings"), h("span", {}, "31 minutes ago")),
+        h("div", { class: "line" }, h("div", { class: "what" }, h("span", { class: "amt" }, "€60.00"), " to Berlin Office Lettings"), h("span", { class: "pill stop" }, "Check before paying")),
+        h("div", { class: "alert" }, h("b", {}, icon("shield", 15), " Held until you call."), h("p", {}, "The bank says this account belongs to Mark Lehmann, not Berlin Office Lettings.")),
+      ),
+    ),
+    h("div", { class: "d-side" }, h("div", { class: "d-side-h" }, "What's happening"), feed),
+  );
+}
+
+/** One slider drives two fields: the stage in words, and the payout at that stage. */
+function howSection() {
+  const stages = [
+    ["Quote", "First, the agent asks for an exact price", "Quoted", "info"],
+    ["Pay", "Then it pays in USDZ on Metal", "Paid in USDZ", "info"],
+    ["Check", "Next, the bank confirms the payee", "Payee confirmed", "info"],
+    ["Deliver", "Last, Airwallex sends the euros", "Delivered", "go"],
+  ];
+  const rows = [
+    ["Price", "201.84 USDZ, with a 1.26 fee"],
+    ["Paid on Metal", "201.84 USDZ over x402, under the agent's 500 cap"],
+    ["Bank check", "The IBAN belongs to Lingua Freelance"],
+    ["Airwallex", "€180.00 by SEPA, reference Oct"],
+  ];
+  const clause = h("h2", { class: "how-clause" });
+  const pill = h("span", { class: "pill" });
+  const bar = h("div", { class: "steps", style: "grid-template-columns:repeat(4,minmax(0,1fr))" }, stages.map(([n]) => h("div", { class: "step" }, n)));
+  const list = h("dl", { class: "how-rows" }, rows.map(([k, v]) => h("div", { class: "how-row" }, h("dt", {}, k), h("dd", {}, v))));
+  const names = stages.map(([n], i) => h("button", { class: "how-name", type: "button", onclick: () => set(i, true) }, n));
+  const range = h("input", { type: "range", min: 0, max: 3, step: 1, value: 0, class: "how-range", "aria-label": "Stage", oninput: (e) => set(Number(e.target.value)) });
+  const track = h("div", { class: "how-track" }, h("div", { class: "how-rail" }, range), h("div", { class: "how-names" }, names));
+  const frag = h("div", { class: "how-frag", "data-ui": "" },
+    h("div", { class: "line" }, h("b", {}, "Lingua Freelance"), h("span", { class: "amt" }, "€180.00")),
+    h("div", { class: "line small" }, h("span", { class: "muted spaced" }, h("span", {}, "Agent"), h("span", {}, "Translation Oct")), pill),
+    bar, list);
+  function set(i, fromName) {
+    if (fromName) range.value = String(i);
+    track.style.setProperty("--fill", `${(i / 3) * 100}%`);
+    clause.replaceChildren(h("span", { class: "swap" }, stages[i][1]));
+    pill.className = `pill ${stages[i][3]}`; bump(pill); pill.textContent = stages[i][2];
+    bar.querySelectorAll(".step").forEach((s, j) => { s.className = `step ${j < i || (i === 3 && j === 3) ? "done" : j === i ? "now" : ""}`; });
+    list.querySelectorAll(".how-row").forEach((r, j) => { r.className = `how-row${j <= i ? " on" : ""}${j === i ? " cur" : ""}`; });
+    names.forEach((n, j) => n.setAttribute("aria-current", String(j === i)));
+  }
+  set(0);
+  return h("section", { id: "how", class: "how" },
+    h("div", { class: "how-left", "data-reveal": "" }, clause),
+    h("div", { class: "how-right", "data-reveal": "" }, frag),
+    track,
+  );
+}
+
+function refusesSection() {
+  const refusals = [
+    ["New bank details in an email", "The bank is asked whose account it is before a penny moves."],
+    ["Pressure to pay today", "Urgency is a reason to slow down, so Sayso holds it."],
+    ["A name the bank doesn't know", "If the account isn't the payee's, it waits for your call."],
+    ["More than you allowed", "Each agent has a cap per payout, and Metal enforces its own."],
+    ["The same invoice twice", "Airwallex dedupes every request, so a retry can't pay again."],
+    ["Fees sent elsewhere", "Sayso's earnings sweep into its own Airwallex account only."],
+  ];
+  return h("section", { id: "refuses", class: "l-sec" },
+    h("div", { class: "tiles" },
+      h("div", { class: "tile tile-head", "data-reveal": "" }, h("h2", {}, "What it won't pay")),
+      refusals.map(([name, why], i) => h("div", { class: "tile", "data-reveal": "", style: `--i:${i + 1}` }, h("h3", {}, name), h("p", {}, why))),
+    ),
+  );
+}
+
+// Three invoices from the offline demo and what Sayso did with each.
+const DEMOS = [
+  { name: "Lingua Freelance", when: "Paid by an agent", end: ["Delivered. The agent never needed you.", "go"], steps: [
+    ["0.0s", "Quoted 201.84 USDZ for €180.00", "Sayso, fee 1.26 included"],
+    ["0.4s", "The agent paid over x402", "Metal, under its 500 USDZ cap"],
+    ["0.6s", "The IBAN belongs to Lingua Freelance", "Bank check"],
+    ["4s", "Sent €180.00 by SEPA", "Airwallex, from your balance"],
+  ] },
+  { name: "Holloway Print", when: "Forwarded by email", end: ["Delivered, one tap from you.", "go"], steps: [
+    ["0.0s", "Found the sort code and account", "Sayso read the email"],
+    ["0.3s", "The name matches Holloway Print", "Bank check"],
+    ["You", "Tapped Pay £72.00", "From your phone"],
+    ["2s", "Sent by Faster Payments", "Airwallex"],
+  ] },
+  { name: "Berlin Office Lettings", when: "Urgent, new bank details", end: ["Held. Not a cent moved.", "stop"], steps: [
+    ["0.0s", "Asked to pay today, to a new account", "Sayso read the email"],
+    ["0.3s", "That account belongs to Mark Lehmann", "Bank check"],
+    ["0.3s", "Held until you call them back", "On a number you already have"],
+  ] },
 ];
 
-function landing() {
+function trySection() {
+  const bands = h("div", { class: "bands", "data-ui": "", "aria-live": "polite" });
+  const tabs = [];
+  let current = -1;
+  const play = (i) => {
+    if (i === current) return;
+    current = i;
+    tabs.forEach((t, j) => t.setAttribute("aria-selected", String(i === j)));
+    const d = DEMOS[i];
+    bands.replaceChildren(
+      ...d.steps.map(([t, title, note], j) => h("div", { class: "band", style: `--i:${j}` },
+        h("span", { class: "band-t" }, t), h("div", {}, h("div", { class: "band-title" }, title), h("div", { class: "band-note" }, note)))),
+      h("p", { class: `band-end ${d.end[1]}`, style: `--i:${d.steps.length}` }, d.end[0]),
+    );
+  };
+  const tablist = h("div", { class: "day-tabs", role: "tablist", "aria-label": "Invoices" }, DEMOS.map((d, i) => {
+    const t = h("button", { class: "day-tab", role: "tab", type: "button", "aria-selected": "false", onclick: () => play(i) }, h("b", {}, d.name), h("span", {}, d.when));
+    tabs.push(t);
+    return t;
+  }));
+  const section = h("section", { id: "try", class: "l-sec try", "data-onview": "" },
+    h("div", { class: "try-head", "data-reveal": "" },
+      h("h2", {}, h("span", { class: "soft" }, "Three invoices,"), h("br"), "three outcomes"),
+      h("a", { class: "l-btn", href: "#signin", onclick: toToken }, "Try it yourself"),
+    ),
+    h("div", { class: "try-body" }, tablist, bands),
+  );
+  section.addEventListener("inview", () => play(0), { once: true });
+  return section;
+}
+
+function signinSection() {
   let token = "";
   const err = h("div", { class: "error", role: "alert" });
   const submit = async (e) => {
@@ -171,131 +349,31 @@ function landing() {
     try { await api("/auth/login", { token }); state.signedIn = true; await load(); goLive(); render(); window.scrollTo({ top: 0, behavior: "instant" }); }
     catch (x) { err.textContent = x.message === "wrong token" ? "That token isn't right." : x.message; }
   };
-  const toToken = () => setTimeout(() => document.getElementById("token")?.focus({ preventScroll: true }), 500);
-  return h("div", { class: "landing" },
-    h("section", { class: "hero", "aria-labelledby": "hero-title" },
-      h("header", { class: "hero-top" }, brand(), h("a", { class: "hero-link", href: "#try" }, "Try an invoice")),
-      h("h1", { id: "hero-title", class: "hero-h1" }, h("span", { class: "rise" }, "on your"), " ", h("span", { class: "rise" }, "say-so")),
-      h("p", { class: "hero-lede" }, "AI agents pay real invoices in local currency through Airwallex. Anything that looks wrong waits for your one tap."),
-      h("nav", { class: "folders", "aria-label": "Sections" }, CHAPTERS.map(([id, name, colour], i) => h("div", { class: `folder f-${colour}`, style: `--i:${i}` },
-        h("a", { class: "folder-tab", href: `#${id}`, onclick: id === "signin" ? toToken : undefined }, name),
-        i === CHAPTERS.length - 1 ? h("div", { class: "folder-body" },
-          h("a", { class: "btn-cut", href: "#signin", onclick: toToken }, "Sign in"),
-          h("p", {}, "Your agents ask. Sayso checks. You decide."),
-        ) : null,
-      ))),
+  return h("section", { id: "signin", class: "cta" },
+    h("div", { class: "cta-copy", "data-reveal": "" },
+      h("h2", {}, "Your say,", h("br"), "one tap"),
+      h("p", {}, "Sign in to see what your agents have waiting, then pay it or hold it."),
     ),
-    howSection(),
-    refusesSection(),
-    trySection(),
-    h("section", { id: "signin", class: "chapter c-yellow cta" },
-      h("form", { class: "blank", onsubmit: submit },
-        h("p", { class: "blank-line" },
-          h("span", { "data-reveal": "" }, "Paste your owner token "),
-          h("input", { id: "token", class: "blank-input", type: "password", autocomplete: "current-password", "aria-label": "Owner token", oninput: (e) => { token = e.target.value; } }),
-          h("span", { "data-reveal": "" }, " and "),
-          h("button", { class: "btn-cut", type: "submit" }, "Sign in"),
-        ),
-        err,
-        h("p", { class: "blank-hint" }, "Running the offline demo? The token is ", h("code", {}, "sayso-demo"), "."),
-      ),
-    ),
-    h("footer", { class: "foot" },
-      h("div", { class: "blocks", "aria-label": "sayso" }, [..."sayso"].map((ch, i) => h("span", { class: `block b${i}`, "aria-hidden": "true", "data-reveal": "", style: `--i:${i}` }, ch))),
-      h("div", { class: "foot-row" },
-        h("span", {}, "Built for the Airwallex and Metal hackathon."),
-        h("nav", {}, h("a", { href: "https://github.com/nice-bills/Sayso", rel: "noopener" }, "Source"), h("a", { href: "/ops/" }, "Back office"), h("a", { href: "#signin", onclick: toToken }, "Sign in")),
-      ),
+    h("form", { class: "dialog", "data-ui": "", "data-reveal": "", onsubmit: submit },
+      h("h3", {}, "Sign in to Sayso"),
+      h("label", { for: "token" }, "Owner token"),
+      h("input", { id: "token", class: "field", type: "password", autocomplete: "current-password", placeholder: "Paste your token", oninput: (e) => { token = e.target.value; } }),
+      h("p", { class: "small muted" }, "Running the offline demo? The token is ", h("code", {}, "sayso-demo"), "."),
+      err,
+      h("button", { class: "btn pay wide", type: "submit" }, "Sign in"),
     ),
   );
 }
 
-/** One bar, its segments sized by how long each stage really takes. */
-function howSection() {
-  const stages = [
-    ["Under a second", "First, an agent asks for a quote and gets one exact price in USDZ.", 1],
-    ["About five seconds", "Then it pays on Metal over x402. Metal won't sign above the cap you set.", 1.6],
-    ["A few minutes", "Next, Sayso checks the payee with their bank and Airwallex sends the transfer.", 3],
-    ["Hours, by local rail", "Last, euros or pounds land in their account. A bounce refunds the agent in full.", 5],
-  ];
-  return h("section", { id: "how", class: "chapter c-orange" },
-    h("h2", { class: "chapter-h", "data-reveal": "" }, "how the money moves"),
-    h("div", { class: "bar", "data-ui": "" }, stages.map(([time, clause, grow], i) => h("div", { class: "seg", style: `--grow:${grow};--i:${i}` },
-      h("div", { class: "seg-fill", "data-reveal": "" }, h("h3", {}, time)),
-      h("p", { class: "seg-clause", "data-reveal": "" }, clause),
-    ))),
+function footer() {
+  return h("footer", { class: "foot" },
+    h("div", { class: "ft ft-statement" }, h("p", {}, "Sayso lets AI agents pay real invoices, and keeps the final say with you."), h("span", { class: "small" }, "Built for the Airwallex and Metal hackathon.")),
+    h("nav", { class: "ft ft-nav", "aria-label": "Footer" }, h("a", { href: "#how" }, "How it moves"), h("a", { href: "#try" }, "Three invoices"), h("a", { href: "/ops/" }, "Back office"), h("a", { href: "https://github.com/nice-bills/Sayso", rel: "noopener" }, "Source")),
+    h("div", { class: "ft ft-rails" }, h("span", { class: "small muted" }, "Runs on"), h("p", {}, "Airwallex sandbox and Metal testnet")),
+    h("div", { class: "ft ft-mail" }, h("span", { class: "small muted" }, "Forward invoices to"), h("a", { href: "mailto:sayso-invoices@agentmail.to" }, "sayso-invoices@agentmail.to")),
+    h("div", { class: "ft ft-word", "aria-hidden": "true" }, "sayso"),
+    h("a", { class: "ft ft-go", href: "#signin", onclick: toToken }, h("span", {}, "Open your inbox"), h("span", { class: "arrow big", "aria-hidden": "true" }, "→")),
   );
-}
-
-function refusesSection() {
-  const refusals = [
-    ["New bank details in an email", "The bank is asked whose account it is before a penny moves."],
-    ["Pressure to pay today", "Urgency is a signal to slow down, so Sayso holds it."],
-    ["A name the bank doesn't know", "If the account isn't the payee's, it waits for your call."],
-    ["More than you allowed", "Each agent has a cap per payout, and Metal enforces its own."],
-    ["Paying the same invoice twice", "Airwallex dedupes every request, so a retry can't double pay."],
-    ["Fees sent elsewhere", "Sayso's earnings sweep into its own Airwallex account and nowhere else."],
-  ];
-  return h("section", { id: "refuses", class: "chapter c-sage" },
-    h("div", { class: "tiles" },
-      h("div", { class: "tile tile-head", "data-reveal": "" }, h("h2", {}, "what it refuses")),
-      refusals.map(([name, why], i) => h("div", { class: "tile", "data-reveal": "", style: `--i:${i + 1}` }, h("h3", {}, name), h("p", {}, why))),
-    ),
-  );
-}
-
-// The landing's live piece: three invoices from the offline demo and what Sayso did with each.
-const DEMOS = [
-  { name: "Lingua Freelance", amount: "€180.00", how: "Paid by an agent", end: ["Delivered. The agent never needed you.", "go"], steps: [
-    ["0.0s", "Sayso", "Quoted 201.84 USDZ for €180.00, a 1.26 fee included"],
-    ["0.4s", "Metal", "The agent paid 201.84 USDZ over x402"],
-    ["0.6s", "Bank", "The IBAN belongs to Lingua Freelance"],
-    ["4s", "Airwallex", "Sent €180.00 by SEPA from your balance"],
-    ["Hours", "Bank", "Arrived in Paris with reference Oct"],
-  ] },
-  { name: "Holloway Print", amount: "£72.00", how: "Forwarded by email", end: ["Delivered, one tap from you.", "go"], steps: [
-    ["0.0s", "Sayso", "Read the email and found the sort code and account"],
-    ["0.3s", "Bank", "The name on the account matches Holloway Print"],
-    ["You", "You", "Tapped Pay £72.00 on your phone"],
-    ["2s", "Airwallex", "Sent by Faster Payments"],
-    ["Seconds", "Bank", "Arrived in London"],
-  ] },
-  { name: "Berlin Office Lettings", amount: "€60.00", how: "Urgent, new bank details", end: ["Held. Not a cent moved.", "stop"], steps: [
-    ["0.0s", "Sayso", "Read an email asking for payment today to a new account"],
-    ["0.3s", "Bank", "That account belongs to Mark Lehmann, not Berlin Office Lettings"],
-    ["0.3s", "Sayso", "Held it. Nothing moves until you call them on a number you already have"],
-  ] },
-];
-
-function trySection() {
-  const frame = h("div", { class: "frame", "data-ui": "", "aria-live": "polite" });
-  const rows = [];
-  let current = -1;
-  const play = (i) => {
-    if (i === current) return;
-    current = i;
-    rows.forEach((r, j) => r.setAttribute("aria-pressed", String(i === j)));
-    const d = DEMOS[i];
-    frame.replaceChildren(
-      h("ol", { class: "plays" }, d.steps.map(([t, who, what], j) => h("li", { class: `play a-${who.toLowerCase()}`, style: `--i:${j}` },
-        h("span", { class: "play-t" }, t), h("span", { class: "play-who" }, who), h("span", { class: "play-what" }, what)))),
-      h("p", { class: `play-end ${d.end[1]}`, style: `--i:${d.steps.length}` }, d.end[0]),
-    );
-  };
-  const list = h("div", { class: "index" }, DEMOS.map((d, i) => {
-    const row = h("button", { class: "index-row", type: "button", "aria-pressed": "false", onclick: () => play(i), onfocus: () => play(i), onpointerenter: (e) => { if (e.pointerType === "mouse") play(i); } },
-      h("span", { class: "index-name" }, d.name), h("span", { class: "index-amt" }, d.amount), h("span", { class: "index-how" }, d.how));
-    rows.push(row);
-    return row;
-  }));
-  const section = h("section", { id: "try", class: "chapter c-white try" },
-    h("h2", { class: "chapter-h", "data-reveal": "" }, "pick an invoice,", h("br"), "watch sayso decide"),
-    h("div", { class: "try-grid" }, list, frame),
-  );
-  // Play the first invoice once the section comes into view.
-  section.dataset.onview = "";
-  section.addEventListener("inview", () => play(0), { once: true });
-  return section;
 }
 
 // Things marked data-reveal fade up as they enter the screen; html.js gates it so nothing hides without script.
