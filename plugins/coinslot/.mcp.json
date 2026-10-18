@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "coinslot": {
+      "type": "http",
+      "url": "${user_config.coinslot_url}/mcp",
+      "headers": { "Authorization": "Bearer ${user_config.agent_key}" }
+    }
+  }
+}

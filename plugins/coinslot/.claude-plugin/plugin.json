@@ -1,0 +1,22 @@
+{
+  "name": "coinslot",
+  "version": "0.2.0",
+  "description": "Pay real-world invoices in local currency through Airwallex. Forward an invoice and the owner approves it with one tap; agents with USDZ on Metal can pay directly over x402.",
+  "author": { "name": "Coin Slot" },
+  "keywords": ["payments", "invoices", "airwallex", "metal", "x402"],
+  "userConfig": {
+    "coinslot_url": {
+      "type": "string",
+      "title": "Coin Slot URL",
+      "description": "Where your Coin Slot runs, e.g. https://coinslot.example.com",
+      "required": true
+    },
+    "agent_key": {
+      "type": "string",
+      "title": "Agent key",
+      "description": "Create one in the Coin Slot app: Agents, Connect your agent",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

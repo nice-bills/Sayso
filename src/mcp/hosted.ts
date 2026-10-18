@@ -41,9 +41,27 @@ function summarise(item: InboxItem & { payout?: ReturnType<typeof publicView> | 
   return { invoice_id: item.id, status: item.status, what, next: next[item.status], approval_url: `${base}${approvalPath(item.id)}`, payout_id: item.payoutId };
 }
 
+const overCap = (agent: AgentKey, priceUsdz: string) => agent.capMinor !== null && toMinor(Number(priceUsdz)) > agent.capMinor;
+const pending = ["awaiting_approval", "needs_verification", "needs_details", "paying"];
+
+/** An agent hands Coin Slot an invoice: into the owner's inbox, with a link and a push for their tap. */
+async function forward(d: HostedDeps, agent: AgentKey, base: string, a: { text: string; from?: string; subject?: string }) {
+  const item = await d.inbox.receive({ messageId: `agent-${agent.id.slice(0, 8)}-${randomUUID()}`, from: a.from ?? `${agent.name} (agent)`, subject: a.subject ?? `Forwarded by ${agent.name}`, body: a.text, receivedAt: new Date() });
+  const full = d.inbox.list().find((i) => i.id === item.id)!;
+  if (full.payout && overCap(agent, full.payout.price_usdz) && ["awaiting_approval", "needs_verification"].includes(full.status)) {
+    d.inbox.ignore(item.id);
+    emit("refuse", `${agent.name} forwarded ${full.payout.amount} ${full.payout.currency}, above its cap; not queued`);
+    return { error: `That's above this agent's cap of ${(agent.capMinor! / 100).toFixed(2)} USD per payout. Ask the owner to forward it themselves.` };
+  }
+  const s = summarise(full, base);
+  if (["awaiting_approval", "needs_verification", "needs_details"].includes(full.status)) {
+    void d.notify(full.status === "needs_verification" ? "Check before paying" : full.status === "needs_details" ? "Invoice needs details" : "Invoice to approve", `${s.what} (from ${agent.name})`, approvalPath(item.id));
+  }
+  return s;
+}
+
 function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
   const server = new McpServer({ name: "coinslot", version: "0.2.0" }, { instructions: "Coin Slot pays real-world invoices in local currency through Airwallex. Forward invoices with forward_invoice; the owner approves each payment themselves from a link. Never tell the owner a payment is made until payout_status says paid." });
-  const overCap = (priceUsdz: string) => agent.capMinor !== null && toMinor(Number(priceUsdz)) > agent.capMinor;
 
   server.registerTool("forward_invoice", {
     description: "Put an invoice in the owner's Coin Slot inbox. Paste the whole invoice or email text (OCR the photo first if you were sent one). Coin Slot reads it, checks the payee with Airwallex, and sends the owner a one-tap approval link. Returns the link and what happens next.",
@@ -52,26 +70,16 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
       from: z.string().optional().describe("Who sent the invoice, e.g. \"Kreuzberg Studio <billing@kreuzberg.de>\""),
       subject: z.string().optional(),
     },
-  }, async ({ text: body, from, subject }) => {
-    const item = await d.inbox.receive({ messageId: `agent-${agent.id.slice(0, 8)}-${randomUUID()}`, from: from ?? `${agent.name} (agent)`, subject: subject ?? `Forwarded by ${agent.name}`, body, receivedAt: new Date() });
-    const full = d.inbox.list().find((i) => i.id === item.id)!;
-    if (full.payout && overCap(full.payout.price_usdz) && ["awaiting_approval", "needs_verification"].includes(full.status)) {
-      d.inbox.ignore(item.id);
-      emit("refuse", `${agent.name} forwarded ${full.payout.amount} ${full.payout.currency}, above its cap; not queued`);
-      return fail(`That's above this agent's cap of ${(agent.capMinor! / 100).toFixed(2)} USD per payout. Ask the owner to forward it themselves.`);
-    }
-    const s = summarise(full, base);
-    if (["awaiting_approval", "needs_verification", "needs_details"].includes(full.status)) {
-      void d.notify(full.status === "needs_verification" ? "Check before paying" : full.status === "needs_details" ? "Invoice needs details" : "Invoice to approve", `${s.what} (from ${agent.name})`, approvalPath(item.id));
-    }
-    return text(s);
+  }, async (args) => {
+    const r = await forward(d, agent, base, args);
+    return "error" in r ? fail(r.error) : text(r);
   });
 
   server.registerTool("list_invoices", {
     description: "The owner's Coin Slot inbox: invoices waiting for their tap, held for a check, missing details, or paying.",
     inputSchema: { include_done: z.boolean().optional().describe("Also list paid, ignored and duplicate invoices") },
   }, async ({ include_done }) => {
-    const items = d.inbox.list().filter((i) => include_done || ["awaiting_approval", "needs_verification", "needs_details", "paying"].includes(i.status));
+    const items = d.inbox.list().filter((i) => include_done || pending.includes(i.status));
     return text(items.slice(0, 50).map((i) => summarise(i, base)));
   });
 
@@ -81,7 +89,7 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
   }, async (i) => {
     try {
       const p = await d.svc.quote(toRequest(i as Invoice));
-      if (overCap(publicView(p).price_usdz)) return fail(`Price ${publicView(p).price_usdz} USDZ is above this agent's cap.`);
+      if (overCap(agent, publicView(p).price_usdz)) return fail(`Price ${publicView(p).price_usdz} USDZ is above this agent's cap.`);
       return text({ ...publicView(p), pay_url: p.status === "quoted" ? `${base}/v1/payouts/${p.id}/pay` : null });
     } catch (err) {
       return fail(err instanceof PayoutError ? err.message : "quote failed");
@@ -101,10 +109,29 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
 
 export function hostedMcpRouter(d: HostedDeps): express.Router {
   const r = express.Router();
+  const agentOf = (req: Request) => {
+    const key = (req.params.key as string | undefined) ?? req.header("authorization")?.match(/^Bearer (.+)$/)?.[1];
+    return key ? d.keys.verify(key) : undefined;
+  };
+
+  // The same two actions as plain REST, for agent frameworks that run curl from a skill (OpenClaw, Hermes).
+  r.post("/v1/agent/invoices", express.json({ limit: "256kb" }), async (req, res) => {
+    const agent = agentOf(req);
+    if (!agent) return void res.status(401).json({ error: "send your Coin Slot agent key as a Bearer token" });
+    const b = req.body as { text?: unknown; from?: unknown; subject?: unknown };
+    if (typeof b?.text !== "string" || !b.text.trim()) return void res.status(400).json({ error: "text is required: the whole invoice or email" });
+    const r2 = await forward(d, agent, baseUrl(req), { text: b.text.slice(0, 20_000), from: typeof b.from === "string" ? b.from : undefined, subject: typeof b.subject === "string" ? b.subject : undefined });
+    res.status("error" in r2 ? 422 : 201).json(r2);
+  });
+  r.get("/v1/agent/invoices", (req, res) => {
+    const agent = agentOf(req);
+    if (!agent) return void res.status(401).json({ error: "send your Coin Slot agent key as a Bearer token" });
+    res.json(d.inbox.list().filter((i) => pending.includes(i.status)).slice(0, 50).map((i) => summarise(i, baseUrl(req))));
+  });
+
   // /mcp with a Bearer header, or /mcp/k/<key> for chat apps whose "add connector by URL" box can't set headers.
   r.post(["/mcp", "/mcp/k/:key"], express.json({ limit: "512kb" }), async (req, res) => {
-    const key = (req.params.key as string | undefined) ?? req.header("authorization")?.match(/^Bearer (.+)$/)?.[1];
-    const agent = key ? d.keys.verify(key) : undefined;
+    const agent = agentOf(req);
     if (!agent) {
       res.setHeader("www-authenticate", 'Bearer realm="coinslot"');
       return void res.status(401).json({ jsonrpc: "2.0", error: { code: -32001, message: "Send your Coin Slot agent key as a Bearer token. The owner creates one in the app's Agents tab." }, id: null });

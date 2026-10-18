@@ -45,6 +45,9 @@ describe("hosted MCP endpoint", () => {
       expect(cs.inbox.get(body.invoice_id)?.status).toBe("awaiting_approval");
       // The approval link opens the app.
       expect((await fetch(body.approval_url)).headers.get("content-type")).toMatch(/html/);
+      // The REST twin for curl-based skills.
+      const rest = await fetch(`${base}/v1/agent/invoices`, { headers: { authorization: `Bearer ${key}` } });
+      expect(((await rest.json()) as unknown[]).length).toBe(2);
       await agent.close();
     } finally {
       server.close();
