@@ -82,6 +82,10 @@ npm run demo                    # or: npm run serve
 
 Network access needed: `api.sandbox.airwallex.com`, `*.metalntwx.com`, and optionally `api.frankfurter.dev` for the FX history.
 
+Until Metal is set up (no `METAL_PRINCIPAL` in `.env`, or `npm run demo -- --sim-metal`), the demo runs on the live Airwallex sandbox with Metal simulated: real FX rates, beneficiaries, transfers, a real sandbox bounce and deposits, with Metal proofs marked `sim:`. `METAL_RPC_URL` must be an endpoint from console-testnet.metalntwx.com (chain 63825), not Metal L2.
+
+What the live sandbox taught us, now handled in code: FX rates come back in market convention (`EURUSD 1.14` for selling USD), so they are inverted; a new beneficiary's id is `id`; LOCAL transfers carry a payer fee (EUR 2.68, GBP 2.26) that is priced in and recorded from the transfer itself, and kept by Airwallex on a bounce; Spanish and US payees need `address.state`, US ACH needs `bank_account_category`; a transfer can only be failed from `SENT`; the sandbox answers `NOT_MATCHED` to every payee name, so the name check is off there (`AWX_NAME_CHECK=on` forces it).
+
 ## Layout
 
 | Path | What it does |

@@ -11,8 +11,9 @@ export const invoiceShape = {
   payee_city: z.string(),
   payee_street: z.string(),
   payee_postcode: z.string(),
+  payee_state: z.string().optional().describe("State or province code; Airwallex requires it for US payees, e.g. CA"),
   bank_country: z.string().describe("Two-letter country of the bank"),
-  bank: z.record(z.string(), z.string()).describe("Bank details as Airwallex bank_details fields, e.g. {\"iban\": \"DE89...\"} or {\"account_number\": \"...\", \"account_routing_type1\": \"sort_code\", \"account_routing_value1\": \"...\"}"),
+  bank: z.record(z.string(), z.string()).describe("Bank details as Airwallex bank_details fields, e.g. {\"iban\": \"DE89...\"} or {\"account_number\": \"...\", \"account_routing_type1\": \"sort_code\", \"account_routing_value1\": \"...\"}; US ACH also needs bank_account_category (Checking or Savings)"),
   reference: z.string().describe("Payment reference shown to the payee, max 35 characters"),
   invoice_text: z.string().optional().describe("The invoice or email text that asked for this payment. Coin Slot reads it and holds anything suspicious."),
 };
@@ -21,6 +22,6 @@ export type Invoice = { [K in keyof typeof invoiceShape]: z.infer<(typeof invoic
 
 export const toRequest = (i: Invoice) => ({
   amount: i.amount, currency: i.currency.toUpperCase(), method: i.method, reference: i.reference, invoice_text: i.invoice_text,
-  payee: { name: i.payee_name, entity_type: i.payee_type, bank: i.bank, bank_country_code: i.bank_country.toUpperCase(), address: { country_code: i.payee_country.toUpperCase(), city: i.payee_city, street_address: i.payee_street, postcode: i.payee_postcode } },
+  payee: { name: i.payee_name, entity_type: i.payee_type, bank: i.bank, bank_country_code: i.bank_country.toUpperCase(), address: { country_code: i.payee_country.toUpperCase(), city: i.payee_city, street_address: i.payee_street, postcode: i.payee_postcode, ...(i.payee_state ? { state: i.payee_state } : {}) } },
 });
 

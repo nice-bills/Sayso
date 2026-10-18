@@ -32,8 +32,8 @@ export const designerInvoice: InboundEmail = {
   body: `Invoice No: HP-0042
 Amount due: £72.00
 Account name: Holloway Print Ltd
-Sort code: 60-16-13
-Account number: 31926819`,
+Sort code: 04-05-68
+Account number: 10006132`,
 };
 
 export const fakeLandlord: InboundEmail = {

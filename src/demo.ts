@@ -11,16 +11,20 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { AddressInfo } from "node:net";
+import type { Airwallex } from "./airwallex/client.js";
 import { buildCoinSlot } from "./app.js";
 import { emit } from "./events.js";
 import { designerInvoice, fakeLandlord, studioInvoice, vagueEmail } from "../samples/invoices.js";
 
 const offline = process.argv.includes("--offline") || !process.env.AWX_CLIENT_ID;
+// Live Airwallex, simulated Metal: buyers pay as simulated payers until a Metal testnet endpoint is set up.
+const simMetal = !offline && (process.argv.includes("--sim-metal") || !process.env.METAL_PRINCIPAL);
+const simPayers = offline || simMetal;
 const exit = process.argv.includes("--exit");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const beat = async (n: number, title: string) => { emit("observe", `Beat ${n}: ${title}`); await sleep(offline ? 500 : 0); };
 
-const cs = await buildCoinSlot({ offline });
+const cs = await buildCoinSlot({ offline, simMetal });
 const server = cs.app.listen(Number(process.env.PORT ?? 4021));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 emit("observe", `Coin Slot on ${base}; open it and sign in with ${cs.offline ? cs.ownerToken : "your owner token"}`);
@@ -29,20 +33,22 @@ const settle = async (n = 3) => { for (let i = 0; i < n; i++) await cs.tick(); }
 /** One buying agent: its own MCP connection to Coin Slot, paying with its own Metal identity. */
 async function agent(name: string, payerOrKey: string) {
   const env: Record<string, string> = { ...(process.env as Record<string, string>), COINSLOT_URL: base, COINSLOT_MAX_USDZ: "500" };
-  if (offline) env.COINSLOT_SIM_PAYER = payerOrKey; else env.COINSLOT_BUYER_KEY = payerOrKey;
+  if (simPayers) env.COINSLOT_SIM_PAYER = payerOrKey; else env.COINSLOT_BUYER_KEY = payerOrKey;
   const client = new Client({ name, version: "1.0.0" });
   await client.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", "tsx", "src/mcp/server.ts"], env, stderr: "ignore" }));
   return client;
 }
 
 const result = (r: Awaited<ReturnType<Client["callTool"]>>) => JSON.parse((r.content as Array<{ text: string }>)[0]!.text);
+// Airwallex wants a state (province) on Spanish payee addresses.
 const payee = (name: string, iban: string, city: string) => ({
   payee_name: name, payee_country: iban.slice(0, 2), payee_city: city, payee_street: "1 Main Street", payee_postcode: "10000", bank_country: iban.slice(0, 2), bank: { iban },
+  ...(iban.startsWith("ES") ? { payee_state: city } : {}),
 });
 
 // ---- 1. agents pay invoices over MCP ----
 await beat(1, "three AI agents pay real-world invoices through Coin Slot's MCP tool");
-const buyers = offline
+const buyers = simPayers
   ? ["0xA9e0000000000000000000000000000000000001", "0xA9e0000000000000000000000000000000000002", "0xA9e0000000000000000000000000000000000003"]
   : (process.env.METAL_BUYER_KEYS ?? "").split(",").filter(Boolean);
 const jobs = [
@@ -88,8 +94,20 @@ if (offline && agents[0]) {
   const r = result(await agents[0].callTool({ name: "pay_invoice", arguments: { amount: "60.00", currency: "EUR", reference: "Old supplier", ...payee("Closed Account Co (CLOSED)", "DE02100100109307118603", "Berlin"), max_usdz: "100" } }));
   emit("observe", `buyer-agent-1 paid quote ${String(r.quote_id).slice(0, 8)}`);
   await settle();
+} else if (agents[0]) {
+  // Live sandbox: pay a real transfer, then have Airwallex's simulation return it as a closed account.
+  const r = result(await agents[0].callTool({ name: "pay_invoice", arguments: { amount: "60.00", currency: "EUR", reference: "Old supplier", ...payee("Closed Account Co", "DE02100100109307118603", "Berlin"), max_usdz: "100" } }));
+  await settle(1); // the payout is submitted to Airwallex on the next tick
+  const transferId = r.paid ? cs.svc.book.get(r.quote_id)?.transferId : undefined;
+  if (transferId && "simulateTransfer" in cs.awx) {
+    // The sandbox only fails a transfer that has been SENT; PROCESSING -> FAILED is a 500.
+    await (cs.awx as Airwallex).simulateTransfer(transferId, { next_status: "SENT" });
+    await (cs.awx as Airwallex).simulateTransfer(transferId, { next_status: "FAILED", failure_type: "ACCOUNT_CLOSED" });
+    emit("observe", `Airwallex sandbox bounced transfer ${transferId.slice(0, 8)} (ACCOUNT_CLOSED)`);
+  } else emit("observe", `buyer-agent-1 bounce payout not submitted: ${r.reason ?? r.status ?? r.error}`);
+  await settle();
 } else {
-  emit("observe", "Live: bounce a payout with the Airwallex transfer simulation (next_status FAILED, failure_type ACCOUNT_CLOSED) to see the refund");
+  emit("observe", "Live: bounce a payout with the Airwallex transfer simulation (next_status SENT, then FAILED with failure_type ACCOUNT_CLOSED) to see the refund");
 }
 
 // ---- 5. sweep ----
@@ -102,8 +120,10 @@ await cs.attemptHeist("0x9f3a6C0b9a2b9E3d7F1c5aE4B2d8C6e0F1a2B3c4", 25_000);
 
 // ---- 7. reconcile ----
 await beat(7, "reconcile every cent");
+// Live: a simulated Airwallex deposit sits PENDING for a second or two before the balance shows it.
+if (!offline) await sleep(5000);
 await cs.reconcileNow();
 
 for (const a of agents) await a.close();
-emit("observe", `Demo complete. ${offline ? "Offline: no real money moved." : "Live sandbox run."} App: ${base}/`);
+emit("observe", `Demo complete. ${offline ? "Offline: no real money moved." : simMetal ? "Live Airwallex sandbox run, Metal simulated." : "Live sandbox run."} App: ${base}/`);
 if (exit) { server.close(); process.exit(0); }

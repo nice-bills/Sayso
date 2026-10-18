@@ -33,8 +33,10 @@ export interface PolicyConfig {
   horizonDays: number;
   /** Autonomous spend limit per action, by forecast confidence band (base minor units). */
   autonomousLimits: { high: number; medium: number; low: number };
-  /** Flat SWIFT fee per payout, charged in the payout currency (minor units). LOCAL is free. */
+  /** Flat SWIFT fee per payout, charged in the payout currency (minor units). */
   swiftFeeMinor: Partial<Record<Currency, number>>;
+  /** Flat LOCAL fee per payout, charged in the payout currency (minor units). */
+  localFeeMinor?: Partial<Record<Currency, number>>;
   /** Headroom on indicative rates before a quote is locked (e.g. 0.01 = 1%). */
   rateBuffer: number;
 }
@@ -92,7 +94,7 @@ export function plan(state: TreasuryState, cfg: PolicyConfig, now: Date): Plan {
       actions.push({ kind: "escalate", obligationId: o.id, reason: "beneficiary_not_allowlisted" });
       continue;
     }
-    const feeMinor = o.method === "SWIFT" ? (cfg.swiftFeeMinor[o.currency] ?? 0) : 0;
+    const feeMinor = (o.method === "SWIFT" ? cfg.swiftFeeMinor : cfg.localFeeMinor ?? {})[o.currency] ?? 0;
     const needMinor = o.amountMinor + feeMinor;
     const haveMinor = held[o.currency] ?? 0;
 

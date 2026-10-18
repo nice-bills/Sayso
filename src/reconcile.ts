@@ -59,11 +59,18 @@ export function flowsFromBooks(store: Store, ledger: RampLedger, rampCurrency: s
   const f = (ccy: string) => (out[ccy] ??= { depositsMinor: 0, boughtMinor: 0, soldMinor: 0, payoutsMinor: 0, feesMinor: 0, cardSpendMinor: 0 });
   f(rampCurrency).depositsMinor += ledger.creditedMinor(rampCurrency);
   for (const op of store.ops()) {
-    if (op.status !== "settled") continue;
     if (op.kind === "pay") {
-      f(op.currency).payoutsMinor += op.amountMinor;
-      f(op.currency).feesMinor += op.detail?.startsWith("{") ? ((JSON.parse(op.detail) as { fee_minor?: number }).fee_minor ?? 0) : 0;
+      // Airwallex debits a transfer and its fee when it is created, not when it is paid; a bounce
+      // returns the transfer amount but not the fee.
+      const feeMinor = op.detail?.startsWith("{") ? ((JSON.parse(op.detail) as { fee_minor?: number }).fee_minor ?? 0) : 0;
+      const created = op.airwallexId !== null;
+      if (op.status === "settled" || (op.status === "submitted" && created)) {
+        f(op.currency).payoutsMinor += op.amountMinor;
+        f(op.currency).feesMinor += feeMinor;
+      } else if ((op.status === "failed" || op.status === "escalated") && created) f(op.currency).feesMinor += feeMinor;
+      continue;
     }
+    if (op.status !== "settled") continue;
     if (op.kind === "card_spend") f(op.currency).cardSpendMinor += op.amountMinor;
     if (op.kind === "convert") {
       f(op.currency).boughtMinor += op.amountMinor;

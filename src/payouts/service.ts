@@ -11,13 +11,13 @@
 
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { AirwallexError, type Airwallex, type Transfer } from "../airwallex/client.js";
+import { AirwallexError, chargedFeeDetail, transferFailure, type Airwallex, type Transfer } from "../airwallex/client.js";
 import { readAuto, type Findings } from "../agent/reader.js";
 import { emit } from "../events.js";
 import type { Store } from "../store.js";
 import { fmt, toMajor, toMinor } from "../treasury/money.js";
 import { PayoutBook, payeeHash, type Payout } from "./book.js";
-import { DEFAULT_PRICING, price, type PricingConfig } from "./pricing.js";
+import { DEFAULT_PRICING, price, transferFee, type PricingConfig } from "./pricing.js";
 import { assess, DEFAULT_RISK, type RiskConfig } from "./risk.js";
 
 export type PayoutAirwallex = Pick<Airwallex, "fxRate" | "fxConvert" | "createTransfer" | "transferByRequestId" | "validateBeneficiary" | "createBeneficiary" | "currentBalances">
@@ -35,7 +35,7 @@ export const PayoutRequest = z.object({
   payee: z.object({
     name: z.string().min(1).max(140),
     entity_type: z.enum(["COMPANY", "PERSONAL"]).default("COMPANY"),
-    address: z.object({ country_code: z.string().length(2), city: z.string(), street_address: z.string(), postcode: z.string() }),
+    address: z.object({ country_code: z.string().length(2), city: z.string(), street_address: z.string(), postcode: z.string(), state: z.string().optional() }),
     /** Airwallex bank_details fields for the destination, e.g. { iban } or { account_number, account_routing_type1, account_routing_value1 }. */
     bank: z.record(z.string(), z.string()).refine((b) => Object.keys(b).length > 0, "bank details required"),
     bank_country_code: z.string().length(2),
@@ -62,6 +62,8 @@ export interface PayoutDeps {
   risk?: RiskConfig;
   quoteTtlMs?: number;
   read?: (text: string) => Promise<Findings>;
+  /** Hold payouts whose account name the bank doesn't fully match. Off for the Airwallex sandbox, which answers NOT_MATCHED for every name. */
+  nameCheck?: boolean;
 }
 
 const HOUR = 3_600_000;
@@ -220,7 +222,7 @@ export class PayoutService {
     let beneficiaryId = this.book.payee(p.payeeHash)?.beneficiaryId;
     if (!beneficiaryId) {
       try {
-        beneficiaryId = (await this.d.awx.createBeneficiary({ beneficiary: p.beneficiary, transfer_methods: [p.method], nickname: p.payeeName.slice(0, 50) })).beneficiary_id;
+        beneficiaryId = (await this.d.awx.createBeneficiary({ beneficiary: p.beneficiary, transfer_methods: [p.method], nickname: p.payeeName.slice(0, 50) })).id;
         this.book.savePayee(p.payeeHash, beneficiaryId);
       } catch (err) {
         return this.fail(p, `Airwallex would not create the beneficiary: ${String(err).slice(0, 200)}`);
@@ -230,7 +232,7 @@ export class PayoutService {
   }
 
   private async ensureFloat(p: Payout): Promise<void> {
-    const need = p.amountMinor + (p.method === "SWIFT" ? (this.pricing.swiftFeeMinor[p.currency] ?? 0) : 0);
+    const need = p.amountMinor + transferFee(p.method, p.currency, this.pricing);
     const balances = await this.d.awx.currentBalances();
     const have = toMinor(balances.find((b) => b.currency === p.currency)?.available_amount ?? 0);
     if (have >= need) {
@@ -253,6 +255,7 @@ export class PayoutService {
     if (!v) return undefined;
     if (v.code === "INVALID") return { verdict: "reject", reason: "the bank says this account does not exist or is closed" };
     const match = v.details?.account_name_match_result;
+    if (this.d.nameCheck === false) return undefined;
     if (v.code !== "VERIFIED" || !match || match === "FULL_MATCH") return undefined;
     const holder = v.details?.resolved_account_name;
     return { verdict: "hold", reason: holder ? `the bank says this account belongs to ${holder}, not ${bank.account_name}` : `the account name does not fully match the bank's record (${match})` };
@@ -263,7 +266,7 @@ export class PayoutService {
       request_id: p.id, beneficiary_id: beneficiaryId, transfer_amount: toMajor(p.amountMinor).toFixed(2), transfer_currency: p.currency,
       transfer_method: p.method, reference: p.reference, source_currency: p.currency, reason: "business_expenses" as const,
     };
-    const fee = p.method === "SWIFT" ? (this.pricing.swiftFeeMinor[p.currency] ?? 0) : 0;
+    const fee = transferFee(p.method, p.currency, this.pricing);
     this.d.store.insertOp({ requestId: p.id, obligationId: p.id, kind: "pay", attempt: 1, status: "submitted", currency: p.currency, amountMinor: p.amountMinor, detail: JSON.stringify({ fee_minor: fee }) });
     let t: Transfer | undefined;
     try {
@@ -281,7 +284,8 @@ export class PayoutService {
         return this.book.get(p.id)!;
       }
     }
-    this.d.store.updateOp(p.id, "submitted", t.id);
+    // Record the fee Airwallex actually charged, so reconciliation uses its number, not our estimate.
+    this.d.store.updateOp(p.id, "submitted", t.id, chargedFeeDetail(t, p.currency));
     this.book.transition(p.id, ["funded"], "submitted", { transferId: t.id });
     emit("act", `Paying ${fmt(p.amountMinor, p.currency)} to ${p.payeeName} via ${p.method}`, { payout: p.id, status: t.status }, t.id);
     return this.book.get(p.id)!;
@@ -298,8 +302,11 @@ export class PayoutService {
       emit("reconcile", `Delivered ${fmt(p.amountMinor, p.currency)} to ${p.payeeName}`, { payout: p.id }, t.id);
     } else if ((t.status === "FAILED" || t.status === "CANCELLED") && (p.status === "submitted" || p.status === "paid")) {
       // A bank can return a payout after Airwallex reported it PAID, so a late failure refunds too.
-      this.d.store.updateOp(p.id, "failed", null, `${t.failure_type ?? ""} ${t.failure_reason ?? ""}`.trim());
-      await this.fail(p, `bank returned it: ${t.failure_type ?? "unknown"}`, ["submitted", "paid"]);
+      // Keep the fee in the op's detail: Airwallex returns the payout on a bounce but keeps its fee.
+      const fee = this.d.store.latestOp(p.id, "pay")?.detail;
+      const feeMinor = fee?.startsWith("{") ? (JSON.parse(fee) as { fee_minor?: number }).fee_minor ?? 0 : 0;
+      this.d.store.updateOp(p.id, "failed", null, JSON.stringify({ fee_minor: feeMinor, failure: transferFailure(t) }));
+      await this.fail(p, `bank returned it: ${transferFailure(t)}`, ["submitted", "paid"]);
     }
     return this.book.get(p.id);
   }

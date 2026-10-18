@@ -6,7 +6,7 @@
 // - Anything flagged needsApproval waits for an approval bound to exactly these terms.
 
 import { randomUUID } from "node:crypto";
-import { AirwallexError, type Airwallex, type Transfer } from "../airwallex/client.js";
+import { AirwallexError, chargedFeeDetail, transferFailure, type Airwallex, type Transfer } from "../airwallex/client.js";
 import { emit } from "../events.js";
 import type { Store } from "../store.js";
 import { ApprovalGate, type Approval, type ApprovalTerms } from "../treasury/approval.js";
@@ -93,7 +93,7 @@ async function submitTransfer(d: ExecutorDeps, requestId: string, a: Extract<Act
       source_currency: a.currency,
       reason: "business_expenses",
     });
-    d.store.updateOp(requestId, "submitted", t.id);
+    d.store.updateOp(requestId, "submitted", t.id, chargedFeeDetail(t, a.currency));
     emit("act", `Payout ${toMajor(a.amountMinor).toFixed(2)} ${a.currency} to ${a.beneficiaryId} via ${a.method}${isRetry ? " (same request_id)" : ""}`, { status: t.status }, t.id);
   } catch (err) {
     if (!isAmbiguous(err)) {
@@ -128,14 +128,17 @@ export function onTransferState(d: Pick<ExecutorDeps, "store">, t: Transfer, ben
     return "settled";
   }
   if (t.status !== "CANCELLED") return "pending"; // SENT is in flight, never final
-  const detail = `${t.failure_type ?? "unknown"}: ${t.failure_reason ?? ""}`;
+  // The fee stays in the detail: a bounce returns the transfer amount, not Airwallex's fee.
+  const feeMinor = op.detail?.startsWith("{") ? (JSON.parse(op.detail) as { fee_minor?: number }).fee_minor ?? 0 : 0;
+  const reason = transferFailure(t);
+  const detail = JSON.stringify({ fee_minor: feeMinor, failure: reason });
   if (op.attempt >= 2 || !beneficiaryStillAllowed) {
     d.store.updateOp(op.requestId, "escalated", null, detail);
-    emit("escalate", `Payout ${t.id} failed (${detail}); escalated instead of retrying`, {}, t.id);
+    emit("escalate", `Payout ${t.id} failed (${reason}); escalated instead of retrying`, {}, t.id);
     return "escalate";
   }
   // Marking it failed releases the duplicate lock for exactly one new attempt.
   d.store.updateOp(op.requestId, "failed", null, detail);
-  emit("decide", `Payout ${t.id} failed (${detail}); the original is terminal, so one replacement is allowed`, {}, t.id);
+  emit("decide", `Payout ${t.id} failed (${reason}); the original is terminal, so one replacement is allowed`, {}, t.id);
   return "replace";
 }

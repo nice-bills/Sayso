@@ -13,6 +13,7 @@ export const policyConfig: PolicyConfig = {
   horizonDays: 7,
   autonomousLimits: { high: toMinor(100), medium: toMinor(50), low: toMinor(30) },
   swiftFeeMinor: { EUR: 1285 },
+  localFeeMinor: { EUR: 268, GBP: 226 },
   rateBuffer: 0.01,
 };
 
@@ -31,7 +32,7 @@ export function obligations(now: Date, ben: ReturnType<typeof beneficiaries>): O
   const at = (days: number) => new Date(now.getTime() + days * DAY);
   return [
     { id: "office-rent-nov", payee: "Berlin office (landlord)", beneficiaryId: ben.landlord, currency: "EUR", amountMinor: toMinor(60), dueAt: at(1), method: "LOCAL", critical: true },
-    { id: "contractor-wk45", payee: "EU contractor", beneficiaryId: ben.contractor, currency: "EUR", amountMinor: toMinor(25), dueAt: at(2), method: "LOCAL", critical: false },
+    { id: "contractor-wk45", payee: "EU contractor", beneficiaryId: ben.contractor, currency: "EUR", amountMinor: toMinor(22), dueAt: at(2), method: "LOCAL", critical: false },
     { id: "designer-nov", payee: "UK designer", beneficiaryId: ben.designer, currency: "GBP", amountMinor: toMinor(18), dueAt: at(3), method: "LOCAL", critical: false },
     { id: "license-annual", payee: "Data licence vendor", beneficiaryId: ben.vendor, currency: "USD", amountMinor: toMinor(150), dueAt: at(5), method: "LOCAL", critical: false },
     { id: "office-rent-dec", payee: "Berlin office (landlord)", beneficiaryId: ben.landlord, currency: "EUR", amountMinor: toMinor(60), dueAt: at(31), method: "LOCAL", critical: true },

@@ -18,7 +18,7 @@ function setup() {
 describe("extractByPattern", () => {
   it("reads European and British invoices", () => {
     expect(extractByPattern(studioInvoice)).toMatchObject({ payeeName: "Kreuzberg Studio GmbH", amount: "280.00", currency: "EUR", reference: "INV-2026-114", iban: "DE89370400440532013000", bankCountry: "DE" });
-    expect(extractByPattern(designerInvoice)).toMatchObject({ payeeName: "Holloway Print Ltd", amount: "72.00", currency: "GBP", sortCode: "601613", accountNumber: "31926819", bankCountry: "GB" });
+    expect(extractByPattern(designerInvoice)).toMatchObject({ payeeName: "Holloway Print Ltd", amount: "72.00", currency: "GBP", sortCode: "040568", accountNumber: "10006132", bankCountry: "GB" });
   });
 });
 

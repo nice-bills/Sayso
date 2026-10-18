@@ -10,11 +10,11 @@ import type { MetalSettlementVerifier } from "../bridge/ramp.js";
 import { emit } from "../events.js";
 import type { EarningsSource } from "../metal/earnings.js";
 import type { PullResult } from "../metal/mandate.js";
+import { transferFee } from "../payouts/pricing.js";
 import type { RampLedger } from "../bridge/ledger.js";
 import { toMajor, toMinor } from "../treasury/money.js";
 
 const SPREAD = 0.003;
-const SWIFT_FEE: Record<string, number> = { EUR: 1285 };
 
 export class FakeAirwallex implements LoopAirwallex {
   readonly balances: Record<string, number>;
@@ -50,9 +50,9 @@ export class FakeAirwallex implements LoopAirwallex {
     const existing = this.transfers.get(b.request_id);
     if (existing) return existing; // same request_id, same transfer
     const amountMinor = toMinor(Number(b.transfer_amount));
-    const fee = b.transfer_method === "SWIFT" ? (SWIFT_FEE[b.transfer_currency] ?? 0) : 0;
+    const fee = transferFee(b.transfer_method, b.transfer_currency);
     this.add(b.transfer_currency, -(amountMinor + fee));
-    const t = { id: `sim:tfr_${this.transfers.size + 1}`, request_id: b.request_id, status: "PROCESSING", transfer_amount: toMajor(amountMinor), transfer_currency: b.transfer_currency, method: b.transfer_method, lookups: 0, beneficiary_id: b.beneficiary_id };
+    const t = { id: `sim:tfr_${this.transfers.size + 1}`, request_id: b.request_id, status: "PROCESSING", transfer_amount: toMajor(amountMinor), transfer_currency: b.transfer_currency, fee_amount: toMajor(fee), fee_currency: b.transfer_currency, method: b.transfer_method, lookups: 0, beneficiary_id: b.beneficiary_id };
     this.transfers.set(b.request_id, t);
     return t;
   };
@@ -99,7 +99,7 @@ export class FakeAirwallex implements LoopAirwallex {
   createBeneficiary = async (body: unknown) => {
     const id = `sim:ben_${this.beneficiaries.size + 1}`;
     this.beneficiaries.set(id, body);
-    return { beneficiary_id: id };
+    return { id };
   };
 
   simulateDeposit = async (_globalAccountId: string, amount: number) => {

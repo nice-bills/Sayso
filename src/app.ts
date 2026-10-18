@@ -65,7 +65,8 @@ export interface CoinSlot {
   keys: AgentKeys;
 }
 
-export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string }): Promise<CoinSlot> {
+/** `simMetal` runs the real Airwallex sandbox with Metal simulated, for when no Metal testnet endpoint is set up yet. */
+export async function buildCoinSlot(opts: { offline: boolean; simMetal?: boolean; dbPath?: string }): Promise<CoinSlot> {
   const dbPath = opts.dbPath ?? (opts.offline ? ":memory:" : process.env.COINSLOT_DB ?? "coinslot.db");
   const store = new Store(dbPath);
   const ledger = new RampLedger(dbPath);
@@ -77,9 +78,10 @@ export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string })
   let mode: PaymentMode;
   let earningsFor: (svc: PayoutService) => EarningsSource;
 
-  if (opts.offline) {
-    emit("observe", "Running OFFLINE: Airwallex and Metal are simulated; every proof starts with sim:");
-    awx = new FakeAirwallex({ USD: toMinor(2000) });
+  if (opts.offline || opts.simMetal) {
+    if (opts.offline) emit("observe", "Running OFFLINE: Airwallex and Metal are simulated; every proof starts with sim:");
+    else emit("observe", "Running on the live Airwallex sandbox with Metal simulated; Metal proofs start with sim:");
+    awx = opts.offline ? new FakeAirwallex({ USD: toMinor(2000) }) : Airwallex.fromEnv();
     refunder = new FakeRefunder();
     const sweepMandate = new FakeMandate("0xRamp000000000000000000000000000000000001", SWEEP_CAP_MINOR);
     verifier = sweepMandate;
@@ -104,7 +106,11 @@ export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string })
     };
   }
 
-  const svc = new PayoutService({ awx, store, refunder });
+  // The Airwallex sandbox says NOT_MATCHED for every payee name, so the name check is off there unless asked for.
+  const sandbox = (process.env.AWX_BASE_URL ?? "https://api.sandbox.airwallex.com").includes("sandbox");
+  const nameCheck = opts.offline || process.env.AWX_NAME_CHECK === "on" || (!sandbox && process.env.AWX_NAME_CHECK !== "off");
+  if (!nameCheck) emit("observe", "Airwallex sandbox: payee name matching is off (the sandbox answers NOT_MATCHED for every name); account existence is still checked");
+  const svc = new PayoutService({ awx, store, refunder, nameCheck });
   const inbox = new Inbox(store, svc);
   const credit = new SimulatedDepositCredit(awx, process.env.AWX_GLOBAL_ACCOUNT_ID ?? "sim:ga_usd");
   const earnings = earningsFor(svc);

@@ -35,6 +35,11 @@ export interface Transfer {
   transfer_currency: string;
   failure_reason?: string;
   failure_type?: string;
+  /** How the live API reports a failure, e.g. { code: "90701", details: { type: "INCORRECT_ROUTING" }, message: "Account closed" }. */
+  failure?: { code?: string; message?: string; details?: { type?: string } };
+  /** Airwallex's fee, taken from the payer's balance on top of transfer_amount when fee_paid_by is PAYER. */
+  fee_amount?: number;
+  fee_currency?: string;
 }
 
 export interface AccountVerification {
@@ -46,6 +51,15 @@ export interface AccountVerification {
   };
   message?: string;
 }
+
+export interface GlobalAccount {
+  id: string;
+  country_code?: string;
+  status?: string;
+  required_features?: Array<{ currency: string; transfer_method: string }>;
+}
+
+export const globalAccountCurrencies = (a: GlobalAccount): string[] => (a.required_features ?? []).map((f) => f.currency);
 
 export class Airwallex {
   private token?: { value: string; expiresAt: number };
@@ -92,7 +106,8 @@ export class Airwallex {
 
   // --- Accounts and balances ---
   currentBalances = () => this.call<Array<{ currency: string; available_amount: number; total_amount: number }>>("GET", "/balances/current");
-  globalAccounts = () => this.call<{ items: Array<{ id: string; currency?: string; country_code?: string }> }>("GET", "/global_accounts");
+  /** Global accounts carry their currencies in `required_features`; there is no top-level currency. */
+  globalAccounts = () => this.call<{ items: GlobalAccount[] }>("GET", "/global_accounts");
   createGlobalAccount = (countryCode: string, currency: string, requestId = Airwallex.newRequestId()) =>
     this.call<{ id: string }>("POST", "/global_accounts/create", {
       request_id: requestId,
@@ -101,8 +116,15 @@ export class Airwallex {
     });
 
   // --- FX: a rate is indicative, a quote is single-use and locks the rate ---
-  fxRate = (sellCurrency: string, buyCurrency: string) =>
-    this.call<{ rate: number }>("GET", "/fx/rates/current", undefined, { sell_currency: sellCurrency, buy_currency: buyCurrency });
+  /**
+   * Indicative rate as units of buy currency per 1 sell currency. Airwallex quotes `rate` in its
+   * market convention for `currency_pair` (EURUSD 1.14 means 1 EUR = 1.14 USD, even when we sell
+   * USD), so it is inverted when the pair is led by the buy currency.
+   */
+  fxRate = async (sellCurrency: string, buyCurrency: string) => {
+    const r = await this.call<{ rate: number; currency_pair?: string }>("GET", "/fx/rates/current", undefined, { sell_currency: sellCurrency, buy_currency: buyCurrency });
+    return { ...r, rate: fxRatePerSell(r.rate, r.currency_pair, sellCurrency, buyCurrency) };
+  };
   fxQuote = (body: { sell_currency: string; buy_currency: string; buy_amount: string; validity: string }) =>
     this.call<{ quote_id: string; client_rate: number; sell_amount: number }>("POST", "/fx/quotes/create", body);
   fxConvert = (body: { request_id: string; sell_currency: string; buy_currency: string; buy_amount: string; quote_id?: string }) =>
@@ -115,7 +137,8 @@ export class Airwallex {
   /** Account verification: does the account exist, and does the name match the bank's record (VoP in SEPA, CoP in the UK)? LOCAL only. */
   verifyAccount = (body: { entity_type: "COMPANY" | "PERSONAL"; transfer_method: "LOCAL"; bank_details: Record<string, string> }) =>
     this.call<AccountVerification>("POST", "/beneficiaries/verify_account", body);
-  createBeneficiary = (body: unknown) => this.call<{ beneficiary_id: string }>("POST", "/beneficiaries/create", body);
+  /** The new beneficiary's id comes back as `id`. */
+  createBeneficiary = (body: unknown) => this.call<{ id: string }>("POST", "/beneficiaries/create", body);
 
   // --- Transfers ---
   // A failed transfer goes FAILED and is cancelled seconds later; FAILED can also follow PAID
@@ -152,3 +175,19 @@ export class Airwallex {
     this.call<Transfer>("POST", `/simulation/transfers/${transferId}/transition`, body);
   simulateCardAuth = (body: unknown) => this.call<{ transaction_id: string }>("POST", "/simulation/issuing/create", body);
 }
+
+/** Airwallex's pair-convention rate as units of buy currency per 1 sell currency. */
+export function fxRatePerSell(rate: number, pair: string | undefined, sell: string, buy: string): number {
+  if (!pair || pair === `${sell}${buy}`) return rate;
+  if (pair === `${buy}${sell}`) return 1 / rate;
+  throw new Error(`Airwallex quoted ${pair} for ${sell}->${buy}`);
+}
+
+/** The op detail recording the fee Airwallex actually charged on a transfer, or null when it didn't say. */
+export function chargedFeeDetail(t: Pick<Transfer, "fee_amount" | "fee_currency">, currency: string): string | null {
+  return t.fee_currency === currency && t.fee_amount !== undefined ? JSON.stringify({ fee_minor: Math.round(t.fee_amount * 100) }) : null;
+}
+
+/** Why a transfer failed, from whichever field the API filled in. */
+export const transferFailure = (t: Pick<Transfer, "failure" | "failure_reason" | "failure_type">): string =>
+  t.failure?.message ?? t.failure_reason ?? t.failure_type ?? "unknown";

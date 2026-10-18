@@ -58,7 +58,7 @@ Tap the checkbox only after "calling". Pay. (Or ignore it, which is the right ca
 
 ## 3:30 A payout bounces (30s)
 
-Have the agent pay an account that bounces (live: the Airwallex transfer simulation: `FAILED` with `failure_type` `ACCOUNT_CLOSED`).
+Have the agent pay an account that bounces (live: the Airwallex transfer simulation: `SENT`, then `FAILED` with `failure_type` `ACCOUNT_CLOSED`).
 
 Show: the timeline turns to Bounced, then Refunded in full. Details shows the refund tx on Metal.
 

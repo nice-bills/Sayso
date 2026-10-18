@@ -33,7 +33,7 @@ describe("reconcile", () => {
     expect(r.checks.find((c) => c.name === "EUR balance explained")?.diffMinor).toBe(-1285);
   });
 
-  it("builds flows from settled operations only", () => {
+  it("builds flows from settled operations, not ones Airwallex never accepted", () => {
     const store = new Store(":memory:");
     const ledger = new RampLedger(":memory:");
     ledger.record("op1", "e1", 5000, "USD");
@@ -47,5 +47,17 @@ describe("reconcile", () => {
       USD: { depositsMinor: 5000, boughtMinor: 0, soldMinor: 2200, payoutsMinor: 0, feesMinor: 0, cardSpendMinor: 0 },
       EUR: { depositsMinor: 0, boughtMinor: 2000, soldMinor: 0, payoutsMinor: 2000, feesMinor: 1285, cardSpendMinor: 0 },
     });
+  });
+
+  it("counts a transfer when Airwallex creates it, and keeps the fee of one that bounced", () => {
+    const store = new Store(":memory:");
+    const ledger = new RampLedger(":memory:");
+    // In flight: Airwallex debited EUR 60.00 plus its EUR 2.68 fee when it created the transfer.
+    store.insertOp({ requestId: "r1", obligationId: "o1", kind: "pay", attempt: 1, status: "submitted", currency: "EUR", amountMinor: 6000 });
+    store.updateOp("r1", "submitted", "tfr1", JSON.stringify({ fee_minor: 268 }));
+    // Bounced: the EUR 40.00 came back, the fee did not.
+    store.insertOp({ requestId: "r2", obligationId: "o2", kind: "pay", attempt: 1, status: "submitted", currency: "EUR", amountMinor: 4000 });
+    store.updateOp("r2", "failed", "tfr2", JSON.stringify({ fee_minor: 268, failure: "Account closed" }));
+    expect(flowsFromBooks(store, ledger, "USD").EUR).toEqual({ depositsMinor: 0, boughtMinor: 0, soldMinor: 0, payoutsMinor: 6000, feesMinor: 536, cardSpendMinor: 0 });
   });
 });

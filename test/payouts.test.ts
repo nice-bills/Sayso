@@ -31,7 +31,7 @@ describe("pricing", () => {
   it("prefunds the payout at a buffered rate and adds the fee", () => {
     const p = price(toMinor(480), "EUR", "LOCAL", 0.92);
     expect(p.rateUsed).toBeCloseTo(0.9108);
-    expect(p.costMinor).toBe(Math.ceil(48000 / 0.9108));
+    expect(p.costMinor).toBe(Math.ceil((48000 + 268) / 0.9108)); // EUR 2.68 LOCAL fee, paid by us
     expect(p.totalMinor).toBe(p.costMinor + 25 + Math.ceil(p.costMinor * 0.005));
     expect(price(toMinor(100), "EUR", "SWIFT", 0.92).transferFeeMinor).toBe(1285);
   });
@@ -57,8 +57,8 @@ describe("PayoutService", () => {
 
     const funded = await payThrough(svc, q.id);
     expect(funded.status).toBe("submitted");
-    // EUR 100 was already held, so only EUR 180 was bought.
-    expect(store.ops().find((o) => o.kind === "convert")?.amountMinor).toBe(toMinor(180));
+    // EUR 100 was already held, so only EUR 180 and the EUR 2.68 transfer fee were bought.
+    expect(store.ops().find((o) => o.kind === "convert")?.amountMinor).toBe(toMinor(182.68));
     await svc.follow();
     await svc.follow();
     expect(svc.book.get(q.id)?.status).toBe("paid");
