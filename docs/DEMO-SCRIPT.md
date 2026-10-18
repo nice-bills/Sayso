@@ -50,15 +50,15 @@ Say: Claude reads the email. Code decides the amount, the limits and whether it 
 
 > Then this arrives. "URGENT, our bank details have changed, pay today."
 
-Show: the card is red, "Check before paying". The reasons say it asks to pay new bank details and uses pressure. The Pay button is disabled.
+Show: the card is red, "Check before paying". The reasons say it asks to pay new bank details and uses pressure, and the third one comes from the payee's own bank through Airwallex account verification: "the bank says this account belongs to Mark Lehmann, not Berlin Office Lettings". The Pay button is disabled.
 
-> The model flagged it, but the model isn't what stops it. The rule is code: a held invoice can't be paid until a person confirms the details with the payee on a number they already had.
+> The model flagged it, and the bank confirmed the account isn't the landlord's. But neither of those is what stops it. The rule is code: a held invoice can't be paid until a person confirms the details with the payee on a number they already had.
 
 Tap the checkbox only after "calling". Pay. (Or ignore it, which is the right call for a real scam.)
 
 ## 3:30 A payout bounces (30s)
 
-Have the agent pay an account that bounces (live: the Airwallex transfer simulation with `CANCELLED`).
+Have the agent pay an account that bounces (live: the Airwallex transfer simulation: `FAILED` with `failure_type` `ACCOUNT_CLOSED`).
 
 Show: the timeline turns to Bounced, then Refunded in full. Details shows the refund tx on Metal.
 

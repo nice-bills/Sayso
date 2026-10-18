@@ -24,7 +24,7 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 | --- | --- |
 | Fiat moves only after the agent's payment settles on chain | x402 settle hook. A failed settlement releases the quote. |
 | No payout is ever sent twice | The payout id is Airwallex's `request_id`; every state change is compare-and-set. |
-| The payee is real before anyone pays | Airwallex beneficiary validation at quote time. |
+| The payee is real before anyone pays | Airwallex beneficiary validation and account verification at quote time. The payee's bank says whose account it is; a name mismatch waits for a person. |
 | Caps, velocity, blocked countries, large first payments | Risk rules in code, not in the prompt. |
 | "New bank details" invoices wait for a human phone check | The inbox refuses to pay a held invoice without an explicit confirmation. |
 | A bounced payout is refunded in full | A Metal refund mandate, capped per refund and in total. |
@@ -33,13 +33,13 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 
 ## How we built it
 
-- **Airwallex:** FX rates and conversions (only the shortfall is converted), beneficiary validation and creation, transfers with `request_id` idempotency, signed webhooks for transfer status, balances, and deposit simulation for the off-ramp.
+- **Airwallex:** FX rates and conversions (only the shortfall is converted), beneficiary validation, account verification with bank name matching (VoP/CoP) and creation, transfers with `request_id` idempotency and a purpose code, signed webhooks for transfer status (including bank returns after `PAID`), balances, and deposit simulation for the off-ramp.
 - **Metal:** x402 payments with `@metalntwx/metal-pay` on Metal testnet (USDZ), and two mandates through the official `metal-agent` CLI: a ramp-only sweep mandate and a capped refund mandate. On-chain refusals are recorded for the heist.
 - **Claude:** reads invoice emails into structured fields with a strict schema (Claude Opus 5.5 with structured outputs). A pattern extractor takes over with no key; neither one decides money.
 - **MCP, two ways.** A local server for agents with their own Metal wallet (`pay_invoice`, `pay_batch`, `pay_quote`, `quote_payout`, `payout_status`, `batch_status`). A hosted endpoint for any agent, with per-agent keys and caps (`forward_invoice`, `list_invoices`, `quote_payout`, `payout_status`). Approving is deliberately not a tool.
 - **Everywhere else:** a Claude Code plugin with a skill that teaches the approval flow, a skill for OpenClaw-style agents, AgentMail email intake (Svix-signed webhooks), and ntfy phone notifications that open the approval page.
 - **App:** a phone-friendly inbox, payments with live progress, an agents page, and a back office feed. Owner sign-in, strict CSP, invoice text always rendered as text.
-- **Quality:** TypeScript, SQLite, 68 unit and integration tests, 5 browser end-to-end tests, and a full offline mode with simulators that follow the same rules as the real services.
+- **Quality:** TypeScript, SQLite, 70 unit and integration tests, 5 browser end-to-end tests, and a full offline mode with simulators that follow the same rules as the real services.
 
 ## What's simulated, honestly
 
@@ -52,7 +52,7 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 | --- | --- |
 | 1 Adaptive Treasury | Converts only the shortfall, sweeps earnings into the float, reconciles to the cent. |
 | 2 Intent-Bound Purchase | Agents pay only at or below `max_usdz`; Metal won't sign above the agent's cap. |
-| 3 Payment Ops Incident | Bounced payouts are refunded automatically; ambiguous transfers are looked up before any retry. |
+| 3 Payment Ops Incident | Bounced payouts are refunded automatically, even when the bank returns one after `PAID`; ambiguous transfers are looked up before any retry. |
 | 8 Marketplace Settlement | Batch payouts: many sellers, one x402 payment, per-line refunds. |
 | 9 Approval-Bound | Agents propose; the owner approves each payment from a link bound to its amount and payee. |
 | 10 Agentic Checkout | Coin Slot's own checkout is x402: the 402 response is the price, and the agent pays it. |

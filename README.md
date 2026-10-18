@@ -5,9 +5,9 @@
 The rails decide what is allowed, not the prompt:
 - **Fiat moves only after the agent's payment settles on Metal.** An unsettled or failed payment releases the quote, and nothing is paid.
 - **Every quote is single-use.** Each payout id doubles as Airwallex's `request_id`, so nothing is paid twice.
-- **Airwallex validates the payee before anyone pays.**
+- **Airwallex validates the payee before anyone pays, and asks the payee's bank whose account it is** (Verification of Payee in SEPA, Confirmation of Payee in the UK). A name mismatch waits for a person; a closed account is refused.
 - **The risk rules are code.** They cover blocked countries, caps, velocity and large first payouts. An invoice that asks to pay new bank details is held until a person confirms with the payee.
-- **A bounced payout is refunded in full** under a Metal **refund mandate**. Metal caps each refund and the lifetime total.
+- **A bounced payout is refunded in full**, even when the bank returns it after Airwallex said `PAID`, under a Metal **refund mandate**. Metal caps each refund and the lifetime total.
 - **Earnings reach the Airwallex float only through a Metal sweep mandate whose only payee is the ramp.** A compromised agent trying to drain them is refused on chain.
 - **Reconciliation is arithmetic, to the cent.**
 
@@ -24,7 +24,7 @@ npm run serve:offline    # or open the app on :4021 and sign in with coinslot-de
 npm run test:e2e         # the app's flows in a real browser
 ```
 
-Offline mode swaps Airwallex and Metal for simulators. They follow the rules our code depends on: `request_id` dedupe, `CANCELLED` as the failure state, and the mandate's payee checks. Every proof they produce starts with `sim:`.
+Offline mode swaps Airwallex and Metal for simulators. They follow the rules our code depends on: `request_id` dedupe, a required transfer `reason`, `FAILED` as the failure state, and the mandate's payee checks. Every proof they produce starts with `sim:`.
 
 ## Use it from an agent (MCP)
 

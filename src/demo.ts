@@ -89,7 +89,7 @@ if (offline && agents[0]) {
   emit("observe", `buyer-agent-1 paid quote ${String(r.quote_id).slice(0, 8)}`);
   await settle();
 } else {
-  emit("observe", "Live: bounce a payout with the Airwallex transfer simulation (next_status CANCELLED) to see the refund");
+  emit("observe", "Live: bounce a payout with the Airwallex transfer simulation (next_status FAILED, failure_type ACCOUNT_CLOSED) to see the refund");
 }
 
 // ---- 5. sweep ----

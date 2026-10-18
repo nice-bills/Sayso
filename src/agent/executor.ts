@@ -91,6 +91,7 @@ async function submitTransfer(d: ExecutorDeps, requestId: string, a: Extract<Act
       transfer_method: a.method,
       reference: d.reference(a.obligationId),
       source_currency: a.currency,
+      reason: "business_expenses",
     });
     d.store.updateOp(requestId, "submitted", t.id);
     emit("act", `Payout ${toMajor(a.amountMinor).toFixed(2)} ${a.currency} to ${a.beneficiaryId} via ${a.method}${isRetry ? " (same request_id)" : ""}`, { status: t.status }, t.id);
@@ -115,7 +116,7 @@ async function submitTransfer(d: ExecutorDeps, requestId: string, a: Extract<Act
 }
 
 /**
- * React to a transfer's state. PAID closes it. CANCELLED (Airwallex's terminal failure state)
+ * React to a transfer's state. PAID closes it. CANCELLED (a FAILED transfer is cancelled, and its money returned, seconds later)
  * records the failure_type and either queues one replacement or escalates.
  */
 export function onTransferState(d: Pick<ExecutorDeps, "store">, t: Transfer, beneficiaryStillAllowed: boolean): "settled" | "replace" | "escalate" | "pending" {

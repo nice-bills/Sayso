@@ -1,10 +1,10 @@
 // Offline stand-ins for Airwallex and Metal, so the whole loop and dashboard run with no keys
 // and no network. They follow the same rules as the real services where those rules matter
-// to our code (request_id dedupe, CANCELLED as the failure state, mandate payee checks), and
+// to our code (request_id dedupe, a required transfer reason, FAILED as the failure state, mandate payee checks), and
 // every proof they return starts with "sim:" so nothing here can be mistaken for a live result.
 
 import { randomUUID } from "node:crypto";
-import { AirwallexError, type Transfer } from "../airwallex/client.js";
+import { AirwallexError, type AccountVerification, type Transfer } from "../airwallex/client.js";
 import type { LoopAirwallex } from "../agent/loop.js";
 import type { MetalSettlementVerifier } from "../bridge/ramp.js";
 import { emit } from "../events.js";
@@ -45,7 +45,8 @@ export class FakeAirwallex implements LoopAirwallex {
     return { id: `sim:conv_${b.request_id.slice(0, 8)}`, status: "SETTLED", sell_amount: toMajor(sellMinor), buy_amount: toMajor(buyMinor) };
   };
 
-  createTransfer = async (b: { request_id: string; beneficiary_id: string; transfer_amount: string; transfer_currency: string; transfer_method: "LOCAL" | "SWIFT" }) => {
+  createTransfer = async (b: { request_id: string; beneficiary_id: string; transfer_amount: string; transfer_currency: string; transfer_method: "LOCAL" | "SWIFT"; reason?: string }) => {
+    if (!b.reason) throw new AirwallexError(400, "validation_failed", { message: "reason is required" }, "/transfers/create");
     const existing = this.transfers.get(b.request_id);
     if (existing) return existing; // same request_id, same transfer
     const amountMinor = toMinor(Number(b.transfer_amount));
@@ -63,8 +64,8 @@ export class FakeAirwallex implements LoopAirwallex {
     t.lookups += 1;
     const ben = JSON.stringify(this.beneficiaries.get(t.beneficiary_id) ?? "");
     const fails = ben.includes(this.failMarker);
-    t.status = t.lookups === 1 ? "SENT" : fails ? "CANCELLED" : "PAID";
-    if (fails && t.lookups > 1 && t.status === "CANCELLED" && !t.refunded) {
+    t.status = t.lookups === 1 ? "SENT" : fails ? "FAILED" : "PAID";
+    if (fails && t.lookups > 1 && !t.refunded) {
       t.refunded = true;
       this.add(t.transfer_currency, toMinor(t.transfer_amount)); // the bank returns the money
       t.failure_type = "ACCOUNT_CLOSED";
@@ -82,6 +83,17 @@ export class FakeAirwallex implements LoopAirwallex {
     if (iban !== undefined && !/^[A-Z]{2}\d{2}[A-Z0-9]{8,30}$/.test(iban)) throw new AirwallexError(400, "invalid_iban", { field: "iban" }, "/beneficiaries/validate");
     if (iban === undefined && !bank.account_number) throw new AirwallexError(400, "missing_account", {}, "/beneficiaries/validate");
     return {};
+  };
+
+  /** Who each account really belongs to, as the payee's bank would say in a VoP/CoP check. */
+  readonly accountHolders = new Map<string, string>([["DE44500105175407324931", "Mark Lehmann"]]);
+
+  verifyAccount = async (b: { bank_details: Record<string, string> }): Promise<AccountVerification> => {
+    const iban = b.bank_details.iban?.replace(/\s+/g, "");
+    const holder = iban ? this.accountHolders.get(iban) : undefined;
+    if (!holder) return { code: "VERIFIED", details: { account_name_match_result: "FULL_MATCH", resolved_account_name: b.bank_details.account_name } };
+    const same = holder.toLowerCase() === (b.bank_details.account_name ?? "").toLowerCase();
+    return { code: "VERIFIED", details: { account_name_match_result: same ? "FULL_MATCH" : "NOT_MATCHED", resolved_account_name: holder } };
   };
 
   createBeneficiary = async (body: unknown) => {

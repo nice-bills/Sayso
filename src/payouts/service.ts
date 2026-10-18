@@ -7,7 +7,7 @@
 //   3. funded  — the payment SETTLED on Metal. Only now does any fiat move.
 //   4. execute — top up the currency float (convert only the shortfall), pay via Airwallex,
 //                idempotent on the payout id as request_id.
-//   5. settle  — PAID closes it; CANCELLED refunds the buyer in full under a Metal refund mandate.
+//   5. settle  — PAID closes it; FAILED or CANCELLED (even after PAID) refunds the buyer in full under a Metal refund mandate.
 
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -20,7 +20,8 @@ import { PayoutBook, payeeHash, type Payout } from "./book.js";
 import { DEFAULT_PRICING, price, type PricingConfig } from "./pricing.js";
 import { assess, DEFAULT_RISK, type RiskConfig } from "./risk.js";
 
-export type PayoutAirwallex = Pick<Airwallex, "fxRate" | "fxConvert" | "createTransfer" | "transferByRequestId" | "validateBeneficiary" | "createBeneficiary" | "currentBalances">;
+export type PayoutAirwallex = Pick<Airwallex, "fxRate" | "fxConvert" | "createTransfer" | "transferByRequestId" | "validateBeneficiary" | "createBeneficiary" | "currentBalances">
+  & Partial<Pick<Airwallex, "verifyAccount">>;
 
 /** Returns a buyer's USDZ. Live: a Metal mandate with a per-refund cap and a total budget. */
 export interface Refunder {
@@ -122,6 +123,13 @@ export class PayoutService {
           reasons.push(`Airwallex rejected the bank details: ${err.code ?? err.status}`);
         } else throw err;
       }
+    }
+
+    // Then the bank itself: does the account exist, and is it really the payee's? (VoP / CoP)
+    if (status !== "rejected" && r.method === "LOCAL") {
+      const check = await this.checkAccount(r.payee.entity_type, bank);
+      if (check?.verdict === "reject") { status = "rejected"; reasons.push(check.reason); }
+      else if (check?.verdict === "hold") { if (status === "quoted") status = "needs_review"; reasons.push(check.reason); }
     }
 
     const p: Payout = {
@@ -238,10 +246,22 @@ export class PayoutService {
     emit("act", `Converted ${toMajor(toMinor(c.sell_amount)).toFixed(2)} USD into the ${fmt(buyMinor, p.currency)} shortfall`, { payout: p.id }, c.id);
   }
 
+  /** Airwallex account verification. Anything short of a full name match waits for a person; an outage never blocks. */
+  private async checkAccount(entityType: "COMPANY" | "PERSONAL", bank: Record<string, string>): Promise<{ verdict: "reject" | "hold"; reason: string } | undefined> {
+    if (!this.d.awx.verifyAccount) return undefined;
+    const v = await this.d.awx.verifyAccount({ entity_type: entityType, transfer_method: "LOCAL", bank_details: bank }).catch(() => undefined);
+    if (!v) return undefined;
+    if (v.code === "INVALID") return { verdict: "reject", reason: "the bank says this account does not exist or is closed" };
+    const match = v.details?.account_name_match_result;
+    if (v.code !== "VERIFIED" || !match || match === "FULL_MATCH") return undefined;
+    const holder = v.details?.resolved_account_name;
+    return { verdict: "hold", reason: holder ? `the bank says this account belongs to ${holder}, not ${bank.account_name}` : `the account name does not fully match the bank's record (${match})` };
+  }
+
   private async submit(p: Payout, beneficiaryId: string): Promise<Payout> {
     const body = {
       request_id: p.id, beneficiary_id: beneficiaryId, transfer_amount: toMajor(p.amountMinor).toFixed(2), transfer_currency: p.currency,
-      transfer_method: p.method, reference: p.reference, source_currency: p.currency,
+      transfer_method: p.method, reference: p.reference, source_currency: p.currency, reason: "business_expenses" as const,
     };
     const fee = p.method === "SWIFT" ? (this.pricing.swiftFeeMinor[p.currency] ?? 0) : 0;
     this.d.store.insertOp({ requestId: p.id, obligationId: p.id, kind: "pay", attempt: 1, status: "submitted", currency: p.currency, amountMinor: p.amountMinor, detail: JSON.stringify({ fee_minor: fee }) });
@@ -276,9 +296,10 @@ export class PayoutService {
       this.d.store.updateOp(p.id, "settled");
       this.book.markPayeePaid(p.payeeHash, now);
       emit("reconcile", `Delivered ${fmt(p.amountMinor, p.currency)} to ${p.payeeName}`, { payout: p.id }, t.id);
-    } else if (t.status === "CANCELLED" && p.status === "submitted") {
+    } else if ((t.status === "FAILED" || t.status === "CANCELLED") && (p.status === "submitted" || p.status === "paid")) {
+      // A bank can return a payout after Airwallex reported it PAID, so a late failure refunds too.
       this.d.store.updateOp(p.id, "failed", null, `${t.failure_type ?? ""} ${t.failure_reason ?? ""}`.trim());
-      await this.fail(p, `bank returned it: ${t.failure_type ?? "unknown"}`, ["submitted"]);
+      await this.fail(p, `bank returned it: ${t.failure_type ?? "unknown"}`, ["submitted", "paid"]);
     }
     return this.book.get(p.id);
   }

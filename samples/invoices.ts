@@ -45,7 +45,7 @@ export const fakeLandlord: InboundEmail = {
 Invoice number: RENT-NOV
 Total due: EUR 60.00
 Payable to: Berlin Office Lettings
-IBAN: DE02 1001 0010 0930 7118 03
+IBAN: DE44 5001 0517 5407 3249 31
 Please don't call the office, the team is travelling.`,
 };
 

@@ -22,7 +22,10 @@ export class AirwallexError extends Error {
   }
 }
 
-export type TransferStatus = "PROCESSING" | "SENT" | "PAID" | "CANCELLED" | (string & {});
+export type TransferStatus = "PROCESSING" | "SENT" | "PAID" | "FAILED" | "CANCELLED" | (string & {});
+
+/** Purpose of payment; Airwallex requires one of its fixed values on every transfer. */
+export type TransferReason = "business_expenses" | "goods_purchased" | "professional_business_services" | "technical_services" | "bill_payment" | "wages_salary" | "other_services" | (string & {});
 
 export interface Transfer {
   id: string;
@@ -32,6 +35,16 @@ export interface Transfer {
   transfer_currency: string;
   failure_reason?: string;
   failure_type?: string;
+}
+
+export interface AccountVerification {
+  code: "VERIFIED" | "INVALID" | "CANNOT_VERIFY" | "EXTERNAL_SERVICE_UNAVAILABLE" | (string & {});
+  details?: {
+    account_name_match_result?: "FULL_MATCH" | "PARTIAL_MATCH" | "NOT_MATCHED" | "FULL_MATCH_INCORRECT_TYPE" | "PARTIAL_MATCH_INCORRECT_TYPE" | (string & {});
+    resolved_account_name?: string;
+    resolved_bank_name?: string;
+  };
+  message?: string;
 }
 
 export class Airwallex {
@@ -96,12 +109,17 @@ export class Airwallex {
     this.call<{ id: string; status: string; sell_amount: number; buy_amount: number }>("POST", "/fx/conversions/create", body);
 
   // --- Beneficiaries ---
-  beneficiarySchema = (body: unknown) => this.call<unknown>("POST", "/beneficiaries/schema", body);
+  beneficiarySchema = (body: unknown) => this.call<unknown>("POST", "/beneficiary_api_schemas/generate", body);
   validateBeneficiary = (beneficiary: unknown, transferMethods: Array<"LOCAL" | "SWIFT">) =>
     this.call<unknown>("POST", "/beneficiaries/validate", { beneficiary, transfer_methods: transferMethods });
+  /** Account verification: does the account exist, and does the name match the bank's record (VoP in SEPA, CoP in the UK)? LOCAL only. */
+  verifyAccount = (body: { entity_type: "COMPANY" | "PERSONAL"; transfer_method: "LOCAL"; bank_details: Record<string, string> }) =>
+    this.call<AccountVerification>("POST", "/beneficiaries/verify_account", body);
   createBeneficiary = (body: unknown) => this.call<{ beneficiary_id: string }>("POST", "/beneficiaries/create", body);
 
-  // --- Transfers (a failed transfer ends CANCELLED, never FAILED) ---
+  // --- Transfers ---
+  // A failed transfer goes FAILED and is cancelled seconds later; FAILED can also follow PAID
+  // when the recipient bank returns it, so PAID is not final.
   createTransfer = (body: {
     request_id: string;
     beneficiary_id: string;
@@ -109,8 +127,7 @@ export class Airwallex {
     transfer_currency: string;
     transfer_method: "LOCAL" | "SWIFT";
     reference: string;
-    /** Check the allowed values with the docs MCP before the first live run. */
-    reason?: string;
+    reason: TransferReason;
     source_currency?: string;
   }) => this.call<Transfer>("POST", "/transfers/create", body);
   transfers = (query: Record<string, string> = {}) => this.call<{ items: Transfer[] }>("GET", "/transfers", undefined, query);

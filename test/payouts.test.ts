@@ -108,6 +108,35 @@ describe("PayoutService", () => {
     expect(refunder.refunds).toEqual([{ to: BUYER, amountMinor: q.totalMinor, payoutId: q.id }]);
   });
 
+  it("refunds the buyer when the bank returns a payout after Airwallex reported it PAID", async () => {
+    const { svc, refunder } = setup();
+    const q = await svc.quote(req());
+    await payThrough(svc, q.id);
+    await svc.follow();
+    await svc.follow();
+    const paid = svc.book.get(q.id)!;
+    expect(paid.status).toBe("paid");
+    const late = { id: paid.transferId!, request_id: q.id, status: "FAILED", transfer_amount: 280, transfer_currency: "EUR", failure_type: "BENEFICIARY_BANK_RETURNED" };
+    await svc.onTransfer(late);
+    await svc.onTransfer({ ...late, status: "CANCELLED" });
+    expect(svc.book.get(q.id)!.status).toBe("refunded");
+    expect(refunder.refunds).toEqual([{ to: BUYER, amountMinor: q.totalMinor, payoutId: q.id }]);
+  });
+
+  it("checks the payee's name with their bank: a mismatch waits for a person, a closed account is refused, an outage never blocks", async () => {
+    const { awx, svc } = setup();
+    awx.accountHolders.set("DE89370400440532013000", "Someone Else");
+    const held = await svc.quote(req());
+    expect(held.status).toBe("needs_review");
+    expect(held.reasons).toContain("the bank says this account belongs to Someone Else, not Kreuzberg Studio GmbH");
+
+    awx.verifyAccount = async () => ({ code: "INVALID" });
+    expect((await svc.quote(req())).status).toBe("rejected");
+
+    awx.verifyAccount = async () => { throw new Error("EXTERNAL_SERVICE_UNAVAILABLE"); };
+    expect((await svc.quote(req())).status).toBe("quoted");
+  });
+
   it("refunds when the USD float cannot cover the payout", async () => {
     const { svc, refunder } = setup({ USD: toMinor(10), EUR: 0 });
     const q = await svc.quote(req());
