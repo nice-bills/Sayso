@@ -20,6 +20,7 @@ import { dashboardRouter } from "./dashboard/server.js";
 import { emit } from "./events.js";
 import { Inbox } from "./inbox/inbox.js";
 import { imapFromEnv, pollImap } from "./inbox/imap.js";
+import { agentMailRouter } from "./inbox/agentmail.js";
 import { ChainEarnings, type EarningsSource } from "./metal/earnings.js";
 import { MandateRefunder, MandateSweepVerifier, MetalMandate, type PullResult } from "./metal/mandate.js";
 import { payoutApi, type PaymentMode } from "./payouts/http.js";
@@ -148,6 +149,7 @@ export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string })
       if (e.name.startsWith("payout.transfer.")) await svc.onTransfer(e.data.object as unknown as Transfer);
     }));
   }
+  if (process.env.AGENTMAIL_WEBHOOK_SECRET) app.use(agentMailRouter(process.env.AGENTMAIL_WEBHOOK_SECRET, (e) => inbox.receive(e)));
   app.use(payoutApi(svc, mode));
 
   const webDir = fileURLToPath(new URL("./web", import.meta.url));

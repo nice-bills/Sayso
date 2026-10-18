@@ -23,3 +23,11 @@ Coin Slot doesn't run a chat bot; you bring your own assistant (OpenClaw, Poke, 
 4. You tap the link, check the details, and tap Pay. Your phone stays signed in for a week.
 
 If the invoice changes bank details or pushes urgency, the reply says so, and Pay stays locked until you confirm you phoned the payee.
+
+## An email address for invoices (AgentMail)
+
+1. Sign up at agentmail.to (the free plan is enough) and create an inbox, e.g. `pay-yourcompany@agentmail.to`.
+2. Add a webhook for `message.received` pointing at `https://YOUR-HOST/webhooks/agentmail`, limited to that inbox.
+3. Put the webhook's secret (`whsec_...`) in `AGENTMAIL_WEBHOOK_SECRET` and the inbox id in `AGENTMAIL_INBOX_ID`.
+
+Suppliers, or you, forward invoices to that address. Each one shows up in the app within seconds, and your phone gets a push if `NTFY_TOPIC` is set. Signatures are checked, and retries never queue an invoice twice. Gmail over IMAP (`INBOX_IMAP_*`) still works if you'd rather use it.
