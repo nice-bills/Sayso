@@ -3,6 +3,6 @@
 # as METAL_BUNDLE, the base64 of `tar czf - .metal`. Without any keys it runs offline.
 set -e
 if [ -n "$METAL_BUNDLE" ] && [ ! -d .metal ]; then echo "$METAL_BUNDLE" | base64 -d | tar xzf -; fi
-if [ -n "$AWX_CLIENT_ID" ] && [ -n "$METAL_PRINCIPAL" ]; then exec npx tsx src/serve.ts; fi
-echo "AWX_CLIENT_ID or METAL_PRINCIPAL is missing: starting offline (simulated Airwallex and Metal)"
+if [ -n "$AWX_CLIENT_ID" ] && [ -n "$METAL_PRINCIPAL" ] && [ -f "${METAL_OWNER_KEY:-.metal/owner.json}" ]; then exec npx tsx src/serve.ts; fi
+echo "Airwallex keys, METAL_PRINCIPAL or the Metal key files (METAL_BUNDLE) are missing: starting offline (simulated Airwallex and Metal)"
 exec npx tsx src/serve.ts --offline
