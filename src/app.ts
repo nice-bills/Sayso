@@ -34,7 +34,8 @@ import { fmt, toMinor } from "./treasury/money.js";
 
 /** Sweep cap per pull, and the USDZ left on the earnings account to cover refunds. */
 const SWEEP_CAP_MINOR = toMinor(5000);
-const REFUND_RESERVE_MINOR = toMinor(200);
+/** USDZ kept on the principal for refunds instead of being swept. */
+const refundReserveMinor = () => toMinor(Number(process.env.SAYSO_REFUND_RESERVE_USDZ ?? 200));
 
 /** Offline earnings: what buyers paid (minus refunds) that has not been swept yet. */
 class BookEarnings implements EarningsSource {
@@ -44,7 +45,7 @@ class BookEarnings implements EarningsSource {
     const received = external.reduce((s, p) => s + p.totalMinor, 0);
     const refunded = external.filter((p) => p.status === "refunded").reduce((s, p) => s + p.totalMinor, 0);
     const swept = this.ledger.all().filter((x) => x.status !== "rejected").reduce((s, x) => s + x.amountMinor, 0);
-    const amountMinor = Math.min(received - refunded - swept - REFUND_RESERVE_MINOR, SWEEP_CAP_MINOR);
+    const amountMinor = Math.min(received - refunded - swept - refundReserveMinor(), SWEEP_CAP_MINOR);
     return amountMinor > 0 ? { epoch: `epoch-${this.ledger.all().length + 1}`, amountMinor } : undefined;
   }
 }
@@ -102,7 +103,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     mode = { kind: "x402", server: registerMetalScheme(new x402ResourceServer(facilitator), { networks: ["testnet"] }), network: METAL_NETWORKS.testnet.network, payTo: principal };
     earningsFor = () => {
       const chain = new ChainEarnings(rpc, principal, ledger, SWEEP_CAP_MINOR);
-      return { pending: async () => { const e = await chain.pending(); return e && e.amountMinor > REFUND_RESERVE_MINOR ? { ...e, amountMinor: e.amountMinor - REFUND_RESERVE_MINOR } : undefined; } };
+      return { pending: async () => { const e = await chain.pending(); return e && e.amountMinor > refundReserveMinor() ? { ...e, amountMinor: e.amountMinor - refundReserveMinor() } : undefined; } };
     };
   }
 

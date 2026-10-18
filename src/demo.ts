@@ -11,6 +11,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { AddressInfo } from "node:net";
+import { getAddress } from "viem";
 import type { Airwallex } from "./airwallex/client.js";
 import { buildSayso } from "./app.js";
 import { emit } from "./events.js";
@@ -20,6 +21,11 @@ const offline = process.argv.includes("--offline") || !process.env.AWX_CLIENT_ID
 // Live Airwallex, simulated Metal: buyers pay as simulated payers until a Metal testnet endpoint is set up.
 const simMetal = !offline && (process.argv.includes("--sim-metal") || !process.env.METAL_PRINCIPAL);
 const simPayers = offline || simMetal;
+// The Metal testnet faucet grants each buyer 100 USDZ once, so a live Metal run pays a tenth of
+// each invoice and keeps a smaller refund reserve, so earnings still sweep.
+const scale = simPayers ? 1 : 0.1;
+const amt = (major: string) => (Number(major) * scale).toFixed(2);
+if (!simPayers) process.env.SAYSO_REFUND_RESERVE_USDZ ??= "20";
 const exit = process.argv.includes("--exit");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const beat = async (n: number, title: string) => { emit("observe", `Beat ${n}: ${title}`); await sleep(offline ? 500 : 0); };
@@ -52,9 +58,9 @@ const buyers = simPayers
   ? ["0xA9e0000000000000000000000000000000000001", "0xA9e0000000000000000000000000000000000002", "0xA9e0000000000000000000000000000000000003"]
   : (process.env.METAL_BUYER_KEYS ?? "").split(",").filter(Boolean);
 const jobs = [
-  { amount: "180.00", currency: "EUR", reference: "Translation Oct", ...payee("Lingua Freelance", "FR1420041010050500013M02606", "Paris") },
-  { amount: "95.50", currency: "EUR", reference: "GPU rental 44", ...payee("Rechenzentrum Nord GmbH", "DE75512108001245126199", "Hamburg") },
-  { amount: "240.00", currency: "EUR", reference: "Data labelling", ...payee("Etiqueta SL", "ES9121000418450200051332", "Madrid") },
+  { amount: amt("180.00"), currency: "EUR", reference: "Translation Oct", ...payee("Lingua Freelance", "FR1420041010050500013M02606", "Paris") },
+  { amount: amt("95.50"), currency: "EUR", reference: "GPU rental 44", ...payee("Rechenzentrum Nord GmbH", "DE75512108001245126199", "Hamburg") },
+  { amount: amt("240.00"), currency: "EUR", reference: "Data labelling", ...payee("Etiqueta SL", "ES9121000418450200051332", "Madrid") },
 ];
 const agents = await Promise.all(buyers.slice(0, 3).map((b, i) => agent(`buyer-agent-${i + 1}`, b)));
 for (const [i, a] of agents.entries()) {
@@ -70,7 +76,7 @@ if (agents[1]) {
     ["Atelier Nord", "DE89370400440532013000", "Hamburg", "64.00"], ["Keramik Sud", "DE75512108001245126199", "Munich", "38.50"],
     ["Linen & Co", "FR1420041010050500013M02606", "Lyon", "52.00"], ["Papel SL", "ES9121000418450200051332", "Valencia", "27.25"],
   ];
-  const r = result(await agents[1].callTool({ name: "pay_batch", arguments: { reference: "Sellers week 44", max_usdz: "250", items: sellers.map(([n, iban, city, amount]) => ({ amount, currency: "EUR", reference: "Sellers week 44", ...payee(n!, iban!, city!) })) } }));
+  const r = result(await agents[1].callTool({ name: "pay_batch", arguments: { reference: "Sellers week 44", max_usdz: "250", items: sellers.map(([n, iban, city, amount]) => ({ amount: amt(amount!), currency: "EUR", reference: "Sellers week 44", ...payee(n!, iban!, city!) })) } }));
   emit("observe", `buyer-agent-2 (marketplace): ${r.paid ? `paid ${r.payouts?.length} sellers with one payment of ${r.price_usdz} USDZ` : `not paid: ${r.reason ?? r.error}`}`);
   await settle();
 }
@@ -96,9 +102,10 @@ if (offline && agents[0]) {
   await settle();
 } else if (agents[0]) {
   // Live sandbox: pay a real transfer, then have Airwallex's simulation return it as a closed account.
-  const r = result(await agents[0].callTool({ name: "pay_invoice", arguments: { amount: "60.00", currency: "EUR", reference: "Old supplier", ...payee("Closed Account Co", "DE02100100109307118603", "Berlin"), max_usdz: "100" } }));
-  await settle(1); // the payout is submitted to Airwallex on the next tick
-  const transferId = r.paid ? cs.svc.book.get(r.quote_id)?.transferId : undefined;
+  const r = result(await agents[0].callTool({ name: "pay_invoice", arguments: { amount: amt("60.00"), currency: "EUR", reference: "Old supplier", ...payee("Closed Account Co", "DE02100100109307118603", "Berlin"), max_usdz: "100" } }));
+  // The payout reaches Airwallex once the payment settles on chain and a tick submits it.
+  let transferId: string | null | undefined;
+  for (let i = 0; r.paid && !transferId && i < 20; i++) { await settle(1); transferId = cs.svc.book.get(r.quote_id)?.transferId; if (!transferId) await sleep(3000); }
   if (transferId && "simulateTransfer" in cs.awx) {
     // The sandbox only fails a transfer that has been SENT; PROCESSING -> FAILED is a 500.
     await (cs.awx as Airwallex).simulateTransfer(transferId, { next_status: "SENT" });
@@ -116,7 +123,7 @@ await settle(1);
 
 // ---- 6. heist ----
 await beat(6, "a compromised agent tries to drain the earnings to an attacker");
-await cs.attemptHeist("0x9f3a6C0b9a2b9E3d7F1c5aE4B2d8C6e0F1a2B3c4", 25_000);
+await cs.attemptHeist(getAddress("0x9f3a6c0b9a2b9e3d7f1c5ae4b2d8c6e0f1a2b3c4"), 25_000);
 
 // ---- 7. reconcile ----
 await beat(7, "reconcile every cent");

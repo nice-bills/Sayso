@@ -51,7 +51,8 @@ server.registerTool("pay_invoice", {
   const q = await quote(i as Invoice);
   if (q.status !== "quoted" || !q.pay_url) return text({ paid: false, ...q });
   if (Number(q.price_usdz) > Number(i.max_usdz)) return text({ paid: false, reason: `price ${q.price_usdz} USDZ is above max_usdz ${i.max_usdz}`, quote: q });
-  return text({ paid: true, quote_id: q.id, ...(await pay(q.id)) });
+  const r = await pay(q.id);
+  return text({ paid: r.http_status < 400, quote_id: q.id, ...r });
 });
 
 server.registerTool("pay_batch", {

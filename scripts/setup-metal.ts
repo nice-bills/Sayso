@@ -19,6 +19,8 @@ for (const name of ["owner", "ramp", "buyer1", "buyer2", "buyer3"]) {
   if (!existsSync(key(name))) await base.cli(["key", "create", "--out", key(name)]).catch(() => undefined);
 }
 const mandate = new MetalMandate({ ...base.cfg, rampAddress: address("ramp") });
+// Binding a mandate is a transaction from the owner key, which pays gas in USDZ: fund it first.
+await mandate.cli(["fund", address("owner")]).then(() => console.log(`funded owner ${address("owner")}`)).catch((e) => console.error(`fund owner: ${String(e).slice(0, 200)}`));
 const { principal, gasKeyAddress } = await mandate.setup({ capCents: toMinor(5000), budgetCents: toMinor(50000) });
 // Refunds go back to whichever agent paid, so this one has no payee list: Metal caps each refund and the total.
 const refunds = new MetalMandate({ ...mandate.cfg, credential: ".metal/refund.json" });
