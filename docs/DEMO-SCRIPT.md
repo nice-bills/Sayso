@@ -75,7 +75,7 @@ Show: **Metal refused it on chain** (PayeeNotAllowed), with the explorer link to
 
 ## Optional, if time allows: Sayso runs itself (30s)
 
-`npm run demo` beats 6 and 7. An email says a big customer is pausing; the forecast drops from 0.85 to 0.45 and Sayso's autonomous limit falls to USD 30, so rent waits for approval while the small bills go out. Then the agent pays its Anthropic bill with its own Airwallex card; a charge at a watch shop is declined by Airwallex, and an unknown merchant freezes the card.
+`npm run demo` beats 6 and 7. An email says a big customer is pausing; the forecast drops from 0.85 to 0.45 and Sayso's autonomous limit falls to USD 30, so rent waits for approval while the small bills go out. Then the agent pays its Anthropic bill with its own card; a charge at a watch shop is declined, and an unknown merchant freezes the card. Say that the card is simulated: the sandbox account can't issue cards, so the simulator applies the same limits Airwallex would.
 
 ## 4:20 Every cent explained (25s)
 
