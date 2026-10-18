@@ -14,7 +14,7 @@ The arc judges asked for: goal, plan, new information, revised decision, resulti
 
 > Agents can hold money now. Stablecoins on Metal, paid per call over x402. But the world's invoices are in euros and pounds, sent to IBANs. Sayso lets any agent pay any real-world invoice, and lets a business do the same thing with one tap.
 
-Show: the landing page. Its chat plays out the whole idea in six lines: the agent pays one invoice, and Sayso holds the risky one.
+Show: the landing page. Point at the three invoices under "pick an invoice, watch sayso decide": an agent pays one, you tap one, and Sayso holds the rent scam.
 
 ## 0:20 An agent pays a real invoice (60s)
 
