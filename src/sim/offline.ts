@@ -108,16 +108,22 @@ export class FakeAirwallex implements LoopAirwallex {
   };
 
   createCardholder = async () => ({ cardholder_id: "sim:ch_1" });
-  createCard = async () => ({ card_id: "sim:card_1" });
+  private cardMcc: string[] = [];
+  createCard = async (body: unknown) => {
+    this.cardMcc = (body as { authorization_controls?: { allowed_merchant_categories?: string[] } }).authorization_controls?.allowed_merchant_categories ?? [];
+    return { card_id: "sim:card_1" };
+  };
   updateCard = async (cardId: string, body: { card_status: string }) => {
     if (body.card_status !== "ACTIVE") this.frozenCards.add(cardId);
     return {};
   };
-  simulateCardAuth = async (body: unknown) => {
-    const b = body as { card_id: string; transaction_amount: number; transaction_currency: string };
-    if (this.frozenCards.has(b.card_id)) throw new Error("card is frozen");
+  /** Airwallex's authorization controls, simulated: a frozen card or a category the card doesn't allow is declined. */
+  simulateCardAuth = async (b: { card_id: string; transaction_amount: number; transaction_currency: string; merchant_info: string; merchant_category_code: string }) => {
+    const base = { card_transaction_id: `sim:itx_${randomUUID().slice(0, 8)}`, card_id: b.card_id, transaction_amount: b.transaction_amount, transaction_currency: b.transaction_currency, merchant: { name: b.merchant_info, category_code: b.merchant_category_code } };
+    if (this.frozenCards.has(b.card_id)) return { ...base, process_result: "DECLINED", failure_reason: "CARD_NOT_ACTIVE" };
+    if (this.cardMcc.length && !this.cardMcc.includes(b.merchant_category_code)) return { ...base, process_result: "DECLINED", failure_reason: "MERCHANT_CATEGORY_NOT_ALLOWED" };
     this.add(b.transaction_currency, -toMinor(b.transaction_amount));
-    return { transaction_id: `sim:itx_${randomUUID().slice(0, 8)}` };
+    return { ...base, process_result: "APPROVED" };
   };
 }
 

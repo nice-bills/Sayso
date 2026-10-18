@@ -5,17 +5,22 @@
 //   3. A business forwards invoices; one tap pays them. A fake "landlord" asking for new bank details is held.
 //   4. A payout bounces (closed account): the agent is refunded in full under a Metal refund mandate.
 //   5. Earnings move into the Airwallex float under a ramp-only mandate, exactly once.
-//   6. A compromised agent tries to drain the earnings to an attacker: Metal refuses it on chain.
-//   7. Reconciliation: every cent explained.
+//   6. Sayso runs its own treasury: an email lowers the earnings forecast, the policy re-plans
+//      hold / convert / pay for its bills, and the backtest over real ECB rates is shown.
+//   7. The agent pays its compute bill with its own Airwallex card; a bad charge freezes the card.
+//   8. A compromised agent tries to drain the earnings to an attacker: Metal refuses it on chain.
+//   9. Reconciliation: every cent explained.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { existsSync, readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { getAddress } from "viem";
 import type { Airwallex } from "./airwallex/client.js";
 import { buildSayso } from "./app.js";
 import { emit } from "./events.js";
 import { designerInvoice, fakeLandlord, studioInvoice, vagueEmail } from "../samples/invoices.js";
+import { churnEmail } from "./scenario.js";
 
 const offline = process.argv.includes("--offline") || !process.env.AWX_CLIENT_ID;
 // Live Airwallex, simulated Metal: buyers pay as simulated payers until a Metal testnet endpoint is set up.
@@ -121,12 +126,31 @@ if (offline && agents[0]) {
 await beat(5, "earnings have been moving into the Airwallex float on every tick, under a ramp-only Metal mandate");
 await settle(1);
 
-// ---- 6. heist ----
-await beat(6, "a compromised agent tries to drain the earnings to an attacker");
+// ---- 6. treasury ----
+await beat(6, "Sayso plans its own bills: hold, convert or pay, and an email changes the plan");
+const treasury = cs.treasury();
+treasury.inbox.push(churnEmail);
+await treasury.tick();
+if (existsSync("results/backtest.json")) {
+  const bt = JSON.parse(readFileSync("results/backtest.json", "utf8")) as { seeds: number; data: { from: string; to: string }; meanPerRun: Record<"policy" | "baseline", { missedBills: number; reserveBreaches: number; spreadPaidMinor: number }> };
+  const p = bt.meanPerRun.policy, b = bt.meanPerRun.baseline;
+  emit("observe", `Backtest, ${bt.seeds} earnings paths over ECB rates ${bt.data.from} to ${bt.data.to}: policy missed ${p.missedBills} bills and breached the reserve ${p.reserveBreaches} times; FX spread ${(p.spreadPaidMinor / 100).toFixed(2)} USD vs ${(b.spreadPaidMinor / 100).toFixed(2)} converting each bill on its due date`);
+}
+
+// ---- 7. the agent's own card ----
+await beat(7, "the agent pays its compute bill with its own Airwallex card");
+if (await cs.cardReady()) {
+  await cs.card.simulateBill("ANTHROPIC PBC", "7372", 4_200);
+  await cs.card.simulateBill("LUXURY WATCHES", "5944", 15_000); // Airwallex's own controls decline it
+  await cs.card.simulateBill("GPU RESELLER LTD", "7372", 9_000); // allowed category, unknown merchant: Sayso freezes the card
+}
+
+// ---- 8. heist ----
+await beat(8, "a compromised agent tries to drain the earnings to an attacker");
 await cs.attemptHeist(getAddress("0x9f3a6c0b9a2b9e3d7f1c5ae4b2d8c6e0f1a2b3c4"), 25_000);
 
-// ---- 7. reconcile ----
-await beat(7, "reconcile every cent");
+// ---- 9. reconcile ----
+await beat(9, "reconcile every cent");
 // Live: a simulated Airwallex deposit sits PENDING for a second or two before the balance shows it.
 if (!offline) await sleep(5000);
 await cs.reconcileNow();

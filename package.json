@@ -15,7 +15,9 @@
     "serve": "tsx --env-file-if-exists=.env src/serve.ts",
     "serve:offline": "tsx src/serve.ts --offline",
     "mcp": "tsx --env-file-if-exists=.env src/mcp/server.ts",
-    "test:e2e": "e2e run"
+    "test:e2e": "e2e run",
+    "bundle:metal": "tar czf - .metal | base64 -w0",
+    "start": "sh scripts/start.sh"
   },
   "license": "MIT",
   "dependencies": {

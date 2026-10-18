@@ -61,7 +61,7 @@ export class Agent {
     for (const ccy of new Set(this.d.obligations.map((o) => o.currency))) {
       if (ccy !== this.d.cfg.baseCurrency) rates[ccy] = (await this.d.awx.fxRate(this.d.cfg.baseCurrency, ccy)).rate;
     }
-    emit("observe", `Balances: ${Object.entries(this.balancesMinor).map(([c, m]) => fmt(m, c)).join(", ") || "none"}`, { rates });
+    emit("observe", `Balances: ${Object.entries(this.balancesMinor).filter(([, m]) => m !== 0).map(([c, m]) => fmt(m, c)).join(", ") || "none"}`, { rates });
     return { balancesMinor: this.balancesMinor, rates, obligations: this.open(), allowlistedBeneficiaries: this.d.allowlist, forecast: this.d.forecast };
   }
 

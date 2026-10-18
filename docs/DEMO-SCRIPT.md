@@ -5,6 +5,7 @@ The arc judges asked for: goal, plan, new information, revised decision, resulti
 **Before recording**
 - Live: `.env` filled, `npm run setup:metal` and `npm run setup:airwallex` done, `npm run serve` running, the app open and signed in, and the Airwallex sandbox dashboard in a second tab.
 - Offline rehearsal: `npm run serve:offline`, sign in with `sayso-demo`.
+- `npm run demo` prints every beat below with its proof links; run it once before recording so the Airwallex dashboard has the transfers.
 - Terminal: one Claude Code window with the Sayso MCP server added (README, "Use it from an agent").
 
 ---
@@ -50,7 +51,7 @@ Say: Claude reads the email. Code decides the amount, the limits and whether it 
 
 > Then this arrives. "URGENT, our bank details have changed, pay today."
 
-Show: the card is red, "Check before paying". The reasons say it asks to pay new bank details and uses pressure, and the third one comes from the payee's own bank through Airwallex account verification: "the bank says this account belongs to Mark Lehmann, not Berlin Office Lettings". The Pay button is disabled.
+Show: the card is red, "Check before paying". The reasons say it asks to pay new bank details and uses pressure. Offline, a third reason comes from the payee's bank through Airwallex account verification: "the bank says this account belongs to Mark Lehmann, not Berlin Office Lettings" (the live sandbox answers NOT_MATCHED to every name, so record this part offline). The Pay button is disabled.
 
 > The model flagged it, and the bank confirmed the account isn't the landlord's. But neither of those is what stops it. The rule is code: a held invoice can't be paid until a person confirms the details with the payee on a number they already had.
 
@@ -66,11 +67,15 @@ Show: the timeline turns to Bounced, then Refunded in full. Details shows the re
 
 ## 4:00 The heist on chain (20s)
 
-Run the demo's heist beat (`npm run demo` beat 6, or the back office): a compromised agent tries to send the earnings to an attacker.
+Run the demo's heist beat (`npm run demo` beat 8, or the back office): a compromised agent tries to send the earnings to an attacker.
 
 Show: **Metal refused it on chain** (PayeeNotAllowed), with the explorer link to the recorded refusal.
 
 > Earnings can only move to one address: the ramp into Airwallex. That's enforced by Metal's mandate, not by our prompt.
+
+## Optional, if time allows: Sayso runs itself (30s)
+
+`npm run demo` beats 6 and 7. An email says a big customer is pausing; the forecast drops from 0.85 to 0.45 and Sayso's autonomous limit falls to USD 30, so rent waits for approval while the small bills go out. Then the agent pays its Anthropic bill with its own Airwallex card; a charge at a watch shop is declined by Airwallex, and an unknown merchant freezes the card.
 
 ## 4:20 Every cent explained (25s)
 

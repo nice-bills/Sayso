@@ -52,6 +52,16 @@ export interface AccountVerification {
   message?: string;
 }
 
+export interface SimulatedCardTransaction {
+  card_transaction_id: string;
+  card_id: string;
+  process_result: "APPROVED" | "DECLINED" | (string & {});
+  failure_reason?: string;
+  transaction_amount: number;
+  transaction_currency: string;
+  merchant?: { name?: string; category_code?: string };
+}
+
 export interface GlobalAccount {
   id: string;
   country_code?: string;
@@ -173,7 +183,9 @@ export class Airwallex {
     this.call<{ id: string; status: string }>("POST", "/simulation/deposit/create", { global_account_id: globalAccountId, amount, payer_name: payerName });
   simulateTransfer = (transferId: string, body: { next_status: string; failure_type?: string }) =>
     this.call<Transfer>("POST", `/simulation/transfers/${transferId}/transition`, body);
-  simulateCardAuth = (body: unknown) => this.call<{ transaction_id: string }>("POST", "/simulation/issuing/create", body);
+  /** A merchant charges the card; Airwallex's authorization controls decide APPROVED or DECLINED. */
+  simulateCardAuth = (body: { card_id: string; transaction_amount: number; transaction_currency: string; merchant_info: string; merchant_category_code: string; single_phase?: boolean }) =>
+    this.call<SimulatedCardTransaction>("POST", "/simulation/issuing/create", body);
 }
 
 /** Airwallex's pair-convention rate as units of buy currency per 1 sell currency. */

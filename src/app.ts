@@ -8,6 +8,10 @@ import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
 import { METAL_NETWORKS, registerMetalScheme, sellerToken } from "@metalntwx/metal-pay";
 import type { Address } from "viem";
 import { Airwallex, type Transfer } from "./airwallex/client.js";
+import { AgentCard, type CardPort } from "./airwallex/card.js";
+import { Agent, type LoopAirwallex } from "./agent/loop.js";
+import { beneficiaries, obligations, policyConfig } from "./scenario.js";
+import { ApprovalGate } from "./treasury/approval.js";
 import { webhookRouter } from "./airwallex/webhooks.js";
 import { createAuth } from "./auth.js";
 import { AgentKeys } from "./agents/keys.js";
@@ -64,6 +68,16 @@ export interface Sayso {
   /** The owner's sign-in token (Bearer, or POST /auth/login). */
   ownerToken: string;
   keys: AgentKeys;
+  /** The agent's own Airwallex card for its compute bills. */
+  card: AgentCard;
+  /** The card's id: AWX_CARD_ID, or a card issued now. Undefined when Airwallex won't issue one. */
+  cardReady(): Promise<string | undefined>;
+  /**
+   * The treasury agent over Sayso's own bills (rent, contractor, designer, data licence): it plans
+   * hold / convert / pay with the policy and acts on the same Airwallex account and books.
+   * Sweeping stays with Sayso's tick, so the agent's own earnings source is empty.
+   */
+  treasury(confidence?: number, now?: Date): Agent;
 }
 
 /** `simMetal` runs the real Airwallex sandbox with Metal simulated, for when no Metal testnet endpoint is set up yet. */
@@ -152,6 +166,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   // ---------- HTTP ----------
   const app = express();
+  app.get("/healthz", (_req, res) => res.json({ ok: true, offline: opts.offline }));
   if (!opts.offline && process.env.AWX_WEBHOOK_SECRET) {
     app.use("/webhooks/airwallex", webhookRouter(process.env.AWX_WEBHOOK_SECRET, store, async (e) => {
       if (e.name.startsWith("payout.transfer.")) await svc.onTransfer(e.data.object as unknown as Transfer);
@@ -249,5 +264,27 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     },
   }));
 
-  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances, ownerToken: auth.ownerToken, keys };
+  const card = new AgentCard(awx as unknown as CardPort, store, undefined, process.env.AWX_CARD_ID || undefined);
+  async function cardReady(): Promise<string | undefined> {
+    if (card.cardId) return card.cardId;
+    try {
+      return await card.issue(process.env.AWX_CARDHOLDER_EMAIL ?? "agent@sayso.example", process.env.AWX_CARD_CREATED_BY ?? "Sayso Agent");
+    } catch (err) {
+      emit("escalate", `Airwallex would not issue the agent card: ${String(err).slice(0, 200)}`);
+      return undefined;
+    }
+  }
+
+  const treasury = (confidence = 0.85, now = new Date()) => {
+    const ben = beneficiaries(!opts.offline);
+    const unused = async () => { throw new Error("sweeps run in Sayso's tick"); };
+    return new Agent({
+      awx: awx as unknown as LoopAirwallex, store, ledger, verifier: { verify: unused } as unknown as MetalSettlementVerifier, credit: { credit: unused },
+      earnings: { pending: async () => undefined }, gate: new ApprovalGate(), approvals: new Map(), evidenceHash: (id) => id, reference: (id) => `Sayso ${id}`.slice(0, 35),
+      baseCurrency: "USD", cfg: policyConfig, obligations: obligations(now, ben), allowlist: new Set(Object.values(ben).filter(Boolean)),
+      forecast: { expectedInflowMinor: toMinor(300), confidence },
+    });
+  };
+
+  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances, ownerToken: auth.ownerToken, keys, card, cardReady, treasury };
 }

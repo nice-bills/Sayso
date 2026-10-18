@@ -88,6 +88,14 @@ With Metal live, the faucet grants each buyer key 100 USDZ once, so the demo pay
 
 What the live sandbox taught us, now handled in code: FX rates come back in market convention (`EURUSD 1.14` for selling USD), so they are inverted; a new beneficiary's id is `id`; LOCAL transfers carry a payer fee (EUR 2.68, GBP 2.26) that is priced in and recorded from the transfer itself, and kept by Airwallex on a bounce; Spanish and US payees need `address.state`, US ACH needs `bank_account_category`; a transfer can only be failed from `SENT`; the sandbox answers `NOT_MATCHED` to every payee name, so the name check is off there (`AWX_NAME_CHECK=on` forces it).
 
+## Host it (public URL)
+
+Claude.ai, ChatGPT, approval links on a phone and Airwallex webhooks need Sayso on a public HTTPS address. It's one long-running Node service, so it fits Render, Fly or Railway (not serverless).
+
+- **Render:** New > Blueprint > this repo. `render.yaml` builds the Dockerfile and asks for the secrets: your Airwallex keys and `AWX_GLOBAL_ACCOUNT_ID`, the Metal lines from `.env`, `METAL_BUNDLE` (the output of `npm run bundle:metal`, your `.metal` keys as one value), an `OWNER_TOKEN` you choose, and `PUBLIC_URL` (the `https://...onrender.com` address it gives you).
+- **Anywhere with Docker:** `docker build -t sayso . && docker run -p 4021:4021 --env-file .env -e METAL_BUNDLE="$(npm run -s bundle:metal)" sayso`.
+- Without Airwallex and Metal settings the container starts offline, which is handy for a first check. `GET /healthz` answers when it's up.
+
 ## Layout
 
 | Path | What it does |

@@ -1,0 +1,27 @@
+# One-click deploy on Render (render.com > New > Blueprint > this repo). Fill the secrets it asks for;
+# `npm run bundle:metal` prints METAL_BUNDLE from your local .metal/ folder.
+services:
+  - type: web
+    name: sayso
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    disk: { name: data, mountPath: /data, sizeGB: 1 }
+    envVars:
+      - { key: SAYSO_DB, value: /data/sayso.db }
+      - { key: PUBLIC_URL, sync: false }
+      - { key: OWNER_TOKEN, sync: false }
+      - { key: SESSION_SECRET, generateValue: true }
+      - { key: AWX_CLIENT_ID, sync: false }
+      - { key: AWX_API_KEY, sync: false }
+      - { key: AWX_GLOBAL_ACCOUNT_ID, sync: false }
+      - { key: AWX_WEBHOOK_SECRET, sync: false }
+      - { key: METAL_RPC_URL, sync: false }
+      - { key: METAL_PRINCIPAL, sync: false }
+      - { key: METAL_RAMP_ADDRESS, sync: false }
+      - { key: METAL_OWNER_KEY, value: .metal/owner.json }
+      - { key: METAL_MANDATE, value: .metal/mandate.json }
+      - { key: METAL_REFUND_MANDATE, value: .metal/refund.json }
+      - { key: METAL_BUNDLE, sync: false }
+      - { key: AGENTMAIL_WEBHOOK_SECRET, sync: false }
+      - { key: NTFY_TOPIC, sync: false }

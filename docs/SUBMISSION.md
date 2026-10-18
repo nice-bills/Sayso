@@ -39,19 +39,29 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 - **MCP, two ways.** A local server for agents with their own Metal wallet (`pay_invoice`, `pay_batch`, `pay_quote`, `quote_payout`, `payout_status`, `batch_status`). A hosted endpoint for any agent, with per-agent keys and caps (`forward_invoice`, `list_invoices`, `quote_payout`, `payout_status`). Approving is deliberately not a tool.
 - **Everywhere else:** a Claude Code plugin with a skill that teaches the approval flow, a skill for OpenClaw-style agents, AgentMail email intake (Svix-signed webhooks), and ntfy phone notifications that open the approval page.
 - **App:** a phone-friendly inbox, payments with live progress, an agents page, and a back office feed. Owner sign-in, strict CSP, invoice text always rendered as text.
-- **Quality:** TypeScript, SQLite, 70 unit and integration tests, 5 browser end-to-end tests, and a full offline mode with simulators that follow the same rules as the real services.
+- **Its own card and its own treasury.** Sayso pays its compute bills with its own Airwallex Issuing card (MCC and amount limits enforced by Airwallex; an unknown merchant freezes the card). It also runs its own bills through a treasury policy that decides hold, convert or pay, and an email that lowers the earnings forecast tightens what it may do without a person.
+- **Quality:** TypeScript, SQLite, 74 unit and integration tests, 5 browser end-to-end tests, and a full offline mode with simulators that follow the same rules as the real services.
+
+## Proven live
+
+`npm run demo` runs end to end against the Airwallex sandbox and Metal testnet: x402 payments from three buyer agents, a batch payout, real Airwallex transfers, a bounce through Airwallex's transfer simulation refunded on chain, earnings swept under the ramp-only mandate and credited exactly once, the heist refused on chain (`mandate_payee_not_listed`), and the books reconciled to the cent (48 checks).
+
+The live run found what offline tests couldn't: Airwallex quotes FX in market convention (EURUSD even when you sell USD, so rates had to be inverted or every EUR quote was 23% cheap), returns a new beneficiary as `id`, charges a fee on every LOCAL transfer and keeps it on a bounce, needs `address.state` for Spanish and US payees, and only fails a transfer from `SENT`. All of it is handled and tested.
 
 ## What's simulated, honestly
 
 - There is no sandbox bridge from Metal to Airwallex. The off-ramp is a Metal mandate sweep followed by Airwallex's deposit simulation, behind one interface. Every simulated proof starts with `sim:` in offline mode.
 - Bounces in the live sandbox use Airwallex's transfer simulation.
+- The Airwallex sandbox answers `NOT_MATCHED` to every payee name, so the bank name check is off on the sandbox (account existence is still checked). The "the bank says this account belongs to Mark Lehmann" moment comes from the offline simulator.
+- Our sandbox account refuses to issue cards ("Invalid issuance details"), so the agent card runs end to end offline and on the live sandbox once issuing is enabled for the account (or with `AWX_CARD_ID`).
+- On live Metal the faucet grants each buyer agent 100 USDZ once, so the live demo pays a tenth of each invoice.
 
 ## Tracks
 
 | Track | How Sayso covers it |
 | --- | --- |
-| 1 Adaptive Treasury | Converts only the shortfall, sweeps earnings into the float, reconciles to the cent. |
-| 2 Intent-Bound Purchase | Agents pay only at or below `max_usdz`; Metal won't sign above the agent's cap. |
+| 1 Adaptive Treasury | A policy plans hold / convert / pay across currencies and bills; an email that contradicts the forecast tightens autonomous limits and the plan changes. Converts only the shortfall, sweeps earnings, reconciles to the cent. Backtest over 44 months of ECB rates and 200 earnings paths: no missed bills and no reserve breaches; FX cost equal to converting each bill on its due date (USD 43.89 vs 43.86 per run), so the gain is safety, not FX. |
+| 2 Intent-Bound Purchase | Agents pay only at or below `max_usdz`; Metal won't sign above the agent's cap. The agent's own card is bound to compute merchants by category and amount. |
 | 3 Payment Ops Incident | Bounced payouts are refunded automatically, even when the bank returns one after `PAID`; ambiguous transfers are looked up before any retry. |
 | 8 Marketplace Settlement | Batch payouts: many sellers, one x402 payment, per-line refunds. |
 | 9 Approval-Bound | Agents propose; the owner approves each payment from a link bound to its amount and payee. |
@@ -66,9 +76,10 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 ## What's next
 
 - Real inbound email addresses per business, and approvals by push notification.
-- A Visa card path for merchants that only take cards.
+- A Visa card path for merchants that only take cards, building on the agent card.
+- An FX policy that earns its keep: hold euros earned in euros (the natural hedge) once Sayso has non-USD income, which the backtest shows is where a policy beats converting on the due date.
 
 ## Links
 
-- Repo: (add after the repo is created)
+- Repo: https://github.com/nice-bills/Sayso
 - Video: (add after recording)

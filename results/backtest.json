@@ -1,0 +1,72 @@
+{
+  "data": {
+    "source": "ECB reference rates via Frankfurter",
+    "from": "2022-12-30",
+    "to": "2026-10-16",
+    "days": 970
+  },
+  "seeds": 200,
+  "assumptions": {
+    "months": 44,
+    "dailyEarningsMeanMinor": 1500,
+    "dailyEarningsSigma": 0.6,
+    "outageProbability": 0.05,
+    "fxSpread": 0.005,
+    "bills": [
+      {
+        "id": "office-rent",
+        "currency": "EUR",
+        "amountMinor": 6000,
+        "day": 1,
+        "critical": true
+      },
+      {
+        "id": "contractor",
+        "currency": "EUR",
+        "amountMinor": 10000,
+        "day": 15,
+        "critical": false
+      },
+      {
+        "id": "designer",
+        "currency": "GBP",
+        "amountMinor": 7200,
+        "day": 20,
+        "critical": false
+      }
+    ],
+    "startingBalanceMinor": 40000
+  },
+  "policyConfig": {
+    "baseCurrency": "USD",
+    "reserveFloorMinor": 5000,
+    "horizonDays": 7,
+    "autonomousLimits": {
+      "high": 10000,
+      "medium": 5000,
+      "low": 3000
+    },
+    "swiftFeeMinor": {
+      "EUR": 1285
+    },
+    "localFeeMinor": {
+      "EUR": 268,
+      "GBP": 226
+    },
+    "rateBuffer": 0.01
+  },
+  "meanPerRun": {
+    "policy": {
+      "missedBills": 0,
+      "reserveBreaches": 0,
+      "spreadPaidMinor": 4389,
+      "conversions": 97
+    },
+    "baseline": {
+      "missedBills": 0,
+      "reserveBreaches": 0,
+      "spreadPaidMinor": 4386,
+      "conversions": 97
+    }
+  }
+}
