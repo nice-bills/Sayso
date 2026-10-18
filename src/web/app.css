@@ -37,8 +37,8 @@ code, .mono { font-family: var(--mono); font-size: 13px; }
 /* sign-in / landing */
 .landing { min-height: 100vh; display: grid; align-content: center; padding: 40px 0; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px; letter-spacing: -.01em; }
-.slot { width: 28px; height: 28px; border-radius: 50%; background: var(--coin); position: relative; flex: none; }
-.slot::after { content: ""; position: absolute; left: 7px; right: 7px; top: 12px; height: 4px; border-radius: 2px; background: var(--bg); }
+.mark { width: 28px; height: 28px; border-radius: 50% 50% 50% 6px; background: var(--coin); position: relative; flex: none; }
+.mark::after { content: ""; position: absolute; left: 10px; top: 6px; width: 6px; height: 11px; border: solid var(--bg); border-width: 0 3px 3px 0; transform: rotate(45deg); }
 .landing h1 { font-size: clamp(30px, 6vw, 48px); line-height: 1.08; letter-spacing: -.025em; margin: 28px 0 14px; max-width: 16ch; }
 .landing .lede { font-size: 18px; color: var(--muted); max-width: 54ch; margin: 0 0 28px; }
 .landing-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 20px; align-items: start; }

@@ -1,11 +1,11 @@
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import { buildCoinSlot } from "../src/app.js";
+import { buildSayso } from "../src/app.js";
 import { designerInvoice, studioInvoice } from "../samples/invoices.js";
 
-describe("Coin Slot service (offline)", () => {
+describe("Sayso service (offline)", () => {
   it("pays inbox invoices and an agent's payout, sweeps earnings, and reconciles to the cent", async () => {
-    const cs = await buildCoinSlot({ offline: true });
+    const cs = await buildSayso({ offline: true });
     const server = cs.app.listen(0);
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const post = (path: string, body?: unknown, headers: Record<string, string> = {}) =>
@@ -29,7 +29,7 @@ describe("Coin Slot service (offline)", () => {
   });
 
   it("keeps the inbox, approvals and back office behind the owner's sign-in", async () => {
-    const cs = await buildCoinSlot({ offline: true });
+    const cs = await buildSayso({ offline: true });
     const server = cs.app.listen(0);
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const json = { "content-type": "application/json" };

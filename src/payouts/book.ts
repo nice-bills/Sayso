@@ -1,4 +1,4 @@
-// The payout book: every quote and payout Coin Slot has made, in the same SQLite file as the
+// The payout book: every quote and payout Sayso has made, in the same SQLite file as the
 // rest of the agent's memory. State changes are compare-and-set, so a quote is paid at most once
 // even if two requests race for it.
 //

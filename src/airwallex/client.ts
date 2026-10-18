@@ -1,4 +1,4 @@
-// Typed Airwallex REST client for the calls Coin Slot makes. Paths and quirks follow the
+// Typed Airwallex REST client for the calls Sayso makes. Paths and quirks follow the
 // hackathon builder guide (airwallexdev.com/guide); check exact payload fields against the
 // docs MCP (https://mcp.sandbox.airwallex.com/docs) before relying on a new call.
 //

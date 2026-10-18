@@ -1,4 +1,4 @@
-// The app's main flows, against Coin Slot offline (simulated Airwallex and Metal, seeded with
+// The app's main flows, against Sayso offline (simulated Airwallex and Metal, seeded with
 // sample invoices and two agent payouts). Exact steps only, so no model is needed to run them.
 import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
@@ -7,7 +7,7 @@ type Screen = Parameters<Parameters<typeof test>[1]>[0]['screen'];
 
 async function signIn(app: { open(path: string): Promise<unknown> }, screen: Screen) {
   await app.open('/');
-  await screen.getByLabel('Owner token').fill('coinslot-demo');
+  await screen.getByLabel('Owner token').fill('sayso-demo');
   await screen.getByRole('button', 'Sign in').tap();
   await expect(screen.getByRole('heading', 'Inbox')).toBeVisible();
 }

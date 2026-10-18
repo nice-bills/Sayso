@@ -32,7 +32,7 @@ function cookies(req: Request): Record<string, string> {
 export function createAuth(opts: { offline: boolean; log: (line: string) => void }): Auth {
   let ownerToken = process.env.OWNER_TOKEN ?? "";
   if (!ownerToken) {
-    ownerToken = opts.offline ? "coinslot-demo" : randomBytes(18).toString("base64url");
+    ownerToken = opts.offline ? "sayso-demo" : randomBytes(18).toString("base64url");
     opts.log(`Owner token (set OWNER_TOKEN to choose your own): ${ownerToken}`);
   }
   const key = process.env.SESSION_SECRET ? Buffer.from(process.env.SESSION_SECRET) : randomBytes(32);

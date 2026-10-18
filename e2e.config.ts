@@ -6,7 +6,7 @@ export default {
     engine: web(),
     app: {
       url: process.env.APP_URL ?? 'http://localhost:4021',
-      // Without APP_URL, the runner starts Coin Slot offline (simulated Airwallex and Metal).
+      // Without APP_URL, the runner starts Sayso offline (simulated Airwallex and Metal).
       ...(process.env.APP_URL ? {} : { command: { executable: 'npm', args: ['run', 'serve:offline'] } }),
     },
   }],

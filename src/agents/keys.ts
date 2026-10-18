@@ -8,7 +8,7 @@ import type { Store } from "../store.js";
 export interface AgentKey {
   id: string;
   name: string;
-  /** The most this agent may ask Coin Slot to pay in one payout, in USD cents (null: no cap beyond the risk rules). */
+  /** The most this agent may ask Sayso to pay in one payout, in USD cents (null: no cap beyond the risk rules). */
   capMinor: number | null;
   createdAt: string;
   lastUsedAt: string | null;

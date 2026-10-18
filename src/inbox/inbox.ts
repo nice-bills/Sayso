@@ -1,5 +1,5 @@
 // The invoice inbox: forward an invoice, get one question back ("pay €480 to Kreuzberg Studio?"),
-// tap yes, and Coin Slot pays it from the business's Airwallex balance.
+// tap yes, and Sayso pays it from the business's Airwallex balance.
 //
 // Nothing pays without the tap. An invoice that asks for new bank details or pushes urgency is
 // held, and clearing it takes an explicit "I confirmed these details with the payee" on top.
@@ -93,7 +93,7 @@ export class Inbox {
       awaiting_approval: `Invoice in: pay ${what}? One tap to approve.`,
       needs_verification: `Invoice in: ${what}, but it looks risky. Confirm the bank details with the payee before approving.`,
       needs_details: `Invoice in from ${e.from}, but I couldn't find: ${missing.join(", ")}`,
-      rejected: `Invoice in: ${what}. Coin Slot won't pay this one.`,
+      rejected: `Invoice in: ${what}. Sayso won't pay this one.`,
       duplicate: `Invoice in: ${what} looks like one you already have; not queued again.`,
       paying: "", ignored: "",
     };

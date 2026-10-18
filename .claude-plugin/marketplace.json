@@ -1,13 +1,13 @@
 {
-  "name": "coinslot",
-  "description": "Coin Slot: pay real-world invoices from any agent, approved by a person.",
+  "name": "sayso",
+  "description": "Sayso: pay real-world invoices from any agent, approved by a person.",
   "owner": {
-    "name": "Coin Slot"
+    "name": "Sayso"
   },
   "plugins": [
     {
-      "name": "coinslot",
-      "source": "./plugins/coinslot",
+      "name": "sayso",
+      "source": "./plugins/sayso",
       "description": "Pay real-world invoices through Airwallex from any Claude agent, with one-tap human approval."
     }
   ]

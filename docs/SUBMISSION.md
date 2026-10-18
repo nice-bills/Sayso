@@ -1,4 +1,4 @@
-# Coin Slot: submission write-up
+# Sayso: submission write-up
 
 **Tagline:** Any AI agent can pay any real-world invoice. Any business can too, with one tap.
 
@@ -6,17 +6,17 @@
 
 ## What it does
 
-Coin Slot is a payout rail between agent money and the real economy.
+Sayso is a payout rail between agent money and the real economy.
 
-- **For agents.** An agent holding USDZ on Metal asks Coin Slot, over MCP or plain HTTP, to pay "€180 to this IBAN". Coin Slot quotes for free, the agent pays the quote over **x402 on Metal**, and Coin Slot delivers the money in local currency through **Airwallex**. If the bank bounces it, the agent gets every cent back.
-- **For businesses.** Forward an invoice email. Coin Slot reads it, checks the payee with Airwallex, and asks one question: "Pay €280 to Kreuzberg Studio?" One tap pays it. An invoice that changes bank details or pushes urgency is held until a person confirms the details with the payee directly.
+- **For agents.** An agent holding USDZ on Metal asks Sayso, over MCP or plain HTTP, to pay "€180 to this IBAN". Sayso quotes for free, the agent pays the quote over **x402 on Metal**, and Sayso delivers the money in local currency through **Airwallex**. If the bank bounces it, the agent gets every cent back.
+- **For businesses.** Forward an invoice email. Sayso reads it, checks the payee with Airwallex, and asks one question: "Pay €280 to Kreuzberg Studio?" One tap pays it. An invoice that changes bank details or pushes urgency is held until a person confirms the details with the payee directly.
 
 - **For marketplaces.** One agent call pays up to 100 sellers or contractors with a single x402 payment. Each line is checked on its own, and a bounced line is refunded on its own.
 - **From anywhere.** Any agent connects by URL with its own key: Claude Code (plugin included), claude.ai, ChatGPT, Cursor, OpenClaw, or the assistant someone texts from iMessage. Text it a photo of an invoice and get back "Pay €280 to Kreuzberg Studio? [tap]". Agents can propose payments but never approve them. Invoices can also be emailed to an AgentMail address.
 
 ## Why it matters
 
-Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a print shop in London. Businesses lose real money to invoice fraud ("our bank details have changed"). Coin Slot answers both with the same idea: **a prompt is not a financial control.** The model reads emails. Code and on-chain mandates decide what moves.
+Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a print shop in London. Businesses lose real money to invoice fraud ("our bank details have changed"). Sayso answers both with the same idea: **a prompt is not a financial control.** The model reads emails. Code and on-chain mandates decide what moves.
 
 ## How the money is kept safe
 
@@ -48,14 +48,14 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 
 ## Tracks
 
-| Track | How Coin Slot covers it |
+| Track | How Sayso covers it |
 | --- | --- |
 | 1 Adaptive Treasury | Converts only the shortfall, sweeps earnings into the float, reconciles to the cent. |
 | 2 Intent-Bound Purchase | Agents pay only at or below `max_usdz`; Metal won't sign above the agent's cap. |
 | 3 Payment Ops Incident | Bounced payouts are refunded automatically, even when the bank returns one after `PAID`; ambiguous transfers are looked up before any retry. |
 | 8 Marketplace Settlement | Batch payouts: many sellers, one x402 payment, per-line refunds. |
 | 9 Approval-Bound | Agents propose; the owner approves each payment from a link bound to its amount and payee. |
-| 10 Agentic Checkout | Coin Slot's own checkout is x402: the 402 response is the price, and the agent pays it. |
+| 10 Agentic Checkout | Sayso's own checkout is x402: the 402 response is the price, and the agent pays it. |
 
 ## Challenges
 

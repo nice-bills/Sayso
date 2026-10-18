@@ -43,7 +43,7 @@ export function cardPayload(requestId: string, cardholderId: string, p: CardPoli
   return {
     request_id: requestId,
     cardholder_id: cardholderId,
-    created_by: "coinslot-agent",
+    created_by: "sayso-agent",
     form_factor: "VIRTUAL",
     is_personalized: false,
     program: { purpose: "COMMERCIAL" }, // VERIFY

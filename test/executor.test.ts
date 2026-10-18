@@ -35,7 +35,7 @@ function fakeAwx(script: Array<"ok" | "timeout_but_created" | "timeout" | "rejec
 function deps(awx: AirwallexPort, over: Partial<ExecutorDeps> = {}): ExecutorDeps {
   return {
     awx, store: new Store(":memory:"), gate: new ApprovalGate(), approvals: new Map(),
-    evidenceHash: () => "ev1", reference: (id) => `coinslot ${id}`, baseCurrency: "USD", ...over,
+    evidenceHash: () => "ev1", reference: (id) => `sayso ${id}`, baseCurrency: "USD", ...over,
   };
 }
 

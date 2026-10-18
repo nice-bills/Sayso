@@ -1,4 +1,4 @@
-// Coin Slot, the app. No framework and no build step: a small element builder (text is always set
+// Sayso, the app. No framework and no build step: a small element builder (text is always set
 // as text, never as HTML, because invoice emails are written by strangers), state in one object,
 // and a full re-render after each change. Live updates come from the server's event stream.
 
@@ -97,7 +97,7 @@ function render() {
 }
 document.addEventListener("focusout", () => setTimeout(() => { if (dirty) render(); }, 0));
 
-function brand() { return h("div", { class: "brand" }, h("span", { class: "slot", "aria-hidden": "true" }), "Coin Slot"); }
+function brand() { return h("div", { class: "brand" }, h("span", { class: "mark", "aria-hidden": "true" }), "Sayso"); }
 
 function landing() {
   let token = "";
@@ -110,10 +110,10 @@ function landing() {
   return h("div", { class: "landing wrap" },
     brand(),
     h("h1", {}, "Pay any invoice, from an AI agent or with one tap."),
-    h("p", { class: "lede" }, "Agents pay in USDZ on Metal and Coin Slot delivers local currency through Airwallex. People forward an invoice and tap once. The rules that keep money safe are code, not a prompt."),
+    h("p", { class: "lede" }, "Agents pay in USDZ on Metal and Sayso delivers local currency through Airwallex. People forward an invoice and tap once. The rules that keep money safe are code, not a prompt."),
     h("div", { class: "landing-grid" },
       h("ul", { class: "points" },
-        point(1, "Forward an invoice", "Coin Slot reads it, checks the payee with Airwallex, and asks you one question."),
+        point(1, "Forward an invoice", "Sayso reads it, checks the payee with Airwallex, and asks you one question."),
         point(2, "Tap to pay", "Invoices that change bank details or push urgency wait until you've confirmed with the payee yourself."),
         point(3, "Or let your agent pay", "Any MCP agent can pay a real-world invoice over x402. If the bank bounces it, the agent is refunded in full."),
       ),
@@ -122,7 +122,7 @@ function landing() {
         h("input", { id: "token", class: "field", type: "password", autocomplete: "current-password", placeholder: "Paste your owner token", oninput: (e) => { token = e.target.value; } }),
         h("button", { class: "btn pay", type: "submit" }, "Sign in"),
         err,
-        h("p", { class: "small muted" }, "The token is in your server's log, or set OWNER_TOKEN. Running offline? It's ", h("code", {}, "coinslot-demo"), "."),
+        h("p", { class: "small muted" }, "The token is in your server's log, or set OWNER_TOKEN. Running offline? It's ", h("code", {}, "sayso-demo"), "."),
       ),
     ),
   );
@@ -171,7 +171,7 @@ function inboxView() {
   const done = state.inbox.filter((i) => !ACTIVE.includes(i.status));
   return h("div", {},
     h("div", { class: "head" },
-      h("div", {}, h("h2", {}, "Inbox"), h("div", { class: "muted small" }, "Invoices forwarded to Coin Slot. Nothing is paid until you tap.")),
+      h("div", {}, h("h2", {}, "Inbox"), h("div", { class: "muted small" }, "Invoices forwarded to Sayso. Nothing is paid until you tap.")),
       h("button", { class: "btn", onclick: () => { state.showAdd = !state.showAdd; render(); } }, state.showAdd ? "Close" : "Add invoice"),
     ),
     state.showAdd ? addSheet() : null,
@@ -237,7 +237,7 @@ function invoiceCard(item) {
     item.status === "needs_verification" ? verifyBlock(item) : null,
     item.status === "needs_details" ? detailsBlock(item) : null,
     item.status === "paying" && p ? [timeline(p, true), failure(p)] : null,
-    item.status === "rejected" && p?.reasons?.length ? h("div", { class: "alert" }, h("b", {}, "Coin Slot won't pay this: "), p.reasons.join("; ")) : null,
+    item.status === "rejected" && p?.reasons?.length ? h("div", { class: "alert" }, h("b", {}, "Sayso won't pay this: "), p.reasons.join("; ")) : null,
     item.status === "duplicate" ? h("div", { class: "sub" }, "This matches an invoice already in your inbox, so it wasn't queued again.") : null,
   );
 }
@@ -418,10 +418,10 @@ function agentsView() {
   const earned = agentPays.filter((p) => p.status !== "refunded").reduce((s, p) => s + Number(p.fee_usdz), 0);
   const swept = (state.summary?.sweeps ?? []).filter((s) => s.status === "credited").reduce((s, x) => s + x.amountMinor, 0) / 100;
   const origin = location.origin;
-  const mcp = `claude mcp add coinslot \\\n  -e COINSLOT_URL=${origin} \\\n  -e COINSLOT_BUYER_KEY=0x… \\\n  -e COINSLOT_MAX_USDZ=500 \\\n  -- npx tsx src/mcp/server.ts`;
+  const mcp = `claude mcp add sayso \\\n  -e SAYSO_URL=${origin} \\\n  -e SAYSO_BUYER_KEY=0x… \\\n  -e SAYSO_MAX_USDZ=500 \\\n  -- npx tsx src/mcp/server.ts`;
   const curl = `curl -X POST ${origin}/v1/quotes \\\n  -H 'content-type: application/json' \\\n  -d '{"amount":"180.00","currency":"EUR","reference":"Oct",\n       "payee":{"name":"Lingua Freelance","bank":{"iban":"FR14…"},\n       "bank_country_code":"FR","address":{"country_code":"FR","city":"Paris"}}}'`;
   return h("div", {},
-    h("div", { class: "head" }, h("div", {}, h("h2", {}, "Agents"), h("div", { class: "muted small" }, "Any AI agent with USDZ on Metal can pay a real-world invoice through Coin Slot."))),
+    h("div", { class: "head" }, h("div", {}, h("h2", {}, "Agents"), h("div", { class: "muted small" }, "Any AI agent with USDZ on Metal can pay a real-world invoice through Sayso."))),
     h("div", { class: "stats" },
       stat(agentPays.length, "agent payouts", byCcy(agentPays.filter((p) => p.status === "paid")) || ""),
       stat(usdz(received), "received over x402", `${usdz(earned)} in fees`),
@@ -430,7 +430,7 @@ function agentsView() {
     h("div", { class: "card", style: "margin-bottom:12px" },
       h("b", {}, "How an agent pays"),
       h("ul", { class: "points", style: "margin-top:12px" },
-        point(1, "Quote, for free", "Coin Slot prices the payout, checks the payee with Airwallex, and runs the risk rules."),
+        point(1, "Quote, for free", "Sayso prices the payout, checks the payee with Airwallex, and runs the risk rules."),
         point(2, "Pay over x402", "The 402 response names the exact price. Metal won't sign above the agent's own cap."),
         point(3, "Airwallex delivers", "Fiat moves only after the payment settles on Metal. If the bank bounces it, the agent gets everything back."),
       ),
@@ -465,10 +465,10 @@ function connectAgents(origin) {
     nk ? h("div", { class: "sheet" },
       h("div", { class: "alert", style: "background:var(--go-bg)" }, h("b", { style: "color:var(--go)" }, `Key for ${nk.agent.name}. `), "Copy it now; it won't be shown again."),
       h("pre", {}, nk.key),
-      h("div", { class: "small muted" }, "Add Coin Slot to the agent by URL:"),
+      h("div", { class: "small muted" }, "Add Sayso to the agent by URL:"),
       h("pre", {}, `${origin}/mcp\nAuthorization: Bearer ${nk.key}`),
       h("div", { class: "small muted" }, "Claude Code:"),
-      h("pre", {}, `claude mcp add --transport http coinslot ${origin}/mcp \\\n  --header "Authorization: Bearer ${nk.key}"`),
+      h("pre", {}, `claude mcp add --transport http sayso ${origin}/mcp \\\n  --header "Authorization: Bearer ${nk.key}"`),
       h("div", { class: "actions" },
         h("button", { class: "btn", onclick: async () => { try { await navigator.clipboard.writeText(nk.key); toast("Copied."); } catch { toast("Couldn't copy here."); } } }, "Copy key"),
         h("button", { class: "btn quiet", onclick: () => { state.newKey = null; render(); } }, "Done"),

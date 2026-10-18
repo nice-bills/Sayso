@@ -2,11 +2,11 @@ import type { AddressInfo } from "node:net";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { describe, expect, it } from "vitest";
-import { buildCoinSlot } from "../src/app.js";
+import { buildSayso } from "../src/app.js";
 import { fakeLandlord, studioInvoice } from "../samples/invoices.js";
 
 async function setup() {
-  const cs = await buildCoinSlot({ offline: true });
+  const cs = await buildSayso({ offline: true });
   const server = cs.app.listen(0);
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const connect = async (key: string) => {

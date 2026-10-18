@@ -22,7 +22,7 @@ const mandate = new MetalMandate({ ...base.cfg, rampAddress: address("ramp") });
 const { principal, gasKeyAddress } = await mandate.setup({ capCents: toMinor(5000), budgetCents: toMinor(50000) });
 // Refunds go back to whichever agent paid, so this one has no payee list: Metal caps each refund and the total.
 const refunds = new MetalMandate({ ...mandate.cfg, credential: ".metal/refund.json" });
-const refund = await refunds.setup({ capCents: toMinor(2500), budgetCents: toMinor(10000), anyPayee: true, description: "Coin Slot refunds to buyer agents" });
+const refund = await refunds.setup({ capCents: toMinor(2500), budgetCents: toMinor(10000), anyPayee: true, description: "Sayso refunds to buyer agents" });
 
 for (const a of [gasKeyAddress, refund.gasKeyAddress, ...["buyer1", "buyer2", "buyer3"].map(address)]) {
   if (a) await mandate.cli(["fund", a]).then(() => console.log(`funded ${a}`)).catch((e) => console.error(`fund ${a}: ${String(e).slice(0, 200)}`));

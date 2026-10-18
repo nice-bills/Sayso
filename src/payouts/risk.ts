@@ -1,4 +1,4 @@
-// Whether Coin Slot will pay a request, decided in code before any money moves. Pure.
+// Whether Sayso will pay a request, decided in code before any money moves. Pure.
 // "hold" means a person (the operator) must look first; "reject" means never.
 // The invoice reader's findings can only tighten this: a request whose invoice asks to pay
 // new bank details, or pushes urgency, is held, whatever the buying agent says.
@@ -8,7 +8,7 @@ import type { Findings } from "../agent/reader.js";
 export interface RiskConfig {
   perPayoutCapMinor: number;
   perBuyerDailyCapMinor: number;
-  /** A first payout to an account Coin Slot has never paid, above this, is held. */
+  /** A first payout to an account Sayso has never paid, above this, is held. */
   newPayeeReviewAboveMinor: number;
   maxPayoutsPerBuyerPerHour: number;
   blockedCountries: string[];

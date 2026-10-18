@@ -1,4 +1,4 @@
-// Backtest: Coin Slot's policy against the naive baseline over many simulated months.
+// Backtest: Sayso's policy against the naive baseline over many simulated months.
 // Baseline = what a single-currency settlement does: hold USD only, and when a foreign bill is
 // due, convert exactly that bill at that day's rate (no natural hedge, no timing).
 // Inputs that are assumptions, not data, are named in `BacktestConfig` and must be reported

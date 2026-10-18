@@ -4,14 +4,14 @@ The arc judges asked for: goal, plan, new information, revised decision, resulti
 
 **Before recording**
 - Live: `.env` filled, `npm run setup:metal` and `npm run setup:airwallex` done, `npm run serve` running, the app open and signed in, and the Airwallex sandbox dashboard in a second tab.
-- Offline rehearsal: `npm run serve:offline`, sign in with `coinslot-demo`.
-- Terminal: one Claude Code window with the Coin Slot MCP server added (README, "Use it from an agent").
+- Offline rehearsal: `npm run serve:offline`, sign in with `sayso-demo`.
+- Terminal: one Claude Code window with the Sayso MCP server added (README, "Use it from an agent").
 
 ---
 
 ## 0:00 The problem (20s)
 
-> Agents can hold money now. Stablecoins on Metal, paid per call over x402. But the world's invoices are in euros and pounds, sent to IBANs. Coin Slot lets any agent pay any real-world invoice, and lets a business do the same thing with one tap.
+> Agents can hold money now. Stablecoins on Metal, paid per call over x402. But the world's invoices are in euros and pounds, sent to IBANs. Sayso lets any agent pay any real-world invoice, and lets a business do the same thing with one tap.
 
 Show: the landing page.
 
@@ -20,9 +20,9 @@ Show: the landing page.
 In Claude Code: *"Pay Lingua Freelance €180 for the October translation. IBAN FR14 2004 1010 0505 0001 3M02 606. Don't spend more than 200 USDZ."*
 
 Narrate as it happens:
-- The agent calls `pay_invoice`. Coin Slot quotes for free: Airwallex validates the payee, the risk rules run, the price comes back in USDZ.
+- The agent calls `pay_invoice`. Sayso quotes for free: Airwallex validates the payee, the risk rules run, the price comes back in USDZ.
 - The agent pays over **x402 on Metal**. Metal itself refuses to sign above the agent's cap.
-- Only after the payment **settles on chain** does Coin Slot touch fiat. It converts just the shortfall and sends EUR through **Airwallex**, with the payout id as the `request_id`, so it can never pay twice.
+- Only after the payment **settles on chain** does Sayso touch fiat. It converts just the shortfall and sends EUR through **Airwallex**, with the payout id as the `request_id`, so it can never pay twice.
 
 Show: the Agents tab and the payout's timeline going Paid in USDZ, then Sent by Airwallex, then Delivered. Open Details: Metal explorer link, Airwallex transfer id. Switch to the Airwallex dashboard to show the same transfer.
 
@@ -34,7 +34,7 @@ Show: four Delivered rows in Payments, all pointing at the same Metal payment.
 
 ## 1:45 Text your agent (25s)
 
-On a phone: text your assistant a photo of the Kreuzberg Studio invoice, "pay this". It replies "Pay €280 to Kreuzberg Studio? Tap to approve" with a link, and a Coin Slot notification arrives at the same moment.
+On a phone: text your assistant a photo of the Kreuzberg Studio invoice, "pay this". It replies "Pay €280 to Kreuzberg Studio? Tap to approve" with a link, and a Sayso notification arrives at the same moment.
 
 > The agent can propose a payment, but it can't approve one. Only you can, with one tap.
 
@@ -62,7 +62,7 @@ Have the agent pay an account that bounces (live: the Airwallex transfer simulat
 
 Show: the timeline turns to Bounced, then Refunded in full. Details shows the refund tx on Metal.
 
-> The refund goes out under a second Metal mandate. Metal caps each refund and the lifetime total, so even Coin Slot can't drain itself through refunds.
+> The refund goes out under a second Metal mandate. Metal caps each refund and the lifetime total, so even Sayso can't drain itself through refunds.
 
 ## 4:00 The heist on chain (20s)
 
@@ -78,4 +78,4 @@ Show: Payments, "Books reconcile to the cent." Then the back office reconciliati
 
 ## 4:45 Close (10s)
 
-> Coin Slot: agents and people pay real invoices, and the rails, not the prompt, decide what's allowed. MCP server and API are in the repo.
+> Sayso: agents and people pay real invoices, and the rails, not the prompt, decide what's allowed. MCP server and API are in the repo.

@@ -21,7 +21,7 @@ export interface Sweep {
 export class RampLedger {
   private readonly db: DatabaseSync;
 
-  constructor(path = "coinslot.db") {
+  constructor(path = "sayso.db") {
     this.db = new DatabaseSync(path);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sweeps (

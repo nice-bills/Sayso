@@ -1,4 +1,4 @@
-// Coin Slot as one service: the x402 payout API, the invoice inbox, Airwallex webhooks, the
+// Sayso as one service: the x402 payout API, the invoice inbox, Airwallex webhooks, the
 // back office, and the background loop that keeps the float funded and payouts moving.
 // `offline: true` swaps Airwallex and Metal for the simulators; everything else is the same code.
 
@@ -49,7 +49,7 @@ class BookEarnings implements EarningsSource {
   }
 }
 
-export interface CoinSlot {
+export interface Sayso {
   offline: boolean;
   app: express.Express;
   svc: PayoutService;
@@ -66,8 +66,8 @@ export interface CoinSlot {
 }
 
 /** `simMetal` runs the real Airwallex sandbox with Metal simulated, for when no Metal testnet endpoint is set up yet. */
-export async function buildCoinSlot(opts: { offline: boolean; simMetal?: boolean; dbPath?: string }): Promise<CoinSlot> {
-  const dbPath = opts.dbPath ?? (opts.offline ? ":memory:" : process.env.COINSLOT_DB ?? "coinslot.db");
+export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; dbPath?: string }): Promise<Sayso> {
+  const dbPath = opts.dbPath ?? (opts.offline ? ":memory:" : process.env.SAYSO_DB ?? "sayso.db");
   const store = new Store(dbPath);
   const ledger = new RampLedger(dbPath);
 

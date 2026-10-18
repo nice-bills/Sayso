@@ -1,6 +1,6 @@
-# Coin Slot
+# Sayso
 
-**Any AI agent can pay any real-world invoice.** An agent holding USDZ on **Metal** asks Coin Slot to pay "€480 to this IBAN", pays the quoted price over x402, and Coin Slot delivers the money in local currency through **Airwallex**. Businesses get the same thing without writing code: forward an invoice to Coin Slot's inbox, tap once, and it's paid.
+**Any AI agent can pay any real-world invoice.** An agent holding USDZ on **Metal** asks Sayso to pay "€480 to this IBAN", pays the quoted price over x402, and Sayso delivers the money in local currency through **Airwallex**. Businesses get the same thing without writing code: forward an invoice to Sayso's inbox, tap once, and it's paid.
 
 The rails decide what is allowed, not the prompt:
 - **Fiat moves only after the agent's payment settles on Metal.** An unsettled or failed payment releases the quote, and nothing is paid.
@@ -20,7 +20,7 @@ Built for the Airwallex Agentic Banking Hackathon (2026). Demo script: [docs/DEM
 ```
 npm install
 npm run demo:offline     # agents pay over MCP, a batch payout, the inbox, a refund, the heist, reconciliation
-npm run serve:offline    # or open the app on :4021 and sign in with coinslot-demo
+npm run serve:offline    # or open the app on :4021 and sign in with sayso-demo
 npm run test:e2e         # the app's flows in a real browser
 ```
 
@@ -33,7 +33,7 @@ Any agent can connect: Claude Code (also as a plugin), claude.ai, ChatGPT, Curso
 For an agent with its own Metal wallet, run the local server:
 
 ```
-claude mcp add coinslot -e COINSLOT_URL=http://127.0.0.1:4021 -e COINSLOT_BUYER_KEY=0x... -- npx tsx src/mcp/server.ts
+claude mcp add sayso -e SAYSO_URL=http://127.0.0.1:4021 -e SAYSO_BUYER_KEY=0x... -- npx tsx src/mcp/server.ts
 ```
 
 | Tool | What it does |
@@ -44,7 +44,7 @@ claude mcp add coinslot -e COINSLOT_URL=http://127.0.0.1:4021 -e COINSLOT_BUYER_
 | `pay_quote` | Pays an existing quote by id. |
 | `payout_status` | Reports where a payout is. |
 
-Metal itself refuses to sign above `COINSLOT_MAX_USDZ`.
+Metal itself refuses to sign above `SAYSO_MAX_USDZ`.
 
 ## API
 
@@ -100,7 +100,7 @@ What the live sandbox taught us, now handled in code: FX rates come back in mark
 | `src/web/` | The app (no build step). `tests/app.e2e.ts` drives it in a browser. |
 | `src/auth.ts`, `src/agents/` | The owner's sign-in, and agent keys. |
 | `src/mcp/hosted.ts` | The hosted MCP endpoint and its REST twin. |
-| `plugins/coinslot/`, `integrations/` | The Claude Code plugin and the skill for OpenClaw-style agents. |
+| `plugins/sayso/`, `integrations/` | The Claude Code plugin and the skill for OpenClaw-style agents. |
 | `src/app.ts`, `src/serve.ts`, `src/demo.ts` | The service in one process, and the demo that drives it through MCP and the inbox. |
 | `src/treasury/`, `src/agent/` | The treasury policy, bound approvals, the email reader and the executor. |
 | `src/sim/offline.ts` | The offline simulators. |

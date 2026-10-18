@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "coinslot": {
+    "sayso": {
       "type": "http",
-      "url": "${user_config.coinslot_url}/mcp",
+      "url": "${user_config.sayso_url}/mcp",
       "headers": { "Authorization": "Bearer ${user_config.agent_key}" }
     }
   }

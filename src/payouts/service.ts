@@ -1,5 +1,5 @@
-// Coin Slot's product: any agent holding USDZ asks Coin Slot to pay a real-world invoice, and
-// Coin Slot pays it in local currency through Airwallex.
+// Sayso's product: any agent holding USDZ asks Sayso to pay a real-world invoice, and
+// Sayso pays it in local currency through Airwallex.
 //
 // The order of operations is the safety argument:
 //   1. quote   — price it, read the invoice, run risk, have Airwallex validate the payee. Free.
@@ -41,7 +41,7 @@ export const PayoutRequest = z.object({
     bank_country_code: z.string().length(2),
   }),
   reference: z.string().min(1).max(35),
-  /** The invoice or email that asked for this payment. Read before paying; it can only make Coin Slot more careful. */
+  /** The invoice or email that asked for this payment. Read before paying; it can only make Sayso more careful. */
   invoice_text: z.string().max(20_000).optional(),
   /** The buyer's Metal address, if it wants limits checked at quote time. The settled payer is what counts. */
   buyer: z.string().optional(),
@@ -194,7 +194,7 @@ export class PayoutService {
    */
   async payInternally(id: string, approver: string, now = new Date()): Promise<Payout> {
     this.accept(id, now);
-    emit("decide", `${approver} approved paying ${id.slice(0, 8)} from Coin Slot's own balance`);
+    emit("decide", `${approver} approved paying ${id.slice(0, 8)} from Sayso's own balance`);
     return this.onFunded(id, `internal:${approver}`, `internal:${id}`, now);
   }
 

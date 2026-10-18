@@ -1,6 +1,6 @@
 // Batch payouts: one agent call pays many people at once, e.g. a marketplace settling its sellers or
 // an agent platform paying its contractors. Each line is quoted and checked like a single payout;
-// the lines Coin Slot will pay are bundled under one price, paid with one x402 payment, and then
+// the lines Sayso will pay are bundled under one price, paid with one x402 payment, and then
 // run as ordinary payouts. A line that bounces is refunded on its own; the rest still go out.
 
 import { randomUUID } from "node:crypto";

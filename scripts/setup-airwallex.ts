@@ -14,7 +14,7 @@ env.push(`AWX_GLOBAL_ACCOUNT_ID=${ga.id}`);
 
 // Re-runs keep what .env already has: no second opening deposit, no duplicate beneficiaries.
 if (!process.env.AWX_GLOBAL_ACCOUNT_ID) {
-  await awx.simulateDeposit(ga.id, 400, "Coin Slot opening balance");
+  await awx.simulateDeposit(ga.id, 400, "Sayso opening balance");
   console.log("deposited USD 400.00 opening balance (sandbox simulation)");
 }
 

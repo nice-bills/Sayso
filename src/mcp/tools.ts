@@ -15,7 +15,7 @@ export const invoiceShape = {
   bank_country: z.string().describe("Two-letter country of the bank"),
   bank: z.record(z.string(), z.string()).describe("Bank details as Airwallex bank_details fields, e.g. {\"iban\": \"DE89...\"} or {\"account_number\": \"...\", \"account_routing_type1\": \"sort_code\", \"account_routing_value1\": \"...\"}; US ACH also needs bank_account_category (Checking or Savings)"),
   reference: z.string().describe("Payment reference shown to the payee, max 35 characters"),
-  invoice_text: z.string().optional().describe("The invoice or email text that asked for this payment. Coin Slot reads it and holds anything suspicious."),
+  invoice_text: z.string().optional().describe("The invoice or email text that asked for this payment. Sayso reads it and holds anything suspicious."),
 };
 
 export type Invoice = { [K in keyof typeof invoiceShape]: z.infer<(typeof invoiceShape)[K]> };

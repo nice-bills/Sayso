@@ -22,7 +22,7 @@ export interface Operation {
 export class Store {
   readonly db: DatabaseSync;
 
-  constructor(path = process.env.COINSLOT_DB ?? "coinslot.db") {
+  constructor(path = process.env.SAYSO_DB ?? "sayso.db") {
     this.db = new DatabaseSync(path);
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS operations (

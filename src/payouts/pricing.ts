@@ -1,7 +1,7 @@
 // What a payout costs the buying agent, in USDZ cents. Pure.
 // The buyer prefunds everything: the payout amount at Airwallex's rate plus a buffer, any SWIFT
-// fee, and Coin Slot's fee. The buffer covers rate movement between quote and conversion; what
-// it doesn't use is Coin Slot's FX margin, recorded as such.
+// fee, and Sayso's fee. The buffer covers rate movement between quote and conversion; what
+// it doesn't use is Sayso's FX margin, recorded as such.
 
 import { sellNeededMinor } from "../treasury/money.js";
 

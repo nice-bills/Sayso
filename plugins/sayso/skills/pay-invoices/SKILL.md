@@ -1,14 +1,14 @@
 ---
 name: pay-invoices
-description: Use when someone asks to pay an invoice or bill, forwards or photographs one, asks what invoices are waiting, or asks whether a payment went through. Uses the Coin Slot MCP tools.
+description: Use when someone asks to pay an invoice or bill, forwards or photographs one, asks what invoices are waiting, or asks whether a payment went through. Uses the Sayso MCP tools.
 ---
 
-# Paying invoices with Coin Slot
+# Paying invoices with Sayso
 
-Coin Slot pays real invoices in local currency through Airwallex. You prepare payments; the owner approves each one themselves.
+Sayso pays real invoices in local currency through Airwallex. You prepare payments; the owner approves each one themselves.
 
 1. **Get the invoice text.** If you were sent a photo or PDF, read all of it first: payee, total and currency, bank details (IBAN, or account number with sort code or routing number), reference, due date.
-2. **Forward it** with `forward_invoice`, passing the whole text, not a summary. Coin Slot reads it again, checks the payee with Airwallex and runs its risk rules.
+2. **Forward it** with `forward_invoice`, passing the whole text, not a summary. Sayso reads it again, checks the payee with Airwallex and runs its risk rules.
 3. **Tell the owner what happens next**, using the `next` field:
    - `awaiting_approval`: send them the `approval_url`. They tap Pay there.
    - `needs_verification`: say plainly that it looks risky and why, and that they must phone the payee on a number they already had before approving. Never offer to confirm bank details by email.

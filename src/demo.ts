@@ -1,6 +1,6 @@
-// The demo, driven the way real users drive Coin Slot: AI agents through the MCP tools, a business
+// The demo, driven the way real users drive Sayso: AI agents through the MCP tools, a business
 // through its invoice inbox. Runs against the live sandboxes, or fully offline with --offline.
-//   1. Three agents pay real-world invoices through Coin Slot's MCP tool (x402 on Metal -> Airwallex).
+//   1. Three agents pay real-world invoices through Sayso's MCP tool (x402 on Metal -> Airwallex).
 //   2. A marketplace agent pays four sellers with one x402 payment (batch payouts).
 //   3. A business forwards invoices; one tap pays them. A fake "landlord" asking for new bank details is held.
 //   4. A payout bounces (closed account): the agent is refunded in full under a Metal refund mandate.
@@ -12,7 +12,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { AddressInfo } from "node:net";
 import type { Airwallex } from "./airwallex/client.js";
-import { buildCoinSlot } from "./app.js";
+import { buildSayso } from "./app.js";
 import { emit } from "./events.js";
 import { designerInvoice, fakeLandlord, studioInvoice, vagueEmail } from "../samples/invoices.js";
 
@@ -24,16 +24,16 @@ const exit = process.argv.includes("--exit");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const beat = async (n: number, title: string) => { emit("observe", `Beat ${n}: ${title}`); await sleep(offline ? 500 : 0); };
 
-const cs = await buildCoinSlot({ offline, simMetal });
+const cs = await buildSayso({ offline, simMetal });
 const server = cs.app.listen(Number(process.env.PORT ?? 4021));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-emit("observe", `Coin Slot on ${base}; open it and sign in with ${cs.offline ? cs.ownerToken : "your owner token"}`);
+emit("observe", `Sayso on ${base}; open it and sign in with ${cs.offline ? cs.ownerToken : "your owner token"}`);
 const settle = async (n = 3) => { for (let i = 0; i < n; i++) await cs.tick(); };
 
-/** One buying agent: its own MCP connection to Coin Slot, paying with its own Metal identity. */
+/** One buying agent: its own MCP connection to Sayso, paying with its own Metal identity. */
 async function agent(name: string, payerOrKey: string) {
-  const env: Record<string, string> = { ...(process.env as Record<string, string>), COINSLOT_URL: base, COINSLOT_MAX_USDZ: "500" };
-  if (simPayers) env.COINSLOT_SIM_PAYER = payerOrKey; else env.COINSLOT_BUYER_KEY = payerOrKey;
+  const env: Record<string, string> = { ...(process.env as Record<string, string>), SAYSO_URL: base, SAYSO_MAX_USDZ: "500" };
+  if (simPayers) env.SAYSO_SIM_PAYER = payerOrKey; else env.SAYSO_BUYER_KEY = payerOrKey;
   const client = new Client({ name, version: "1.0.0" });
   await client.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", "tsx", "src/mcp/server.ts"], env, stderr: "ignore" }));
   return client;
@@ -47,7 +47,7 @@ const payee = (name: string, iban: string, city: string) => ({
 });
 
 // ---- 1. agents pay invoices over MCP ----
-await beat(1, "three AI agents pay real-world invoices through Coin Slot's MCP tool");
+await beat(1, "three AI agents pay real-world invoices through Sayso's MCP tool");
 const buyers = simPayers
   ? ["0xA9e0000000000000000000000000000000000001", "0xA9e0000000000000000000000000000000000002", "0xA9e0000000000000000000000000000000000003"]
   : (process.env.METAL_BUYER_KEYS ?? "").split(",").filter(Boolean);

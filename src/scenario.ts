@@ -1,4 +1,4 @@
-// The demo business: Coin Slot sells answers per call and pays a small team and its rent abroad.
+// The demo business: Sayso sells answers per call and pays a small team and its rent abroad.
 // Beneficiary ids come from scripts/setup-airwallex.ts when live, and are "sim:" ids offline.
 
 import type { InboundMessage } from "./agent/loop.js";

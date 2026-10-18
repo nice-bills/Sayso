@@ -1,5 +1,5 @@
 {
-  "name": "coinslot",
+  "name": "sayso",
   "version": "0.1.0",
   "description": "An AI agent that sells its service per call on Metal, banks it with Airwallex, and pays its own bills.",
   "scripts": {

@@ -1,16 +1,16 @@
-// Runs Coin Slot: `npm run serve` (live sandboxes) or `npm run serve:offline` (simulators).
+// Runs Sayso: `npm run serve` (live sandboxes) or `npm run serve:offline` (simulators).
 // Offline, the app opens with a few sample invoices and agent payouts so there is something to tap
 // (SEED=0 starts empty).
-import { buildCoinSlot } from "./app.js";
+import { buildSayso } from "./app.js";
 import { emit } from "./events.js";
 import { designerInvoice, fakeLandlord, studioInvoice, vagueEmail } from "../samples/invoices.js";
 
 const offline = process.argv.includes("--offline");
 const port = Number(process.env.PORT ?? 4021);
-const cs = await buildCoinSlot({ offline });
+const cs = await buildSayso({ offline });
 const base = `http://127.0.0.1:${port}`;
 cs.app.listen(port, async () => {
-  emit("observe", `Coin Slot on ${base}${offline ? ` OFFLINE; sign in with ${cs.ownerToken}` : ""}`);
+  emit("observe", `Sayso on ${base}${offline ? ` OFFLINE; sign in with ${cs.ownerToken}` : ""}`);
   if (offline && process.env.SEED !== "0") await seed().catch((e) => emit("escalate", `Seeding failed: ${String(e)}`));
 });
 const every = Number(process.env.TICK_MS ?? (offline ? 3000 : 30_000));

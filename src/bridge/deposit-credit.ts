@@ -14,7 +14,7 @@ export class SimulatedDepositCredit implements AirwallexCredit {
 
   async credit(operationId: string, amountMinor: number, currency: string): Promise<{ depositId: string }> {
     if (currency !== "USD") throw new Error(`the ramp credits USD only, got ${currency}`);
-    const { id } = await this.awx.simulateDeposit(this.globalAccountId, toMajor(amountMinor), `Coin Slot ramp ${operationId.slice(0, 8)}`);
+    const { id } = await this.awx.simulateDeposit(this.globalAccountId, toMajor(amountMinor), `Sayso ramp ${operationId.slice(0, 8)}`);
     this.deposits.push({ operationId, depositId: id, amountMinor });
     return { depositId: id };
   }
