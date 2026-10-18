@@ -64,3 +64,41 @@ export function agentMailRouter(secret: string, receive: (e: InboundEmail) => Pr
   });
   return r;
 }
+
+/**
+ * Polls an AgentMail inbox over its API, for when Sayso has no public URL for the webhook yet.
+ *   AGENTMAIL_API_KEY  the inbox's API key (am_...)
+ *   AGENTMAIL_INBOX_ID the inbox, e.g. sayso-invoices@agentmail.to
+ */
+export class AgentMailPoller {
+  private readonly seen = new Set<string>();
+
+  constructor(private readonly apiKey: string, private readonly inboxId: string, private readonly http: typeof fetch = fetch, private readonly base = "https://api.agentmail.to/v0") {}
+
+  static fromEnv(): AgentMailPoller | undefined {
+    const { AGENTMAIL_API_KEY, AGENTMAIL_INBOX_ID } = process.env;
+    return AGENTMAIL_API_KEY && AGENTMAIL_INBOX_ID ? new AgentMailPoller(AGENTMAIL_API_KEY, AGENTMAIL_INBOX_ID) : undefined;
+  }
+
+  private async get<T>(path: string): Promise<T> {
+    const res = await this.http(`${this.base}/inboxes/${encodeURIComponent(this.inboxId)}${path}`, { headers: { Authorization: `Bearer ${this.apiKey}` } });
+    if (!res.ok) throw new Error(`AgentMail ${res.status} on ${path}: ${(await res.text()).slice(0, 200)}`);
+    return (await res.json()) as T;
+  }
+
+  /** Receives the newest messages not seen yet; the inbox also ignores a message id it already has. */
+  async poll(receive: (e: InboundEmail) => Promise<unknown>): Promise<number> {
+    const { messages } = await this.get<{ messages: Array<{ message_id: string }> }>("/messages?limit=20");
+    let n = 0;
+    for (const { message_id } of messages.reverse()) {
+      if (this.seen.has(message_id)) continue;
+      const m = await this.get<AgentMailMessage>(`/messages/${encodeURIComponent(message_id)}`);
+      const email = await toInboundEmail({ ...m, text: m.extracted_text || m.text });
+      this.seen.add(message_id);
+      if (!email) continue;
+      await receive(email);
+      n++;
+    }
+    return n;
+  }
+}

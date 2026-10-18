@@ -24,7 +24,7 @@ import { dashboardRouter } from "./dashboard/server.js";
 import { emit } from "./events.js";
 import { Inbox } from "./inbox/inbox.js";
 import { imapFromEnv, pollImap } from "./inbox/imap.js";
-import { agentMailRouter } from "./inbox/agentmail.js";
+import { AgentMailPoller, agentMailRouter } from "./inbox/agentmail.js";
 import { ChainEarnings, type EarningsSource } from "./metal/earnings.js";
 import { MandateRefunder, MandateSweepVerifier, MetalMandate, type PullResult } from "./metal/mandate.js";
 import { payoutApi, type PaymentMode } from "./payouts/http.js";
@@ -157,10 +157,13 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   }
 
   const imap = imapFromEnv();
+  // Without a public URL for the webhook, the AgentMail inbox is polled instead.
+  const agentMail = opts.offline || process.env.AGENTMAIL_WEBHOOK_SECRET ? undefined : AgentMailPoller.fromEnv();
   async function tick() {
     await sweep().catch((e) => emit("escalate", `Sweep failed: ${String(e).slice(0, 200)}`));
     await svc.follow().catch((e) => emit("escalate", `Following payouts failed: ${String(e).slice(0, 200)}`));
     if (imap) await pollImap(imap, inbox);
+    if (agentMail) await agentMail.poll((e) => inbox.receive(e)).catch((e) => emit("escalate", `AgentMail poll failed: ${String(e).slice(0, 200)}`));
     lastBalances = await balances().catch(() => lastBalances);
   }
 

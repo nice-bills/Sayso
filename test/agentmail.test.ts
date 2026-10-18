@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildSayso } from "../src/app.js";
-import { toInboundEmail, verifySvix } from "../src/inbox/agentmail.js";
+import { AgentMailPoller, toInboundEmail, verifySvix } from "../src/inbox/agentmail.js";
 import { studioInvoice } from "../samples/invoices.js";
 
 const secret = `whsec_${Buffer.from("sayso-test-secret-32-bytes!!!").toString("base64")}`;
@@ -41,5 +41,20 @@ describe("AgentMail", () => {
     } finally {
       server.close();
     }
+  });
+
+  it("polls the inbox over the API and takes each message once", async () => {
+    const calls: string[] = [];
+    const http = (async (url: string) => {
+      calls.push(url);
+      const body = url.includes("/messages?") ? { count: 1, messages: [{ message_id: "<m1@x>" }] } : { message_id: "<m1@x>", from: "Billing <b@x.com>", subject: "Inv", text: "quoted", extracted_text: "Total due: EUR 10,00" };
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+    const got: string[] = [];
+    const poller = new AgentMailPoller("am_test", "pay@agentmail.to", http);
+    await poller.poll(async (e) => got.push(e.body));
+    await poller.poll(async (e) => got.push(e.body));
+    expect(got).toEqual(["Total due: EUR 10,00"]);
+    expect(calls.filter((c) => c.includes("/messages/")).length).toBe(1);
   });
 });

@@ -30,4 +30,6 @@ If the invoice changes bank details or pushes urgency, the reply says so, and Pa
 2. Add a webhook for `message.received` pointing at `https://YOUR-HOST/webhooks/agentmail`, limited to that inbox.
 3. Put the webhook's secret (`whsec_...`) in `AGENTMAIL_WEBHOOK_SECRET` and the inbox id in `AGENTMAIL_INBOX_ID`.
 
+No public URL yet? Skip the webhook: set `AGENTMAIL_API_KEY` and `AGENTMAIL_INBOX_ID` and Sayso polls the inbox on every tick. An agent can create a receive-only inbox without the console: `POST https://api.agentmail.to/v0/agent/sign-up` with `{"username": "..."}` returns the inbox and its key.
+
 Suppliers, or you, forward invoices to that address. Each one shows up in the app within seconds, and your phone gets a push if `NTFY_TOPIC` is set. Signatures are checked, and retries never queue an invoice twice. Gmail over IMAP (`INBOX_IMAP_*`) still works if you'd rather use it.

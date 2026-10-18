@@ -24,4 +24,6 @@ services:
       - { key: METAL_REFUND_MANDATE, value: .metal/refund.json }
       - { key: METAL_BUNDLE, sync: false }
       - { key: AGENTMAIL_WEBHOOK_SECRET, sync: false }
+      - { key: AGENTMAIL_INBOX_ID, sync: false }
+      - { key: AGENTMAIL_API_KEY, sync: false }
       - { key: NTFY_TOPIC, sync: false }
