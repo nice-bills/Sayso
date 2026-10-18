@@ -11,6 +11,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createMetalPaymentClient, usdzBaseUnits } from "@metalntwx/metal-pay";
 import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
+import { invoiceShape, toRequest, type Invoice } from "./tools.js";
 
 const base = process.env.COINSLOT_URL ?? "http://127.0.0.1:4021";
 const maxUsdz = process.env.COINSLOT_MAX_USDZ ?? "250";
@@ -23,29 +24,6 @@ function payingFetch(): typeof fetch {
   // Metal refuses to sign above maxAmount, so a wrong quote can never overspend the agent's wallet.
   return createMetalPaymentClient({ account: privateKeyToAccount(key), network: "testnet", maxAmount: BigInt(usdzBaseUnits(maxUsdz)) }).fetchWithPayment as typeof fetch;
 }
-
-const invoiceShape = {
-  amount: z.string().describe("Amount in major units, e.g. \"480.00\""),
-  currency: z.string().describe("ISO currency of the payout, e.g. EUR, GBP, USD"),
-  method: z.enum(["LOCAL", "SWIFT"]).optional().describe("LOCAL (default, free) or SWIFT"),
-  payee_name: z.string(),
-  payee_type: z.enum(["COMPANY", "PERSONAL"]).optional(),
-  payee_country: z.string().describe("Two-letter country of the payee's address"),
-  payee_city: z.string(),
-  payee_street: z.string(),
-  payee_postcode: z.string(),
-  bank_country: z.string().describe("Two-letter country of the bank"),
-  bank: z.record(z.string(), z.string()).describe("Bank details as Airwallex bank_details fields, e.g. {\"iban\": \"DE89...\"} or {\"account_number\": \"...\", \"account_routing_type1\": \"sort_code\", \"account_routing_value1\": \"...\"}"),
-  reference: z.string().describe("Payment reference shown to the payee, max 35 characters"),
-  invoice_text: z.string().optional().describe("The invoice or email text that asked for this payment. Coin Slot reads it and holds anything suspicious."),
-};
-
-type Invoice = { [K in keyof typeof invoiceShape]: z.infer<(typeof invoiceShape)[K]> };
-
-const toRequest = (i: Invoice) => ({
-  amount: i.amount, currency: i.currency.toUpperCase(), method: i.method, reference: i.reference, invoice_text: i.invoice_text,
-  payee: { name: i.payee_name, entity_type: i.payee_type, bank: i.bank, bank_country_code: i.bank_country.toUpperCase(), address: { country_code: i.payee_country.toUpperCase(), city: i.payee_city, street_address: i.payee_street, postcode: i.payee_postcode } },
-});
 
 const text = (o: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(o, null, 2) }] });
 

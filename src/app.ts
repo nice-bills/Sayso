@@ -10,6 +10,9 @@ import type { Address } from "viem";
 import { Airwallex, type Transfer } from "./airwallex/client.js";
 import { webhookRouter } from "./airwallex/webhooks.js";
 import { createAuth } from "./auth.js";
+import { AgentKeys } from "./agents/keys.js";
+import { hostedMcpRouter } from "./mcp/hosted.js";
+import { notifierFromEnv } from "./notify.js";
 import { RampLedger } from "./bridge/ledger.js";
 import { SimulatedDepositCredit } from "./bridge/deposit-credit.js";
 import { sweepEpoch, type MetalSettlementVerifier } from "./bridge/ramp.js";
@@ -57,6 +60,7 @@ export interface CoinSlot {
   balances(): Promise<Record<string, number>>;
   /** The owner's sign-in token (Bearer, or POST /auth/login). */
   ownerToken: string;
+  keys: AgentKeys;
 }
 
 export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string }): Promise<CoinSlot> {
@@ -146,6 +150,7 @@ export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string })
   }
   app.use(payoutApi(svc, mode));
 
+  const webDir = fileURLToPath(new URL("./web", import.meta.url));
   // The app itself: static files under a strict CSP, since it renders text from strangers' emails.
   app.use((_req, res, next) => {
     res.setHeader("x-content-type-options", "nosniff");
@@ -153,16 +158,35 @@ export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string })
     next();
   });
   app.use("/", (req, res, next) => {
-    if (req.method === "GET" && /^\/(index\.html|app\.js|app\.css)?$/.test(req.path)) {
+    if (req.method === "GET" && /^\/(index\.html|app\.js|app\.css|approve\/.+)?$/.test(req.path)) {
       res.setHeader("content-security-policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
       res.setHeader("cache-control", "no-cache");
     }
     next();
-  }, express.static(fileURLToPath(new URL("./web", import.meta.url)), { index: "index.html" }));
+  }, express.static(webDir, { index: "index.html" }));
+  // A one-tap approval link opens the app on that invoice (the page asks for sign-in if needed).
+  app.get("/approve/:id", (_req, res) => res.sendFile("index.html", { root: webDir }));
 
   // Everything below moves the business's money or shows its payees, so it needs the owner.
   const auth = createAuth({ offline: opts.offline, log: (l) => emit("observe", l) });
   app.use(auth.router);
+
+  // Agents connect over the hosted MCP endpoint with keys the owner makes here.
+  const keys = new AgentKeys(store);
+  const notify = notifierFromEnv();
+  app.use(hostedMcpRouter({ svc, inbox, keys, notify }));
+  app.get("/v1/agents", auth.requireOwner, (_req, res) => res.json(keys.list()));
+  app.post("/v1/agents", auth.requireOwner, express.json(), (req, res) => {
+    const name = String(req.body?.name ?? "").trim();
+    if (!name) return void res.status(400).json({ error: "name the agent" });
+    const cap = req.body?.cap_usd ? Number(req.body.cap_usd) : null;
+    if (cap !== null && !(cap > 0)) return void res.status(400).json({ error: "cap_usd must be a positive number" });
+    res.status(201).json(keys.create(name, cap === null ? null : toMinor(cap)));
+  });
+  app.post("/v1/agents/:id/revoke", auth.requireOwner, express.json(), (req, res) => {
+    if (!keys.revoke(String(req.params.id))) return void res.status(404).json({ error: "no such agent" });
+    res.json({ ok: true });
+  });
   const fail = (res: express.Response, err: unknown) => res.status(err instanceof PayoutError ? err.status : 500).json({ error: String((err as Error).message) });
 
   // The inbox: forward an invoice here (from the app, or a mail hook holding INBOX_SECRET).
@@ -214,5 +238,5 @@ export async function buildCoinSlot(opts: { offline: boolean; dbPath?: string })
     },
   }));
 
-  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances, ownerToken: auth.ownerToken };
+  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances, ownerToken: auth.ownerToken, keys };
 }

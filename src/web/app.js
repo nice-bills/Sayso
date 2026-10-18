@@ -4,7 +4,8 @@
 
 const $root = document.getElementById("root");
 const state = {
-  signedIn: null, inbox: [], payouts: [], summary: null,
+  signedIn: null, inbox: [], payouts: [], summary: null, agents: [], newKey: null,
+  focus: decodeURIComponent(location.pathname.match(/^\/approve\/(.+)$/)?.[1] ?? "") || null,
   tab: sessionGet("tab") || "inbox", filter: "all",
   showAdd: false, drafts: {}, verified: {}, open: {}, busy: {}, toast: null,
 };
@@ -51,9 +52,9 @@ async function api(path, body) {
 }
 
 async function load() {
-  const [inbox, payouts, summary] = await Promise.all([api("/v1/inbox"), api("/v1/payouts"), api("/v1/summary")]);
-  const changed = JSON.stringify([inbox, payouts, summary]) !== JSON.stringify([state.inbox, state.payouts, state.summary]);
-  Object.assign(state, { inbox, payouts, summary, signedIn: true });
+  const [inbox, payouts, summary, agents] = await Promise.all([api("/v1/inbox"), api("/v1/payouts"), api("/v1/summary"), api("/v1/agents")]);
+  const changed = JSON.stringify([inbox, payouts, summary, agents]) !== JSON.stringify([state.inbox, state.payouts, state.summary, state.agents]);
+  Object.assign(state, { inbox, payouts, summary, agents, signedIn: true });
   if (changed) render();
 }
 
@@ -141,9 +142,24 @@ function appView() {
       h("button", { class: "btn quiet", onclick: async () => { await api("/auth/logout", {}); state.signedIn = false; render(); } }, "Sign out"),
     )),
     h("div", { class: "wrap" },
-      h("nav", { class: "tabs", role: "tablist" }, tabs.map(([id, label, n]) => h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === id), onclick: () => { state.tab = id; sessionSet("tab", id); render(); } }, label, n ? h("span", { class: "count" }, n) : null))),
-      h("main", {}, state.tab === "inbox" ? inboxView() : state.tab === "payments" ? paymentsView() : agentsView()),
+      h("nav", { class: "tabs", role: "tablist" }, tabs.map(([id, label, n]) => h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === id), onclick: () => { state.tab = id; sessionSet("tab", id); leaveFocus(); render(); } }, label, n ? h("span", { class: "count" }, n) : null))),
+      h("main", {}, state.focus ? focusView() : state.tab === "inbox" ? inboxView() : state.tab === "payments" ? paymentsView() : agentsView()),
     ),
+  );
+}
+
+// ---------- one invoice, opened from an approval link ----------
+function leaveFocus() {
+  if (!state.focus) return;
+  state.focus = null;
+  history.replaceState(null, "", "/");
+}
+
+function focusView() {
+  const item = state.inbox.find((i) => i.id === state.focus);
+  return h("div", {},
+    h("button", { class: "btn quiet", style: "padding-left:0;margin-bottom:8px", onclick: () => { leaveFocus(); state.tab = "inbox"; render(); } }, "← All invoices"),
+    item ? h("div", { class: "list" }, invoiceCard(item)) : h("div", { class: "empty" }, "This invoice isn't in your inbox."),
   );
 }
 
@@ -419,7 +435,8 @@ function agentsView() {
         point(3, "Airwallex delivers", "Fiat moves only after the payment settles on Metal. If the bank bounces it, the agent gets everything back."),
       ),
     ),
-    snippet("Connect an agent (MCP)", mcp),
+    connectAgents(origin),
+    snippet("Or run the MCP server next to an agent with its own wallet", mcp),
     snippet("Or call the API", curl),
     h("h3", { class: "muted small", style: "margin:20px 0 8px" }, "Recent agent payouts"),
     h("div", { class: "list" }, agentPays.length ? agentPays.slice(0, 10).map(payoutRow) : h("div", { class: "empty" }, "No agent has paid yet.")),
@@ -429,6 +446,43 @@ function snippet(title, text) {
   return h("div", { class: "card", style: "margin-bottom:12px" },
     h("button", { class: "btn quiet small copy", onclick: async () => { try { await navigator.clipboard.writeText(text); toast("Copied."); } catch { toast("Couldn't copy here."); } } }, "Copy"),
     h("b", {}, title), h("pre", {}, text));
+}
+
+function connectAgents(origin) {
+  const d = (state.drafts.__agent ??= { name: "", cap: "" });
+  const nk = state.newKey;
+  const live = state.agents.filter((a) => !a.revokedAt);
+  const add = (e) => {
+    e.preventDefault();
+    act("agent", async () => {
+      state.newKey = await api("/v1/agents", { name: d.name, cap_usd: d.cap || undefined });
+      delete state.drafts.__agent;
+    });
+  };
+  return h("div", { class: "card", style: "margin-bottom:12px" },
+    h("b", {}, "Connect your agent"),
+    h("p", { class: "small muted", style: "margin:4px 0 12px" }, "Claude, ChatGPT, OpenClaw, or the assistant you text from iMessage. It can forward invoices and check on payments. It can't approve them: you get a link and tap it yourself."),
+    nk ? h("div", { class: "sheet" },
+      h("div", { class: "alert", style: "background:var(--go-bg)" }, h("b", { style: "color:var(--go)" }, `Key for ${nk.agent.name}. `), "Copy it now; it won't be shown again."),
+      h("pre", {}, nk.key),
+      h("div", { class: "small muted" }, "Add Coin Slot to the agent by URL:"),
+      h("pre", {}, `${origin}/mcp\nAuthorization: Bearer ${nk.key}`),
+      h("div", { class: "small muted" }, "Claude Code:"),
+      h("pre", {}, `claude mcp add --transport http coinslot ${origin}/mcp \\\n  --header "Authorization: Bearer ${nk.key}"`),
+      h("div", { class: "actions" },
+        h("button", { class: "btn", onclick: async () => { try { await navigator.clipboard.writeText(nk.key); toast("Copied."); } catch { toast("Couldn't copy here."); } } }, "Copy key"),
+        h("button", { class: "btn quiet", onclick: () => { state.newKey = null; render(); } }, "Done"),
+      ),
+    ) : h("form", { class: "form", onsubmit: add },
+      h("label", {}, h("span", {}, "Agent name"), h("input", { class: "field", name: "agent-name", required: true, value: d.name, placeholder: "My phone assistant", oninput: (e) => { d.name = e.target.value; } })),
+      h("label", {}, h("span", {}, "Most it can ask for, per payout (USD, optional)"), h("input", { class: "field", name: "agent-cap", inputmode: "decimal", value: d.cap, placeholder: "500", oninput: (e) => { d.cap = e.target.value; } })),
+      h("div", { class: "actions wide", style: "grid-column:1/-1" }, h("button", { class: "btn pay", type: "submit", disabled: state.busy.agent }, "Create a key")),
+    ),
+    live.length ? h("div", { style: "margin-top:14px" }, live.map((a) => h("div", { class: "line", style: "display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line)" },
+      h("div", {}, h("b", {}, a.name), h("div", { class: "small muted" }, a.capMinor ? `Up to ${money(a.capMinor / 100, "USD")} per payout · ` : "", a.lastUsedAt ? `last used ${ago(a.lastUsedAt)}` : "not used yet")),
+      h("button", { class: "btn quiet danger", disabled: state.busy[`revoke:${a.id}`], onclick: () => act(`revoke:${a.id}`, () => api(`/v1/agents/${encodeURIComponent(a.id)}/revoke`, {}), `Disconnected ${a.name}.`) }, "Disconnect"),
+    ))) : null,
+  );
 }
 
 // ---------- start ----------

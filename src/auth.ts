@@ -7,7 +7,8 @@ import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
 
 const COOKIE = "cs_session";
-const SESSION_MS = 12 * 3_600_000;
+/** A week, so the approval links on the owner's phone open signed in. */
+const SESSION_MS = 7 * 24 * 3_600_000;
 
 export interface Auth {
   ownerToken: string;
