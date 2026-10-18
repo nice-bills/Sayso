@@ -9,7 +9,7 @@ async function signIn(app: { open(path: string): Promise<unknown> }, screen: Scr
   await app.open('/');
   await screen.getByLabel('Owner token').fill('sayso-demo');
   await screen.getByRole('button', 'Sign in').tap();
-  await expect(screen.getByRole('heading', 'Inbox')).toBeVisible();
+  await expect(screen.getByRole('heading', 'Needs you')).toBeVisible();
 }
 
 test('a wrong token does not get in', async ({ app, screen }) => {
@@ -17,7 +17,7 @@ test('a wrong token does not get in', async ({ app, screen }) => {
   await screen.getByLabel('Owner token').fill('not-the-token');
   await screen.getByRole('button', 'Sign in').tap();
   await expect(screen.getByRole('alert')).toContainText("That token isn't right.");
-  await expect(screen.getByRole('heading', 'Inbox')).not.toBeVisible();
+  await expect(screen.getByRole('heading', 'Needs you')).not.toBeVisible();
 });
 
 test('one tap pays a forwarded invoice', async ({ app, screen, browser }) => {

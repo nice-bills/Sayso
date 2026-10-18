@@ -240,7 +240,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   // The app's own views: every payout (agents' and the inbox's), and the money on hand.
   app.get("/v1/payouts", auth.requireOwner, (_req, res) => res.json(svc.book.list().map(publicView)));
-  app.get("/v1/summary", auth.requireOwner, (_req, res) => res.json({ offline: opts.offline, balances: lastBalances, sweeps: ledger.all(), reconcile: lastReconcile }));
+  app.get("/v1/summary", auth.requireOwner, (_req, res) => res.json({ offline: opts.offline, sandbox, balances: lastBalances, sweeps: ledger.all(), reconcile: lastReconcile }));
   app.post("/v1/payouts/:id/review", auth.requireOwner, express.json(), (req, res) => {
     try {
       const approver = String(req.body?.approver ?? "owner");

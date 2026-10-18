@@ -38,9 +38,9 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 - **Claude:** reads invoice emails into structured fields with a strict schema (Claude Opus 5.5 with structured outputs). A pattern extractor takes over with no key; neither one decides money.
 - **MCP, two ways.** A local server for agents with their own Metal wallet (`pay_invoice`, `pay_batch`, `pay_quote`, `quote_payout`, `payout_status`, `batch_status`). A hosted endpoint for any agent, with per-agent keys and caps (`forward_invoice`, `list_invoices`, `quote_payout`, `payout_status`). Approving is deliberately not a tool.
 - **Everywhere else:** a Claude Code plugin with a skill that teaches the approval flow, a skill for OpenClaw-style agents, AgentMail email intake (Svix-signed webhooks), and ntfy phone notifications that open the approval page.
-- **App:** a phone-friendly inbox, payments with live progress, an agents page, and a back office feed. Owner sign-in, strict CSP, invoice text always rendered as text.
+- **App:** built for people whose agents do the work. Home leads with what needs your say and a live feed of what the agents are doing, each step with its proof. Then an inbox, payments with live progress, an agents page, and a bottom tab bar on phones. Owner sign-in, strict CSP, invoice text always rendered as text.
 - **Its own card and its own treasury.** Sayso pays its compute bills with its own Airwallex Issuing card (MCC and amount limits enforced by Airwallex; an unknown merchant freezes the card). It also runs its own bills through a treasury policy that decides hold, convert or pay, and an email that lowers the earnings forecast tightens what it may do without a person.
-- **Quality:** TypeScript, SQLite, 74 unit and integration tests, 5 browser end-to-end tests, and a full offline mode with simulators that follow the same rules as the real services.
+- **Quality:** TypeScript, SQLite, 75 unit and integration tests, 5 browser end-to-end tests, and a full offline mode with simulators that follow the same rules as the real services.
 
 ## Proven live
 

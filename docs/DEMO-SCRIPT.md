@@ -14,7 +14,7 @@ The arc judges asked for: goal, plan, new information, revised decision, resulti
 
 > Agents can hold money now. Stablecoins on Metal, paid per call over x402. But the world's invoices are in euros and pounds, sent to IBANs. Sayso lets any agent pay any real-world invoice, and lets a business do the same thing with one tap.
 
-Show: the landing page.
+Show: the landing page. Its chat plays out the whole idea in six lines: the agent pays one invoice, and Sayso holds the risky one.
 
 ## 0:20 An agent pays a real invoice (60s)
 
@@ -25,7 +25,7 @@ Narrate as it happens:
 - The agent pays over **x402 on Metal**. Metal itself refuses to sign above the agent's cap.
 - Only after the payment **settles on chain** does Sayso touch fiat. It converts just the shortfall and sends EUR through **Airwallex**, with the payout id as the `request_id`, so it can never pay twice.
 
-Show: the Agents tab and the payout's timeline going Paid in USDZ, then Sent by Airwallex, then Delivered. Open Details: Metal explorer link, Airwallex transfer id. Switch to the Airwallex dashboard to show the same transfer.
+Show: Home, with the app beside the terminal. Each step lands in **Live activity** as it happens: quoted, paid in USDZ, converted, sent, delivered. Then the Agents tab, where the payout's timeline reads Paid in USDZ, Sent by Airwallex, Delivered. Open Details: Metal explorer link, Airwallex transfer id. Switch to the Airwallex dashboard to show the same transfer.
 
 ## 1:20 A marketplace pays its sellers (25s)
 
@@ -43,7 +43,7 @@ On a phone: text your assistant a photo of the Kreuzberg Studio invoice, "pay th
 
 > Most businesses won't write code. So they forward the invoice.
 
-Show: the Inbox, where the Kreuzberg Studio invoice from the text is waiting. It has been read into "€280.00 to Kreuzberg Studio GmbH, IBAN ending 3000". Tap **Pay €280.00**. It moves to Sent, then Delivered.
+Show: Home. The headline says how many payments need you, and the Kreuzberg Studio invoice from the text is first under **Needs you**, marked as forwarded by your agent. It has been read into "€280.00 to Kreuzberg Studio GmbH, IBAN ending 3000". Tap **Pay €280.00**. It moves under Just approved and goes to Sent, then Delivered, while the feed on the right narrates it.
 
 Say: Claude reads the email. Code decides the amount, the limits and whether it pays.
 
@@ -51,7 +51,7 @@ Say: Claude reads the email. Code decides the amount, the limits and whether it 
 
 > Then this arrives. "URGENT, our bank details have changed, pay today."
 
-Show: the card is red, "Check before paying". The reasons say it asks to pay new bank details and uses pressure. Offline, a third reason comes from the payee's bank through Airwallex account verification: "the bank says this account belongs to Mark Lehmann, not Berlin Office Lettings" (the live sandbox answers NOT_MATCHED to every name, so record this part offline). The Pay button is disabled.
+Show: the card has a red edge, "Check before paying", and "Sayso is holding this one until you call". The reasons say it asks to pay new bank details and uses pressure. Offline, a third reason comes from the payee's bank through Airwallex account verification: "the bank says this account belongs to Mark Lehmann, not Berlin Office Lettings" (the live sandbox answers NOT_MATCHED to every name, so record this part offline). The Pay button is disabled.
 
 > The model flagged it, and the bank confirmed the account isn't the landlord's. But neither of those is what stops it. The rule is code: a held invoice can't be paid until a person confirms the details with the payee on a number they already had.
 

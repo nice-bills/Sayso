@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildSayso } from "../src/app.js";
 import { AgentMailPoller, toInboundEmail, verifySvix } from "../src/inbox/agentmail.js";
 import { studioInvoice } from "../samples/invoices.js";
@@ -9,7 +9,7 @@ const secret = `whsec_${Buffer.from("sayso-test-secret-32-bytes!!!").toString("b
 const sign = (id: string, ts: string, body: string) => `v1,${createHmac("sha256", Buffer.from(secret.slice(6), "base64")).update(`${id}.${ts}.${body}`).digest("base64")}`;
 
 describe("AgentMail", () => {
-  afterEach(() => { delete process.env.AGENTMAIL_WEBHOOK_SECRET; });
+  afterEach(() => { delete process.env.AGENTMAIL_WEBHOOK_SECRET; vi.unstubAllEnvs(); });
 
   it("verifies Svix signatures and rejects stale or forged ones", () => {
     const now = 1_760_000_000;
@@ -27,6 +27,7 @@ describe("AgentMail", () => {
 
   it("turns a signed webhook into an invoice waiting for approval, once", async () => {
     process.env.AGENTMAIL_WEBHOOK_SECRET = secret;
+    vi.stubEnv("AGENTMAIL_INBOX_ID", ""); // a real inbox id in the shell would filter out this test's inbox
     const cs = await buildSayso({ offline: true });
     const server = cs.app.listen(0);
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
