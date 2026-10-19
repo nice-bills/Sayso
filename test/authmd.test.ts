@@ -103,7 +103,7 @@ describe("passkeys and auth.md", () => {
       const poll = () => call("/oauth2/token", `grant_type=urn:workos:agent-auth:grant-type:claim&claim_token=${reg.claim_token}`, form);
       expect((await poll()).body.error).toBe("authorization_pending");
 
-      const attempt = new URL(reg.claim.verification_uri).searchParams.get("claim_attempt_token")!;
+      const attempt = new URL(reg.claim.verification_uri).pathname.split("/c/")[1]!;
       const seen = (await call(`/agent/identity/claim/attempt?t=${attempt}`)).body;
       expect(seen.agent_name).toBe("Claude");
       expect((await call("/agent/identity/claim/complete", { attempt_token: attempt, user_code: "000000" === reg.claim.user_code ? "111111" : "000000" })).status).toBe(400);

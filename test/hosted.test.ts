@@ -33,7 +33,8 @@ describe("hosted MCP endpoint", () => {
 
       const { body } = await call(agent, "forward_invoice", { text: studioInvoice.body, from: studioInvoice.from });
       expect(body.status).toBe("awaiting_approval");
-      expect(body.approval_url).toBe(`${base}/approve/${encodeURIComponent(body.invoice_id)}`);
+      expect(body.approval_url).toMatch(new RegExp(`^${base}/p/[\\w-]{8}$`));
+      expect((await fetch(body.approval_url, { redirect: "manual" })).headers.get("location")).toBe(`/approve/${encodeURIComponent(body.invoice_id)}`);
 
       const held = await call(agent, "forward_invoice", { text: fakeLandlord.body, from: fakeLandlord.from });
       expect(held.body.status).toBe("needs_verification");

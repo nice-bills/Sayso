@@ -7,7 +7,7 @@
 import express, { type Request } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { AgentKey, AgentKeys } from "../agents/keys.js";
 import { emit } from "../events.js";
@@ -26,7 +26,9 @@ const fail = (message: string) => ({ ...text({ error: message }), isError: true 
 const baseUrl = (req: Request) => process.env.PUBLIC_URL ?? `${req.header("x-forwarded-proto") ?? req.protocol}://${req.header("host")}`;
 /** Points an agent without credentials at the auth.md discovery chain (RFC 9728). */
 const resourceMetadata = (req: Request) => `Bearer resource_metadata="${baseUrl(req)}/.well-known/oauth-protected-resource"`;
-export const approvalPath = (id: string) => `/approve/${encodeURIComponent(id)}`;
+/** Invoice ids are often whole email Message-IDs, so links carry a short hash of one instead. */
+export const shortCode = (id: string) => createHash("sha256").update(id).digest("base64url").slice(0, 8);
+export const approvalPath = (id: string) => `/p/${shortCode(id)}`;
 
 function summarise(item: InboxItem & { payout?: ReturnType<typeof publicView> | null }, base: string) {
   const p = item.payout;

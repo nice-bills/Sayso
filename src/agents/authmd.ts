@@ -68,7 +68,7 @@ export function authMdRouter(d: { store: Store; keys: AgentKeys; auth: Auth }): 
   const ceremony = (base: string, r: Pick<Registration, "user_code" | "attempt_token" | "code_expires">) => ({
     user_code: r.user_code,
     expires_in: Math.max(0, Math.round((r.code_expires - Date.now()) / 1000)),
-    verification_uri: `${base}/claim?claim_attempt_token=${encodeURIComponent(r.attempt_token)}`,
+    verification_uri: `${base}/c/${r.attempt_token}`,
     interval: 5,
   });
   const err = (res: Response, status: number, error: string, description: string) => res.status(status).json({ error, error_description: description });
@@ -220,7 +220,7 @@ Content-Type: application/json
 Show the user, in one message:
 
 > Open this link, sign in to Sayso, and enter this code: **123456**
-> ${base}/claim?claim_attempt_token=...
+> ${base}/c/...
 
 The user signs in, types the code, and confirms with Face ID, a fingerprint or their security key. Meanwhile poll:
 

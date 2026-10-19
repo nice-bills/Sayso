@@ -5,7 +5,7 @@
 const $root = document.getElementById("root");
 const state = {
   signedIn: null, me: null, inbox: [], payouts: [], summary: null, agents: [], newKey: null,
-  claim: location.pathname === "/claim" ? new URLSearchParams(location.search).get("claim_attempt_token") : null, claimInfo: null, laterPasskey: sessionGet("laterPasskey") === "1",
+  claim: location.pathname === "/claim" ? new URLSearchParams(location.search).get("claim_attempt_token") : location.pathname.match(/^\/c\/([\w-]+)$/)?.[1] ?? null, claimInfo: null, laterPasskey: sessionGet("laterPasskey") === "1",
   focus: decodeURIComponent(location.pathname.match(/^\/approve\/(.+)$/)?.[1] ?? "") || null,
   tab: sessionGet("tab") || "home", filter: "all", events: [], recent: new Set(),
   pick: null, showAdd: false, drafts: {}, verified: {}, open: {}, busy: {}, toast: null,
