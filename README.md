@@ -119,4 +119,4 @@ Claude.ai, ChatGPT, approval links on a phone and Airwallex webhooks need Sayso 
 
 - `@x402/*` is pinned to 2.21.0. `@metalntwx/metal-pay` 0.2.0's `ClearingDebitServerScheme` has no `paymentFlows`, which `@x402/core` 2.22+ requires at runtime.
 - Payload fields marked `VERIFY` follow the Airwallex docs as we understand them. They get checked against the docs MCP on the first live run.
-- The x402 payment path (dynamic price per quote, settle hooks) has not run against Metal's facilitator yet, because this environment can't reach it. Offline, the same routes run with simulated payments.
+- The x402 payment path (dynamic price per quote, settle hooks) has run end to end against Metal's facilitator on testnet (live demo run, 18 Oct 2026). Offline, the same routes run with simulated payments.
