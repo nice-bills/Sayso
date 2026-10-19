@@ -102,3 +102,15 @@ export class AgentMailPoller {
     return n;
   }
 }
+
+/** Sends mail from the AgentMail inbox (the owner's emailed sign-in links). Needs AGENTMAIL_API_KEY and AGENTMAIL_INBOX_ID. */
+export function agentMailSenderFromEnv(http: typeof fetch = fetch, base = "https://api.agentmail.to/v0"): ((to: string, subject: string, text: string) => Promise<void>) | undefined {
+  const { AGENTMAIL_API_KEY, AGENTMAIL_INBOX_ID } = process.env;
+  if (!AGENTMAIL_API_KEY || !AGENTMAIL_INBOX_ID) return undefined;
+  return async (to, subject, text) => {
+    const res = await http(`${base}/inboxes/${encodeURIComponent(AGENTMAIL_INBOX_ID)}/messages/send`, {
+      method: "POST", headers: { Authorization: `Bearer ${AGENTMAIL_API_KEY}`, "content-type": "application/json" }, body: JSON.stringify({ to: [to], subject, text }),
+    });
+    if (!res.ok) throw new Error(`AgentMail ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  };
+}

@@ -14,6 +14,7 @@ import { beneficiaries, obligations, policyConfig } from "./scenario.js";
 import { ApprovalGate } from "./treasury/approval.js";
 import { webhookRouter } from "./airwallex/webhooks.js";
 import { createAuth } from "./auth.js";
+import { authMdRouter } from "./agents/authmd.js";
 import { AgentKeys } from "./agents/keys.js";
 import { hostedMcpRouter } from "./mcp/hosted.js";
 import { notifierFromEnv } from "./notify.js";
@@ -24,7 +25,7 @@ import { dashboardRouter } from "./dashboard/server.js";
 import { emit } from "./events.js";
 import { Inbox } from "./inbox/inbox.js";
 import { imapFromEnv, pollImap } from "./inbox/imap.js";
-import { AgentMailPoller, agentMailRouter } from "./inbox/agentmail.js";
+import { AgentMailPoller, agentMailRouter, agentMailSenderFromEnv } from "./inbox/agentmail.js";
 import { ChainEarnings, type EarningsSource } from "./metal/earnings.js";
 import { MandateRefunder, MandateSweepVerifier, MetalMandate, type PullResult } from "./metal/mandate.js";
 import { payoutApi, type PaymentMode } from "./payouts/http.js";
@@ -187,7 +188,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     next();
   });
   app.use("/", (req, res, next) => {
-    if (req.method === "GET" && /^\/(index\.html|app\.js|app\.css|approve\/.+)?$/.test(req.path)) {
+    if (req.method === "GET" && /^\/(index\.html|app\.js|app\.css|claim|approve\/.+)?$/.test(req.path)) {
       res.setHeader("content-security-policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
       res.setHeader("cache-control", "no-cache");
     }
@@ -195,13 +196,17 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   }, express.static(webDir, { index: "index.html" }));
   // A one-tap approval link opens the app on that invoice (the page asks for sign-in if needed).
   app.get("/approve/:id", (_req, res) => res.sendFile("index.html", { root: webDir }));
+  // An agent's auth.md claim link lands here; the app asks for the code and a passkey check.
+  app.get("/claim", (_req, res) => res.sendFile("index.html", { root: webDir }));
 
   // Everything below moves the business's money or shows its payees, so it needs the owner.
-  const auth = createAuth({ offline: opts.offline, log: (l) => emit("observe", l) });
+  const auth = createAuth({ offline: opts.offline, log: (l) => emit("observe", l), store, send: opts.offline ? undefined : agentMailSenderFromEnv() });
   app.use(auth.router);
 
-  // Agents connect over the hosted MCP endpoint with keys the owner makes here.
+  // Agents connect over the hosted MCP endpoint, with a key the owner makes here or by signing
+  // themselves up through auth.md, which the owner confirms with their passkey.
   const keys = new AgentKeys(store);
+  app.use(authMdRouter({ store, keys, auth }));
   const notify = notifierFromEnv();
   app.use(hostedMcpRouter({ svc, inbox, keys, notify }));
   app.get("/v1/agents", auth.requireOwner, (_req, res) => res.json(keys.list()));
@@ -229,6 +234,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   });
   app.get("/v1/inbox", auth.requireOwner, (_req, res) => res.json(inbox.list()));
   app.post("/v1/inbox/:id/approve", auth.requireOwner, express.json(), async (req, res) => {
+    if (!(await auth.confirmed(req, req.body?.confirmation, "approve", String(req.params.id)))) return void res.status(401).json({ error: "Confirm with your passkey to pay.", need: "passkey" });
     try { res.json(await inbox.approve(String(req.params.id), String(req.body?.approver ?? "owner"), { verifiedWithPayee: req.body?.verified_with_payee === true })); } catch (err) { fail(res, err); }
   });
   app.post("/v1/inbox/:id/details", auth.requireOwner, express.json(), async (req, res) => {
@@ -241,7 +247,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   // The app's own views: every payout (agents' and the inbox's), and the money on hand.
   app.get("/v1/payouts", auth.requireOwner, (_req, res) => res.json(svc.book.list().map(publicView)));
   app.get("/v1/summary", auth.requireOwner, (_req, res) => res.json({ offline: opts.offline, sandbox, balances: lastBalances, sweeps: ledger.all(), reconcile: lastReconcile }));
-  app.post("/v1/payouts/:id/review", auth.requireOwner, express.json(), (req, res) => {
+  app.post("/v1/payouts/:id/review", auth.requireOwner, express.json(), async (req, res) => {
+    if (req.body?.decision !== "reject" && !(await auth.confirmed(req, req.body?.confirmation, "review", String(req.params.id)))) return void res.status(401).json({ error: "Confirm with your passkey to allow it.", need: "passkey" });
     try {
       const approver = String(req.body?.approver ?? "owner");
       res.json(publicView(req.body?.decision === "reject" ? svc.rejectReview(String(req.params.id), approver) : svc.approveReview(String(req.params.id), approver)));
@@ -262,6 +269,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
       reconcile: lastReconcile,
     }),
     approve: async (id, approver, body) => {
+      if (auth.hasPasskey()) throw new PayoutError(403, "Approve this in the app, where your passkey confirms it.");
       if (inbox.get(id)) return inbox.approve(id, approver, { verifiedWithPayee: body.verified_with_payee === true });
       return publicView(svc.approveReview(id, approver));
     },

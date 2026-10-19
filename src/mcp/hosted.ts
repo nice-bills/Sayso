@@ -24,6 +24,8 @@ const fail = (message: string) => ({ ...text({ error: message }), isError: true 
 
 /** Where people reach this server: PUBLIC_URL, or the host the agent called. */
 const baseUrl = (req: Request) => process.env.PUBLIC_URL ?? `${req.header("x-forwarded-proto") ?? req.protocol}://${req.header("host")}`;
+/** Points an agent without credentials at the auth.md discovery chain (RFC 9728). */
+const resourceMetadata = (req: Request) => `Bearer resource_metadata="${baseUrl(req)}/.well-known/oauth-protected-resource"`;
 export const approvalPath = (id: string) => `/approve/${encodeURIComponent(id)}`;
 
 function summarise(item: InboxItem & { payout?: ReturnType<typeof publicView> | null }, base: string) {
@@ -117,7 +119,7 @@ export function hostedMcpRouter(d: HostedDeps): express.Router {
   // The same two actions as plain REST, for agent frameworks that run curl from a skill (OpenClaw, Hermes).
   r.post("/v1/agent/invoices", express.json({ limit: "256kb" }), async (req, res) => {
     const agent = agentOf(req);
-    if (!agent) return void res.status(401).json({ error: "send your Sayso agent key as a Bearer token" });
+    if (!agent) return void res.status(401).setHeader("www-authenticate", resourceMetadata(req)).json({ error: `send your Sayso agent key or access token as a Bearer token; to sign up, read ${baseUrl(req)}/auth.md` });
     const b = req.body as { text?: unknown; from?: unknown; subject?: unknown };
     if (typeof b?.text !== "string" || !b.text.trim()) return void res.status(400).json({ error: "text is required: the whole invoice or email" });
     const r2 = await forward(d, agent, baseUrl(req), { text: b.text.slice(0, 20_000), from: typeof b.from === "string" ? b.from : undefined, subject: typeof b.subject === "string" ? b.subject : undefined });
@@ -125,7 +127,7 @@ export function hostedMcpRouter(d: HostedDeps): express.Router {
   });
   r.get("/v1/agent/invoices", (req, res) => {
     const agent = agentOf(req);
-    if (!agent) return void res.status(401).json({ error: "send your Sayso agent key as a Bearer token" });
+    if (!agent) return void res.status(401).setHeader("www-authenticate", resourceMetadata(req)).json({ error: `send your Sayso agent key or access token as a Bearer token; to sign up, read ${baseUrl(req)}/auth.md` });
     res.json(d.inbox.list().filter((i) => pending.includes(i.status)).slice(0, 50).map((i) => summarise(i, baseUrl(req))));
   });
 
@@ -133,8 +135,8 @@ export function hostedMcpRouter(d: HostedDeps): express.Router {
   r.post(["/mcp", "/mcp/k/:key"], express.json({ limit: "512kb" }), async (req, res) => {
     const agent = agentOf(req);
     if (!agent) {
-      res.setHeader("www-authenticate", 'Bearer realm="sayso"');
-      return void res.status(401).json({ jsonrpc: "2.0", error: { code: -32001, message: "Send your Sayso agent key as a Bearer token. The owner creates one in the app's Agents tab." }, id: null });
+      res.setHeader("www-authenticate", resourceMetadata(req));
+      return void res.status(401).json({ jsonrpc: "2.0", error: { code: -32001, message: "Send your Sayso agent key or access token as a Bearer token. To sign up for your user, read /auth.md." }, id: null });
     }
     // Stateless: a fresh server and transport per request, so nothing leaks between agents.
     const server = buildServer(d, agent, baseUrl(req));

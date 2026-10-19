@@ -4,7 +4,8 @@
 
 const $root = document.getElementById("root");
 const state = {
-  signedIn: null, inbox: [], payouts: [], summary: null, agents: [], newKey: null,
+  signedIn: null, me: null, inbox: [], payouts: [], summary: null, agents: [], newKey: null,
+  claim: location.pathname === "/claim" ? new URLSearchParams(location.search).get("claim_attempt_token") : null, claimInfo: null, laterPasskey: sessionGet("laterPasskey") === "1",
   focus: decodeURIComponent(location.pathname.match(/^\/approve\/(.+)$/)?.[1] ?? "") || null,
   tab: sessionGet("tab") || "home", filter: "all", events: [], recent: new Set(),
   pick: null, showAdd: false, drafts: {}, verified: {}, open: {}, busy: {}, toast: null,
@@ -45,6 +46,7 @@ const ICONS = {
   ext: "M15 3h6v6 M10 14 21 3 M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
   back: "M19 12H5 M12 19l-7-7 7-7",
   ledger: "M4 4h16v16H4z M8 9h8 M8 13h8 M8 17h5",
+  face: "M7 3H5a2 2 0 0 0-2 2v2 M17 3h2a2 2 0 0 1 2 2v2 M7 21H5a2 2 0 0 1-2-2v-2 M17 21h2a2 2 0 0 0 2-2v-2 M9 9v1.5 M15 9v1.5 M12 9v4h-1 M9 16c1.7 1.3 4.3 1.3 6 0",
 };
 function icon(name, size = 18) {
   const ns = "http://www.w3.org/2000/svg";
@@ -75,11 +77,44 @@ const agentOf = (item) => item.id.startsWith("agent-") || / \(agent\)$/.test(ite
 // ---------- api ----------
 async function api(path, body) {
   const res = await fetch(path, body === undefined ? { credentials: "same-origin" } : { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  if (res.status === 401 && !path.startsWith("/auth/")) { state.signedIn = false; render(); throw new Error("signed out"); }
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && data.need !== "passkey" && !path.startsWith("/auth/")) { state.signedIn = false; render(); throw new Error("signed out"); }
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
+
+// ---------- passkeys (Face ID, Touch ID, a fingerprint, a security key) ----------
+const canPasskey = () => Boolean(window.PublicKeyCredential && navigator.credentials);
+const enc = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const dec = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), (c) => c.charCodeAt(0));
+const creationOptions = (o) => PublicKeyCredential.parseCreationOptionsFromJSON ? PublicKeyCredential.parseCreationOptionsFromJSON(o)
+  : { ...o, challenge: dec(o.challenge), user: { ...o.user, id: dec(o.user.id) }, excludeCredentials: (o.excludeCredentials ?? []).map((c) => ({ ...c, id: dec(c.id) })) };
+const requestOptions = (o) => PublicKeyCredential.parseRequestOptionsFromJSON ? PublicKeyCredential.parseRequestOptionsFromJSON(o)
+  : { ...o, challenge: dec(o.challenge), allowCredentials: (o.allowCredentials ?? []).map((c) => ({ ...c, id: dec(c.id) })) };
+function credentialJSON(c) {
+  try { if (c.toJSON) return c.toJSON(); } catch { /* older browsers: build it by hand */ }
+  const r = c.response;
+  return { id: c.id, rawId: enc(c.rawId), type: c.type, authenticatorAttachment: c.authenticatorAttachment, clientExtensionResults: c.getClientExtensionResults(),
+    response: r.attestationObject ? { clientDataJSON: enc(r.clientDataJSON), attestationObject: enc(r.attestationObject), transports: r.getTransports?.() }
+      : { clientDataJSON: enc(r.clientDataJSON), authenticatorData: enc(r.authenticatorData), signature: enc(r.signature), userHandle: r.userHandle ? enc(r.userHandle) : undefined } };
+}
+/** The browser's own Face ID / fingerprint sheet. Cancelling it throws a plain sentence. */
+async function askDevice(kind, options) {
+  try { return credentialJSON(await navigator.credentials[kind]({ publicKey: kind === "create" ? creationOptions(options) : requestOptions(options) })); }
+  catch (e) { throw new Error(e?.name === "NotAllowedError" ? "Cancelled, so nothing changed." : e?.name === "InvalidStateError" ? "This device already has a Sayso passkey." : e?.message || "The passkey didn't work."); }
+}
+async function addPasskey() {
+  const { challenge_id, options } = await api("/auth/passkey/register/options", {});
+  await api("/auth/passkey/register", { challenge_id, response: await askDevice("create", options) });
+  state.me = { ...state.me, passkeys: true, methods: { ...state.me?.methods, passkey: true } };
+}
+/** A passkey check bound to one action. Undefined while no passkey is set up (the server then doesn't ask). */
+async function confirmWith(purpose, subject) {
+  if (!state.me?.passkeys) return undefined;
+  const { challenge_id, options } = await api("/auth/passkey/confirm/options", { purpose, subject });
+  return { challenge_id, response: await askDevice("get", options) };
+}
+const approveInvoice = async (id, extra = {}) => api(`/v1/inbox/${encodeURIComponent(id)}/approve`, { ...extra, confirmation: await confirmWith("approve", id) });
 
 async function load() {
   const [inbox, payouts, summary, agents] = await Promise.all([api("/v1/inbox"), api("/v1/payouts"), api("/v1/summary"), api("/v1/agents")]);
@@ -136,7 +171,7 @@ function render() {
   dirty = false;
   staggered = 0;
   const y = window.scrollY;
-  $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn ? appView() : landing(), state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].filter(Boolean));
+  $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn ? (state.claim ? claimView() : appView()) : state.claim ? claimGate() : landing(), state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].filter(Boolean));
   window.scrollTo(0, y);
   if (!state.signedIn) watchReveals();
 }
@@ -357,27 +392,113 @@ function trySection() {
   return section;
 }
 
+const SIGNIN_NOTES = {
+  expired: "That sign-in link has expired or was used already. Ask for a new one.",
+  "google-not-owner": "That Google account isn't this Sayso's owner.", "google-failed": "Google sign-in didn't finish. Try again.", "google-off": "Google sign-in isn't set up here.",
+};
+async function signedIn() {
+  state.me = await api("/auth/me");
+  state.signedIn = true;
+  await load(); goLive(); render(); window.scrollTo({ top: 0, behavior: "instant" });
+}
+
+/** Every way in, best first: a passkey, an emailed link, Google, then the owner token. */
+function signinDialog() {
+  const m = state.me?.methods ?? {};
+  let token = "", email = "";
+  const err = h("div", { class: "error", role: "alert" }, SIGNIN_NOTES[new URLSearchParams(location.search).get("signin")] ?? "");
+  const note = h("p", { class: "small muted", role: "status" });
+  const run = (fn) => async (e) => { e?.preventDefault(); err.textContent = ""; try { await fn(); } catch (x) { err.textContent = x.message === "wrong token" ? "That token isn't right." : x.message; } };
+  const passkey = run(async () => {
+    const { challenge_id, options } = await api("/auth/passkey/login/options", {});
+    await api("/auth/passkey/login", { challenge_id, response: await askDevice("get", options) });
+    await signedIn();
+  });
+  const mail = run(async () => { note.textContent = (await api("/auth/email", { email })).message; });
+  const tokenIn = run(async () => { await api("/auth/login", { token }); await signedIn(); });
+  const or = (t) => h("div", { class: "or" }, h("span", {}, t));
+  return h("div", { class: "dialog", "data-ui": "" },
+    h("h3", {}, state.claim ? "Sign in to connect your agent" : "Sign in to Sayso"),
+    m.passkey && canPasskey() ? h("button", { class: "btn pay wide", type: "button", onclick: passkey }, icon("face", 18), "Use Face ID or a passkey") : null,
+    m.email ? h("form", { class: "row-form", onsubmit: mail },
+      h("label", { class: "sr", for: "email" }, "Email"),
+      h("input", { id: "email", class: "field", type: "email", autocomplete: "email", required: true, placeholder: "you@company.com", oninput: (e) => { email = e.target.value; } }),
+      h("button", { class: m.passkey ? "btn" : "btn pay", type: "submit" }, "Email me a link")) : null,
+    note,
+    m.google ? h("a", { class: "btn wide google", href: "/auth/google" }, h("span", { class: "g", "aria-hidden": "true" }, "G"), "Continue with Google") : null,
+    m.passkey || m.email || m.google ? or("or use the owner token") : null,
+    h("form", { class: "row-form", onsubmit: tokenIn },
+      h("label", { for: "token" }, "Owner token"),
+      h("input", { id: "token", class: "field", type: "password", autocomplete: "current-password", placeholder: "Paste your token", oninput: (e) => { token = e.target.value; } }),
+      h("button", { class: m.passkey || m.email ? "btn" : "btn pay", type: "submit" }, "Sign in")),
+    m.demo ? h("p", { class: "small muted" }, "Running the offline demo? The token is ", h("code", {}, "sayso-demo"), ". Sign in with it, then turn on Face ID to try passkeys.") : null,
+    err,
+  );
+}
+
 function signinSection() {
-  let token = "";
-  const err = h("div", { class: "error", role: "alert" });
-  const submit = async (e) => {
-    e.preventDefault();
-    try { await api("/auth/login", { token }); state.signedIn = true; await load(); goLive(); render(); window.scrollTo({ top: 0, behavior: "instant" }); }
-    catch (x) { err.textContent = x.message === "wrong token" ? "That token isn't right." : x.message; }
-  };
   return h("section", { id: "signin", class: "cta" },
     h("div", { class: "cta-copy", "data-reveal": "" },
       h("h2", {}, "Your say,", h("br"), "one tap"),
-      h("p", {}, "Sign in to see what your agents have waiting, then pay it or hold it."),
+      h("p", {}, "Sign in with Face ID or a fingerprint, then pay what your agents found, or hold it."),
     ),
-    h("form", { class: "dialog", "data-ui": "", "data-reveal": "", onsubmit: submit },
-      h("h3", {}, "Sign in to Sayso"),
-      h("label", { for: "token" }, "Owner token"),
-      h("input", { id: "token", class: "field", type: "password", autocomplete: "current-password", placeholder: "Paste your token", oninput: (e) => { token = e.target.value; } }),
-      h("p", { class: "small muted" }, "Running the offline demo? The token is ", h("code", {}, "sayso-demo"), "."),
-      err,
-      h("button", { class: "btn pay wide", type: "submit" }, "Sign in"),
-    ),
+    h("div", { "data-reveal": "" }, signinDialog()),
+  );
+}
+
+// ---------- an agent asking to connect (auth.md) ----------
+function claimGate() {
+  return h("div", { class: "gate" }, h("header", { class: "l-top" }, brand()), h("div", { class: "gate-body" }, signinDialog()));
+}
+
+function leaveClaim() { state.claim = null; state.claimInfo = null; history.replaceState(null, "", "/"); render(); }
+
+function claimView() {
+  const info = state.claimInfo;
+  if (!info) {
+    api(`/agent/identity/claim/attempt?t=${encodeURIComponent(state.claim)}`).then((i) => { state.claimInfo = i; render(); }).catch((e) => { state.claimInfo = { error: e.message }; render(); });
+    return h("div", { class: "gate" }, h("header", { class: "l-top" }, brand()));
+  }
+  let code = "";
+  const err = h("div", { class: "error", role: "alert" });
+  const label = state.me?.passkeys ? "Confirm with Face ID" : canPasskey() ? "Turn on Face ID and connect" : "Connect";
+  const submit = async (e) => {
+    e.preventDefault();
+    err.textContent = "";
+    state.busy.claim = true; render();
+    try {
+      if (!state.me?.passkeys && canPasskey()) await addPasskey();
+      const confirmation = await confirmWith("claim", info.subject);
+      await api("/agent/identity/claim/complete", { attempt_token: state.claim, user_code: code, confirmation });
+      state.claimInfo = { ...info, status: "claimed" };
+    } catch (x) { state.claimInfo = { ...info, lastError: x.message }; }
+    finally { delete state.busy.claim; render(); }
+  };
+  const body = info.error ? [h("h2", {}, "This link has expired"), h("p", { class: "muted" }, info.error), h("button", { class: "btn", onclick: leaveClaim }, "Open Sayso")]
+    : info.status !== "pending" ? [h("span", { class: "tick big-tick", "aria-hidden": "true" }, icon("check", 26)), h("h2", {}, `${info.agent_name} is connected`), h("p", { class: "muted" }, `Go back to ${info.agent_name}; it finishes on its own. It can forward and check invoices. Paying still needs you.`), h("button", { class: "btn pay", onclick: leaveClaim }, "Open Sayso")]
+    : [
+      h("span", { class: "agent-mark", "aria-hidden": "true" }, icon("bot", 24)),
+      h("h2", {}, `Connect ${info.agent_name} to Sayso?`),
+      h("p", { class: "muted" }, `${info.agent_name} asked to forward and check invoices for ${info.login_hint}. It can't pay anything: that stays with your face or fingerprint.`),
+      h("form", { class: "claim-form", onsubmit: submit },
+        h("label", { for: "user-code" }, "The code your agent showed you"),
+        h("input", { id: "user-code", class: "field code", inputmode: "numeric", autocomplete: "one-time-code", maxlength: 7, required: true, placeholder: "123456", oninput: (e) => { code = e.target.value; } }),
+        h("button", { class: "btn pay wide", type: "submit", disabled: state.busy.claim }, icon("face", 18), state.busy.claim ? "Checking…" : label),
+      ),
+      info.lastError ? h("div", { class: "error", role: "alert" }, info.lastError) : err,
+      h("button", { class: "btn quiet", type: "button", onclick: leaveClaim }, "Not now"),
+    ];
+  return h("div", { class: "gate" }, h("header", { class: "l-top" }, brand()), h("div", { class: "gate-body" }, h("div", { class: "dialog claim", "data-ui": "" }, body)));
+}
+
+/** Offered once signed in, until there's a passkey: Face ID becomes the way in and the way to pay. */
+function passkeyBanner() {
+  if (!state.me || state.me.passkeys || state.laterPasskey || !canPasskey()) return null;
+  return h("section", { class: "nudge" },
+    h("span", { class: "agent-mark", "aria-hidden": "true" }, icon("face", 22)),
+    h("div", { class: "grow" }, h("b", {}, "Turn on Face ID"), h("p", { class: "small muted" }, "Sign in and approve payments with your face or fingerprint. An agent can't fake it.")),
+    h("button", { class: "btn pay", disabled: state.busy.passkey, onclick: () => act("passkey", addPasskey, "Face ID is on. You'll use it to sign in and to pay.") }, "Turn on"),
+    h("button", { class: "btn quiet", onclick: () => { state.laterPasskey = true; sessionSet("laterPasskey", "1"); render(); } }, "Later"),
   );
 }
 
@@ -422,7 +543,7 @@ function appView() {
         s?.balances?.USD ? h("span", { class: "bal" }, "Available ", h("b", {}, money(s.balances.USD / 100, "USD"))) : null,
         s ? h("span", { class: "mode", title: s.offline ? "Airwallex and Metal are simulated" : "Real Airwallex and Metal APIs" }, h("span", { class: `dot${s.offline ? "" : " live"}` }), s.offline ? "Offline demo" : s.sandbox ? "Sandbox" : "Live") : null,
         h("a", { class: "btn quiet icon-btn", href: "/ops/", target: "_blank", rel: "noopener", title: "Back office", "aria-label": "Back office" }, icon("ledger", 18)),
-        h("button", { class: "btn quiet icon-btn", title: "Sign out", "aria-label": "Sign out", onclick: async () => { await api("/auth/logout", {}); state.signedIn = false; render(); } }, icon("out", 18)),
+        h("button", { class: "btn quiet icon-btn", title: "Sign out", "aria-label": "Sign out", onclick: async () => { await api("/auth/logout", {}); state.me = await api("/auth/me").catch(() => state.me); state.signedIn = false; render(); } }, icon("out", 18)),
       ),
     )),
     h("div", { class: "wrap" },
@@ -445,7 +566,7 @@ function homeView() {
   // Keep what you just approved in view, so you can watch it go through.
   const recent = state.inbox.filter((i) => state.recent.has(i.id) && !NEEDS(i));
   const byAgents = state.payouts.filter((p) => p.source === "agent" && p.status === "paid");
-  return h("div", { class: "home-grid" },
+  return h("div", { class: "home" }, passkeyBanner(), h("div", { class: "home-grid" },
     h("section", { class: "stage", "aria-labelledby": "needs-h" },
       h("div", { class: "stage-head" },
         h("h2", { id: "needs-h" }, "Needs you"),
@@ -468,7 +589,7 @@ function homeView() {
         byAgents.slice(0, 4).map((p) => h("div", { class: "done-row" }, h("span", { class: "tick", "aria-hidden": "true" }, icon("check", 14)), h("div", { class: "grow" }, h("b", {}, `${money(p.amount, p.currency)} to ${p.payee}`), h("div", { class: "small muted" }, p.created_at ? ago(p.created_at) : "Delivered")))),
       ),
     ),
-  );
+  ));
 }
 
 /** A queued payment as one short row. A ready one can be paid right here; the rest open in the main card. */
@@ -480,7 +601,7 @@ function upNext(q, pick) {
   const i = q.item, f = i.fields, p = i.payout, key = `pay:${i.id}`;
   const amt = f.amount && f.currency ? money(f.amount, f.currency) : "";
   const action = i.status === "awaiting_approval"
-    ? h("button", { class: "btn pay small", disabled: state.busy[key], onclick: () => { state.recent.add(i.id); act(key, () => api(`/v1/inbox/${encodeURIComponent(i.id)}/approve`, {}), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); } }, state.busy[key] ? "Paying…" : `Pay ${money(p.amount, p.currency)}`)
+    ? h("button", { class: "btn pay small", disabled: state.busy[key], onclick: () => { state.recent.add(i.id); act(key, () => approveInvoice(i.id), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); } }, state.busy[key] ? "Paying…" : `Pay ${money(p.amount, p.currency)}`)
     : i.status === "needs_details"
       ? h("button", { class: "btn small", onclick: () => { state.open[i.id] = true; pick(i.id); } }, "Add missing details")
       : h("button", { class: "btn small", onclick: () => pick(i.id) }, "Check it");
@@ -628,7 +749,7 @@ function bankLine(f, masked) {
 function approveBlock(item) {
   const p = item.payout, key = `pay:${item.id}`;
   return h("div", { class: "actions" },
-    h("button", { class: "btn pay", disabled: state.busy[key], onclick: () => { state.recent.add(item.id); act(key, () => api(`/v1/inbox/${encodeURIComponent(item.id)}/approve`, {}), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); } }, state.busy[key] ? "Paying…" : `Pay ${money(p.amount, p.currency)}`),
+    h("button", { class: "btn pay", disabled: state.busy[key], onclick: () => { state.recent.add(item.id); act(key, () => approveInvoice(item.id), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); } }, state.busy[key] ? "Paying…" : `Pay ${money(p.amount, p.currency)}`),
     ignoreButton(item),
     h("span", { class: "muted small" }, `From your Airwallex balance by ${p.method === "SWIFT" ? "SWIFT" : "local transfer"}, about ${money(p.price_usdz, "USD")}.`),
   );
@@ -648,7 +769,7 @@ function verifyBlock(item) {
       h("span", {}, "I confirmed these bank details with the payee myself."),
     ),
     h("div", { class: "actions" },
-      h("button", { class: "btn pay", disabled: !ok || state.busy[key], onclick: () => { state.recent.add(item.id); act(key, () => api(`/v1/inbox/${encodeURIComponent(item.id)}/approve`, { verified_with_payee: true }), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); } }, `Pay ${money(p.amount, p.currency)}`),
+      h("button", { class: "btn pay", disabled: !ok || state.busy[key], onclick: () => { state.recent.add(item.id); act(key, () => approveInvoice(item.id, { verified_with_payee: true }), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); } }, `Pay ${money(p.amount, p.currency)}`),
       ignoreButton(item),
     ),
   ];
@@ -746,7 +867,7 @@ function row(k, v) { return v ? h("div", {}, k, ": ", h("code", {}, String(v))) 
 
 function reviewBlock(p) {
   const key = `review:${p.id}`;
-  const go = (decision) => act(key, () => api(`/v1/payouts/${encodeURIComponent(p.id)}/review`, { decision }), decision === "reject" ? "Blocked." : "Approved. The agent can pay it now.");
+  const go = (decision) => act(key, async () => api(`/v1/payouts/${encodeURIComponent(p.id)}/review`, { decision, confirmation: decision === "reject" ? undefined : await confirmWith("review", p.id) }), decision === "reject" ? "Blocked." : "Approved. The agent can pay it now.");
   return h("div", {},
     h("div", { class: "alert" }, h("b", {}, "Held for review: "), p.reasons.join("; ")),
     h("div", { class: "actions", style: "margin-top:8px" },
@@ -825,6 +946,8 @@ function connectAgents(origin) {
   return h("div", { class: "card connect" },
     h("h3", { class: "card-title" }, "Connect your agent"),
     h("p", { class: "small muted", style: "margin:4px 0 12px" }, "Claude, ChatGPT, OpenClaw, or the assistant you text from iMessage. It can forward invoices and check on payments. Approving stays with you."),
+    h("div", { class: "authmd" }, h("b", {}, "Easiest: let it sign itself up"), h("p", { class: "small muted" }, "Tell your agent: ", h("code", {}, `Connect to Sayso using ${origin}/auth.md`), ". It shows you a code; you enter it here and confirm with Face ID.")),
+    h("p", { class: "small muted", style: "margin:14px 0 10px" }, "Or make a key and paste it into the agent yourself:"),
     nk ? h("div", { class: "sheet" },
       h("div", { class: "alert", style: "background:var(--go-bg)" }, h("b", { style: "color:var(--go)" }, `Key for ${nk.agent.name}. `), "Copy it now; it won't be shown again."),
       h("pre", {}, nk.key),
@@ -853,6 +976,7 @@ function connectAgents(origin) {
 (async () => {
   try {
     const me = await api("/auth/me");
+    state.me = me;
     state.signedIn = me.owner;
     if (me.owner) { await load(); goLive(); }
   } catch { state.signedIn = false; }

@@ -63,7 +63,9 @@ Metal itself refuses to sign above `SAYSO_MAX_USDZ`.
 | `POST /v1/inbox/:id/details` | owner | Fill in what the extractor couldn't find; the invoice is checked again. |
 | `GET /v1/payouts`, `POST /v1/payouts/:id/review` | owner | Every payout; allow or block a held agent payout. |
 
-"Owner" means the app's session cookie (sign in with `OWNER_TOKEN`) or `Authorization: Bearer <OWNER_TOKEN>`. Agents never need it.
+"Owner" means the app's session cookie or `Authorization: Bearer <OWNER_TOKEN>`. The owner signs in with a passkey (Face ID, Touch ID, a fingerprint), an emailed one-time link to `OWNER_EMAIL`, Google (with `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`), or the owner token. Once a passkey exists, every approval needs a fresh passkey check bound to that payment, so a stolen session or an agent driving the browser can't pay.
+
+Agents sign themselves up through [auth.md](https://github.com/workos/auth.md): Sayso serves `/auth.md`, the RFC 9728 metadata and `service_auth` registration. The agent shows the owner a six-digit code, the owner enters it at `/claim` and confirms with their passkey, and the agent gets an hour-long access token plus a 30-day assertion to renew it. Owner-made keys from the Agents tab still work too. Agents never get the owner's sign-in.
 
 ## The app
 

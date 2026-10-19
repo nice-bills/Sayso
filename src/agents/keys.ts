@@ -22,7 +22,8 @@ export class AgentKeys {
     store.db.exec(`CREATE TABLE IF NOT EXISTS agent_keys (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE, cap_minor INTEGER,
       created_at TEXT NOT NULL, last_used_at TEXT, revoked_at TEXT
-    )`);
+    );
+    CREATE TABLE IF NOT EXISTS agent_tokens (token_hash TEXT PRIMARY KEY, agent_id TEXT NOT NULL, expires_at INTEGER NOT NULL)`);
   }
 
   /** Returns the secret once; only its hash is stored. */
@@ -33,9 +34,22 @@ export class AgentKeys {
     return { key, agent: this.get(id)! };
   }
 
-  /** The live agent behind a key, marking it used. */
+  /** A short-lived access token for an agent that signed up through auth.md (see agents/authmd.ts). */
+  issueToken(agentId: string, ttlSeconds: number, now = new Date()): string {
+    const token = `cs_at_${randomBytes(24).toString("base64url")}`;
+    this.store.db.prepare("DELETE FROM agent_tokens WHERE expires_at < ?").run(now.getTime());
+    this.store.db.prepare("INSERT INTO agent_tokens (token_hash, agent_id, expires_at) VALUES (?,?,?)").run(hash(token), agentId, now.getTime() + ttlSeconds * 1000);
+    return token;
+  }
+
+  revokeToken(token: string): void {
+    this.store.db.prepare("DELETE FROM agent_tokens WHERE token_hash = ?").run(hash(token));
+  }
+
+  /** The live agent behind a key or an unexpired access token, marking it used. */
   verify(key: string, now = new Date()): AgentKey | undefined {
-    const row = this.store.db.prepare("SELECT id FROM agent_keys WHERE key_hash = ? AND revoked_at IS NULL").get(hash(key)) as { id: string } | undefined;
+    const row = (this.store.db.prepare("SELECT id FROM agent_keys WHERE key_hash = ? AND revoked_at IS NULL").get(hash(key))
+      ?? this.store.db.prepare("SELECT k.id FROM agent_tokens t JOIN agent_keys k ON k.id = t.agent_id WHERE t.token_hash = ? AND t.expires_at > ? AND k.revoked_at IS NULL").get(hash(key), now.getTime())) as { id: string } | undefined;
     if (!row) return undefined;
     this.store.db.prepare("UPDATE agent_keys SET last_used_at = ? WHERE id = ?").run(now.toISOString(), row.id);
     return this.get(row.id);

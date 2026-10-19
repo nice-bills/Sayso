@@ -11,6 +11,9 @@ services:
       - { key: SAYSO_DB, value: /data/sayso.db }
       - { key: PUBLIC_URL, sync: false }
       - { key: OWNER_TOKEN, sync: false }
+      - { key: OWNER_EMAIL, sync: false }
+      - { key: GOOGLE_CLIENT_ID, sync: false }
+      - { key: GOOGLE_CLIENT_SECRET, sync: false }
       - { key: SESSION_SECRET, generateValue: true }
       - { key: AWX_CLIENT_ID, sync: false }
       - { key: AWX_API_KEY, sync: false }
