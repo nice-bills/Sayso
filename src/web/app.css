@@ -290,7 +290,7 @@ button:active:not(:disabled), .btn:active, .l-btn:active { transform: scale(.97)
 @keyframes band { from { opacity: 0; transform: translateX(-16px); } }
 
 /* ---------- app shell ---------- */
-.top { position: sticky; top: 0; z-index: 5; background: rgba(246, 247, 252, .92); }
+.top { position: sticky; top: 0; z-index: 5; background: var(--bg); }
 .top .wrap { display: flex; align-items: center; gap: 16px; height: 72px; }
 .top-right { display: flex; align-items: center; gap: 2px; margin-left: auto; }
 .bal { font-size: 15px; color: var(--muted); margin-right: 14px; white-space: nowrap; }
