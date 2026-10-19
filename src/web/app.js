@@ -7,7 +7,7 @@ const state = {
   signedIn: null, inbox: [], payouts: [], summary: null, agents: [], newKey: null,
   focus: decodeURIComponent(location.pathname.match(/^\/approve\/(.+)$/)?.[1] ?? "") || null,
   tab: sessionGet("tab") || "home", filter: "all", events: [], recent: new Set(),
-  showAdd: false, drafts: {}, verified: {}, open: {}, busy: {}, toast: null,
+  pick: null, showAdd: false, drafts: {}, verified: {}, open: {}, busy: {}, toast: null,
 };
 
 function sessionGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
@@ -152,31 +152,47 @@ function motion(key, status) {
 }
 document.addEventListener("focusout", () => setTimeout(() => { if (dirty) render(); }, 0));
 
-function brand() { return h("div", { class: "brand" }, "sayso"); }
+function brand() { return h("div", { class: "brand" }, h("i", { "aria-hidden": "true" }), "sayso"); }
 
 // ---------- landing: the product performs ----------
 // Each section is a working piece of Sayso at its real size, not a picture of it.
 function landing() {
   return h("div", { class: "landing" },
     h("section", { class: "l-hero" },
-      h("header", { class: "l-top" }, brand(), h("a", { class: "l-link", href: "#signin", onclick: toToken }, "Sign in")),
-      h("div", { class: "l-hero-grid" },
-        h("div", { class: "l-hero-copy" },
-          h("h1", {}, h("span", { class: "soft" }, "Your agents pay the bills."), " ", h("span", {}, "You keep the say.")),
-          h("p", { class: "l-lede" }, "Any AI agent can pay a real invoice in local currency through Airwallex. Sayso checks the payee with their bank first, and anything risky waits for your tap."),
-          h("div", { class: "l-actions" },
-            h("a", { class: "l-btn", href: "#signin", onclick: toToken }, "Sign in"),
-            h("a", { class: "l-text-link", href: "#how" }, "See how it moves", h("span", { "aria-hidden": "true", class: "arrow" }, "→")),
-          ),
+      h("header", { class: "l-top" }, brand(),
+        h("nav", { class: "l-nav", "aria-label": "Sections" },
+          h("a", { href: "#demo" }, "See it work"), h("a", { href: "#refuses" }, "Safety"), h("a", { href: "#try" }, "Three invoices"),
+          h("a", { class: "l-btn small", href: "#signin", onclick: toToken }, "Sign in"))),
+      heroCards(),
+      h("div", { class: "l-hero-copy" },
+        h("h1", {}, "Your agents pay the bills. ", h("span", { class: "soft" }, "You keep the say.")),
+        h("p", { class: "l-lede" }, "Let any AI agent pay real invoices in euros, pounds or dollars. Sayso checks every payee with their bank, and anything risky waits for your tap."),
+        h("div", { class: "l-actions" },
+          h("a", { class: "l-btn", href: "#signin", onclick: toToken }, "Sign in"),
+          h("a", { class: "l-btn light", href: "#demo" }, "See it pay an invoice"),
         ),
-        heroDemo(),
       ),
+      h("div", { class: "l-rails" }, h("span", {}, "Payouts through"), h("b", {}, "Airwallex"), h("b", {}, "Metal"), h("b", {}, "Claude"), h("b", {}, "ChatGPT")),
+    ),
+    h("section", { id: "demo", class: "l-sec demo-sec" },
+      h("div", { class: "sec-head", "data-reveal": "" }, h("h2", {}, "Tap Pay. ", h("span", { class: "soft" }, "Watch it land.")), h("p", {}, "This is the real card from the app. Try it.")),
+      h("div", { "data-reveal": "" }, heroDemo()),
     ),
     howSection(),
     refusesSection(),
     trySection(),
     signinSection(),
     footer(),
+  );
+}
+
+/** Four real moments from Sayso, pinned around the headline like notes on a desk. */
+function heroCards() {
+  return h("div", { class: "stickers", "data-ui": "", "aria-hidden": "true" },
+    h("div", { class: "sticker k1" }, h("div", { class: "s-top" }, h("span", {}, "Paid by your agent"), h("span", { class: "pill go" }, "Delivered")), h("b", {}, "€180.00 to Lingua Freelance"), "SEPA to Paris, 4 seconds", h("div", { class: "s-bar" }, h("i"), h("i"), h("i"))),
+    h("div", { class: "sticker k2" }, h("div", { class: "s-who" }, h("i"), "Claude"), h("div", { class: "s-bubble" }, "Found the Holloway Print invoice for £72. It's waiting for your tap.")),
+    h("div", { class: "sticker k3" }, h("div", { class: "s-top" }, h("span", {}, "Holloway Print Ltd"), h("span", { class: "pill coin" }, "Ready to pay")), h("b", {}, "£72.00"), "Faster Payments from your balance", h("div", { class: "s-mini" }, h("span", { class: "on" }, "Pay £72.00"), h("span", {}, "Not now"))),
+    h("div", { class: "sticker k4" }, h("div", { class: "s-top" }, h("span", {}, "Rent, “new bank details”"), h("span", { class: "pill stop" }, "Held")), h("b", {}, "€60.00 to Mark Lehmann?"), "The bank says this isn't your landlord's account. Call them first."),
   );
 }
 /** Restart a one-shot animation on an element that is already on the page. */
@@ -233,10 +249,10 @@ function heroDemo() {
 /** One slider drives two fields: the stage in words, and the payout at that stage. */
 function howSection() {
   const stages = [
-    ["Quote", "First, the agent asks for an exact price", "Quoted", "info"],
-    ["Pay", "Then it pays in USDZ on Metal", "Paid in USDZ", "info"],
-    ["Check", "Next, the bank confirms the payee", "Payee confirmed", "info"],
-    ["Deliver", "Last, Airwallex sends the euros", "Delivered", "go"],
+    ["Quote", "The agent asks for a price", "Quoted", "info"],
+    ["Pay", "It pays in USDZ on Metal", "Paid in USDZ", "info"],
+    ["Check", "The bank confirms the payee", "Payee confirmed", "info"],
+    ["Deliver", "Airwallex sends the euros", "Delivered", "go"],
   ];
   const rows = [
     ["Price", "201.84 USDZ, with a 1.26 fee"],
@@ -403,6 +419,7 @@ function appView() {
       brand(),
       h("nav", { class: "tabs", role: "tablist" }, tabs.map(([id, label, ic, n]) => h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === id && !state.focus), onclick: () => { state.tab = id; sessionSet("tab", id); shown.clear(); leaveFocus(); render(); window.scrollTo(0, 0); } }, icon(ic, 20), h("span", { class: "tab-label" }, label), n ? h("span", { class: "count" }, n) : null))),
       h("div", { class: "top-right" },
+        s?.balances?.USD ? h("span", { class: "bal" }, "Available ", h("b", {}, money(s.balances.USD / 100, "USD"))) : null,
         s ? h("span", { class: "mode", title: s.offline ? "Airwallex and Metal are simulated" : "Real Airwallex and Metal APIs" }, h("span", { class: `dot${s.offline ? "" : " live"}` }), s.offline ? "Offline demo" : s.sandbox ? "Sandbox" : "Live") : null,
         h("a", { class: "btn quiet icon-btn", href: "/ops/", target: "_blank", rel: "noopener", title: "Back office", "aria-label": "Back office" }, icon("ledger", 18)),
         h("button", { class: "btn quiet icon-btn", title: "Sign out", "aria-label": "Sign out", onclick: async () => { await api("/auth/logout", {}); state.signedIn = false; render(); } }, icon("out", 18)),
@@ -414,36 +431,64 @@ function appView() {
   );
 }
 
-// ---------- home: what needs you, and what your agents are doing ----------
+// ---------- home: one thing at a time, with what's next beside it ----------
 function homeView() {
   const order = ["needs_verification", "awaiting_approval", "needs_details"];
   const needs = state.inbox.filter(NEEDS).sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
   const reviews = reviewable();
-  const n = needs.length + reviews.length;
+  const queue = [...reviews.map((p) => ({ key: p.id, payout: p })), ...needs.map((i) => ({ key: i.id, item: i }))];
+  const n = queue.length;
+  const at = Math.max(0, queue.findIndex((q) => q.key === state.pick));
+  const cur = queue[at];
+  const rest = queue.filter((_, i) => i !== at);
+  const pick = (key) => { state.pick = key; render(); };
   // Keep what you just approved in view, so you can watch it go through.
   const recent = state.inbox.filter((i) => state.recent.has(i.id) && !NEEDS(i));
-  const s = state.summary;
-  const usd = (s?.balances ?? {}).USD;
-  return h("div", {},
-    h("section", { class: "app-hero" },
-      h("h2", { class: `hero-title${motion(`title:${n ? "n" : "clear"}`).cls}` }, n ? `${n} ${n === 1 ? "payment needs" : "payments need"} you` : "All clear"),
-      h("p", { class: "muted" },
-        !s ? "Connecting…" : s.offline ? "Offline demo with simulated Airwallex and Metal." : `Live on the Airwallex${s.sandbox ? " sandbox" : ""} and Metal${s.sandbox ? " testnet" : ""}.`,
-        usd ? ` ${money(usd / 100, "USD")} available.` : ""),
-    ),
-    h("div", { class: "home-grid" },
-      h("section", {},
-        h("h3", { class: "section" }, "Needs you"),
-        h("div", { class: "list" },
-          n ? [reviews.map(payoutRow), needs.map(invoiceCard)] : h("div", { class: "empty" }, "Nothing needs you. Your agents will bring the next invoice here."),
-          recent.length ? [h("h3", { class: "section sub-section" }, "Just approved"), recent.map(invoiceCard)] : null,
-        ),
+  const byAgents = state.payouts.filter((p) => p.source === "agent" && p.status === "paid");
+  return h("div", { class: "home-grid" },
+    h("section", { class: "stage", "aria-labelledby": "needs-h" },
+      h("div", { class: "stage-head" },
+        h("h2", { id: "needs-h" }, "Needs you"),
+        n ? h("span", { class: "stage-count" }, `${at + 1} of ${n}`) : null,
+        n > 1 ? h("div", { class: "dots", "aria-hidden": "true" }, queue.map((_, i) => h("i", { class: i === at ? "on" : "" }))) : null,
       ),
-      h("section", { class: "activity" },
-        h("h3", { class: "section" }, "What's happening"),
-        activityFeed(),
+      cur ? h("div", { class: "stage-card" }, cur.item ? invoiceCard(cur.item) : payoutRow(cur.payout),
+        n > 1 ? h("button", { class: "btn quiet skip", type: "button", onclick: () => pick(queue[(at + 1) % n].key) }, "Not now, show the next one") : null)
+        : h("div", { class: "stage-card clear" }, h("b", { class: "clear-title" }, "All clear"), h("p", { class: "muted" }, "Nothing needs you. Your agents will bring the next invoice here.")),
+    ),
+    h("div", { class: "side" },
+      rest.length ? h("section", { class: "box" },
+        h("h3", { class: "box-h" }, "Up next", h("span", {}, String(rest.length))),
+        h("div", { class: "next-list" }, rest.map((q) => upNext(q, pick))),
+      ) : null,
+      recent.length ? h("section", { class: "box" }, h("h3", { class: "box-h" }, "Just approved"), h("div", { class: "list" }, recent.map(invoiceCard))) : null,
+      h("section", { class: "box" },
+        h("h3", { class: "box-h" }, "Your agents"),
+        h("div", { class: "big-num" }, `${byAgents.length} paid`), h("p", { class: "muted small", style: "margin:0 0 6px" }, "without needing you"),
+        byAgents.slice(0, 4).map((p) => h("div", { class: "done-row" }, h("span", { class: "tick", "aria-hidden": "true" }, icon("check", 14)), h("div", { class: "grow" }, h("b", {}, `${money(p.amount, p.currency)} to ${p.payee}`), h("div", { class: "small muted" }, p.created_at ? ago(p.created_at) : "Delivered")))),
       ),
     ),
+  );
+}
+
+/** A queued payment as one short row. A ready one can be paid right here; the rest open in the main card. */
+function upNext(q, pick) {
+  if (q.payout) {
+    const p = q.payout;
+    return h("div", { class: "next warn" }, h("span", { class: "ic" }, "!"), h("div", { class: "grow" }, h("b", {}, p.payee), h("div", { class: "small muted" }, "Held for review")), h("button", { class: "btn small", onclick: () => pick(q.key) }, "Review"));
+  }
+  const i = q.item, f = i.fields, p = i.payout, key = `pay:${i.id}`;
+  const amt = f.amount && f.currency ? money(f.amount, f.currency) : "";
+  const action = i.status === "awaiting_approval"
+    ? h("button", { class: "btn pay small", disabled: state.busy[key], onclick: () => { state.recent.add(i.id); act(key, () => api(`/v1/inbox/${encodeURIComponent(i.id)}/approve`, {}), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); } }, state.busy[key] ? "Paying…" : `Pay ${money(p.amount, p.currency)}`)
+    : i.status === "needs_details"
+      ? h("button", { class: "btn small", onclick: () => { state.open[i.id] = true; pick(i.id); } }, "Add missing details")
+      : h("button", { class: "btn small", onclick: () => pick(i.id) }, "Check it");
+  const why = { awaiting_approval: "Ready to pay", needs_details: "A few details are missing", needs_verification: amt ? `${amt}, held: check the bank details` : "Held: check the bank details" }[i.status];
+  return h("div", { class: `next${i.status === "needs_verification" ? " stop" : ""}` },
+    h("span", { class: "ic" }, i.status === "needs_verification" ? "!" : (f.currency ? { EUR: "€", GBP: "£", USD: "$" }[f.currency] ?? "·" : "?")),
+    h("div", { class: "grow" }, h("b", {}, f.payeeName ?? sender(i.from)), h("div", { class: "small muted" }, why)),
+    action,
   );
 }
 
@@ -727,6 +772,7 @@ function paymentsView() {
     h("div", { class: "head" }, h("div", {}, h("h2", {}, "Payments"), h("div", { class: "muted small" }, rec ? (rec.ok ? "Books reconcile to the cent." : "Books don't reconcile. Check the back office.") : "Every payout, from agents and from your inbox.")),
     ),
     h("p", { class: "summary" }, `${delivered.length} delivered, ${moving.length} on the way, ${all.filter((p) => p.status === "refunded").length} bounced and refunded.`, delivered.length ? ` ${byCcy(delivered)} so far.` : ""),
+    h("details", { class: "happening" }, h("summary", {}, "What's happening, step by step"), activityFeed()),
     h("div", { class: "filters", style: "margin-bottom:12px" }, filters.map(([id, label]) => h("button", { class: "chip", "aria-pressed": String(state.filter === id), onclick: () => { state.filter = id; render(); } }, label))),
     h("div", { class: "list" }, shown.length ? shown.map(payoutRow) : h("div", { class: "empty" }, icon("payments", 22), h("div", {}, "Nothing here yet."))),
   );
