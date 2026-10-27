@@ -9,6 +9,7 @@ const state = {
   focus: decodeURIComponent(location.pathname.match(/^\/approve\/(.+)$/)?.[1] ?? "") || null,
   tab: sessionGet("tab") || "home", filter: "all", events: [], recent: new Set(),
   pick: null, showAdd: false, drafts: {}, verified: {}, open: {}, busy: {}, toast: null,
+  say: { listening: false, text: "", result: null }, why: {},
 };
 
 function sessionGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
@@ -46,6 +47,7 @@ const ICONS = {
   ext: "M15 3h6v6 M10 14 21 3 M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
   back: "M19 12H5 M12 19l-7-7 7-7",
   ledger: "M4 4h16v16H4z M8 9h8 M8 13h8 M8 17h5",
+  mic: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z M19 10v2a7 7 0 0 1-14 0v-2 M12 19v3",
   face: "M7 3H5a2 2 0 0 0-2 2v2 M17 3h2a2 2 0 0 1 2 2v2 M7 21H5a2 2 0 0 1-2-2v-2 M17 21h2a2 2 0 0 0 2-2v-2 M9 9v1.5 M15 9v1.5 M12 9v4h-1 M9 16c1.7 1.3 4.3 1.3 6 0",
 };
 function icon(name, size = 18) {
@@ -566,7 +568,7 @@ function homeView() {
   // Keep what you just approved in view, so you can watch it go through.
   const recent = state.inbox.filter((i) => state.recent.has(i.id) && !NEEDS(i));
   const byAgents = state.payouts.filter((p) => p.source === "agent" && p.status === "paid");
-  return h("div", { class: "home" }, passkeyBanner(), h("div", { class: "home-grid" },
+  return h("div", { class: "home" }, passkeyBanner(), sayCard(), h("div", { class: "home-grid" },
     h("section", { class: "stage", "aria-labelledby": "needs-h" },
       h("div", { class: "stage-head" },
         h("h2", { id: "needs-h" }, "Needs you"),
@@ -611,6 +613,96 @@ function upNext(q, pick) {
     h("div", { class: "grow" }, h("b", {}, f.payeeName ?? sender(i.from)), h("div", { class: "small muted" }, why)),
     action,
   );
+}
+
+// ---------- say it: what I heard, and what I understood ----------
+// The browser transcribes (on device or through its speech service); the words appear as they are
+// heard, then Sayso shows how it read them, field by field, and where each field came from. Bank
+// details never come from speech. Nothing pays until you tap Pay and confirm with your passkey.
+const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recog;
+function startListening() {
+  const s = state.say;
+  recog = new Speech();
+  recog.lang = navigator.language || "en-GB";
+  recog.interimResults = true;
+  recog.continuous = false;
+  Object.assign(s, { listening: true, text: "", result: null });
+  render();
+  // The live words go straight into their element: a full re-render per syllable would flicker.
+  recog.onresult = (e) => {
+    s.text = Array.from(e.results, (r) => r[0].transcript).join("").trim();
+    const live = document.getElementById("say-live");
+    if (live) live.textContent = s.text || "Listening…";
+  };
+  recog.onerror = (e) => { s.listening = false; toast(e.error === "not-allowed" || e.error === "service-not-allowed" ? "Allow the microphone to say a payment, or type it." : e.error === "no-speech" ? "I didn't hear anything." : "I didn't catch that. Try again, or type it."); };
+  recog.onend = () => { s.listening = false; if (s.text) understand(s.text); else render(); };
+  try { recog.start(); } catch { s.listening = false; render(); }
+}
+function understand(text) {
+  document.activeElement?.blur?.();
+  state.say.text = text;
+  act("say", async () => {
+    state.say.result = await api("/v1/say", { transcript: text });
+    // An invoice that still needs something opens as the main card under Needs you.
+    const item = state.say.result.item;
+    if (item && item.status !== "awaiting_approval" && NEEDS(item)) state.pick = item.id;
+  });
+}
+
+function sayCard() {
+  const s = state.say, r = s.result;
+  return h("section", { class: "say", "aria-label": "Say a payment" },
+    h("div", { class: "say-row" },
+      Speech ? h("button", { class: `mic${s.listening ? " on" : ""}`, type: "button", "aria-label": s.listening ? "Stop listening" : "Say a payment", "aria-pressed": String(s.listening), onclick: () => (s.listening ? recog?.stop() : startListening()) }, icon("mic", 22)) : null,
+      h("form", { class: "grow", onsubmit: (e) => { e.preventDefault(); const t = e.target.elements.say.value.trim(); if (t) understand(t); } },
+        h("input", { class: "field say-field", name: "say", autocomplete: "off", value: s.listening ? "" : s.text, "aria-label": "Say or type a payment",
+          placeholder: Speech ? "Tap the mic and say it, or type: Pay Kreuzberg Studio 280 euros" : "Type it: Pay Kreuzberg Studio 280 euros", oninput: (e) => { s.text = e.target.value; } })),
+    ),
+    s.listening ? h("p", { class: "say-live", id: "say-live", "aria-live": "polite" }, s.text || "Listening…") : null,
+    state.busy.say ? h("p", { class: "muted small say-note" }, "Checking what I heard…")
+      : r ? sayResult(r)
+      : h("p", { class: "muted small say-note" }, "Say who to pay and how much. You'll see the exact words I heard and how I read them before anything moves."),
+  );
+}
+
+const SAID = { payee: "Pay", amount: "Amount", reference: "Reference", bank: "Into" };
+function sayResult(r) {
+  const ccy = r.understood.find((u) => u.field === "currency")?.value;
+  const item = r.item ? state.inbox.find((i) => i.id === r.item.id) ?? r.item : null;
+  return h("div", { class: "heard-grid" },
+    h("div", { class: "heard" }, h("div", { class: "lbl" }, "I heard"), h("blockquote", {}, `“${r.heard}”`),
+      h("button", { class: "btn quiet small", type: "button", onclick: () => { state.say.result = null; render(); document.querySelector(".say-field")?.focus(); } }, "That's not what I said")),
+    h("div", { class: "understood" }, h("div", { class: "lbl" }, "I understood"),
+      h("dl", {}, r.understood.filter((u) => SAID[u.field]).map((u) => h("div", { class: "u-row" },
+        h("dt", {}, SAID[u.field]),
+        h("dd", {}, h("b", {}, u.value ? (u.field === "amount" ? money(u.value, ccy || "USD") : u.value) : "?"),
+          h("span", { class: `src${u.source.startsWith("you said") ? " said" : ""}` }, u.source.startsWith("you said") ? u.source : `from ${u.source}`)))))),
+    r.problem ? h("div", { class: "alert note" }, r.problem) : null,
+    item ? h("div", { class: "say-item" }, item.status === "awaiting_approval" ? approveBlock(item)
+      : NEEDS(item) ? h("p", { class: "small", style: "margin:0" }, item.status === "needs_verification" ? "That's an invoice Sayso is holding: it asks to pay new bank details. It's open below under Needs you." : "That invoice is missing details. It's open below under Needs you.")
+      : invoiceCard(item)) : null,
+  );
+}
+
+// ---------- why: every step behind a payment, with its proof ----------
+const WHY = { heard: "You said", read: "Claude read", risk: "Rules", payee: "Bank", mandate: "Mandate", observe: "Seen", decide: "Decided", act: "Moved", reconcile: "Settled", escalate: "Flagged", refuse: "Refused", receipt: "Receipt" };
+function whyButton(id) {
+  const open = Boolean(state.why[id]);
+  return h("button", { class: "btn quiet small why-btn", type: "button", disabled: state.busy[`why:${id}`], onclick: () => open ? (delete state.why[id], render()) : act(`why:${id}`, async () => { state.why[id] = await api(`/v1/payouts/${encodeURIComponent(id)}/why`); }) }, open ? "Hide why" : "Why?");
+}
+function whyPanel(id) {
+  const w = state.why[id];
+  if (!w) return null;
+  return h("ol", { class: "why" }, w.steps.map((s) => h("li", { class: `why-step ${TONE[s.kind] ?? ""}` },
+    h("span", { class: "why-k" }, WHY[s.kind] ?? s.kind),
+    h("div", { class: "grow" },
+      h("div", {}, sentence(s.title.replace(/ \(sim\)$/, ""))),
+      s.kind === "mandate" && s.detail?.limits ? h("div", { class: "small muted" }, `Owner's limits: ${s.detail.limits.cap_usdz} USDZ a payment, ${s.detail.limits.budget_usdz} USDZ in total${s.detail.limits.expires_at ? `, until ${new Date(s.detail.limits.expires_at).toLocaleDateString()}` : ""}. Mandate `, h("code", {}, `${String(s.detail.ref).slice(0, 10)}…`)) : null,
+      s.detail?.citations?.length ? h("div", { class: "small muted" }, s.detail.citations.map((c) => `“${c}”`).join("  ")) : null,
+      s.detail?.hash ? h("div", { class: "small muted" }, "Receipt hash ", h("code", {}, `${String(s.detail.hash).slice(0, 14)}…`)) : null,
+      h("div", { class: "small soft" }, ago(s.at), " ", proof(s.proof) ?? (s.proof?.startsWith("sim:") ? "(simulated)" : "")),
+    ))));
 }
 
 // Each step's tone: green moved money, amber waits for a person, red was refused.
@@ -732,7 +824,7 @@ function invoiceCard(item) {
     item.status === "needs_verification" ? verifyBlock(item) : null,
     item.status === "needs_details" ? (state.open[item.id] ? detailsBlock(item)
       : [h("div", { class: "sub" }, `Sayso couldn't find the ${item.missing.join(", ")}.`), h("div", { class: "actions" }, h("button", { class: "btn", onclick: () => { state.open[item.id] = true; render(); } }, "Add missing details"), ignoreButton(item))]) : null,
-    item.status === "paying" && p ? [timeline(p, true), failure(p)] : null,
+    item.status === "paying" && p ? [timeline(p, true), failure(p), whyButton(p.id), whyPanel(p.id)] : null,
     item.status === "rejected" && p?.reasons?.length ? h("div", { class: "alert" }, h("b", {}, "Sayso won't pay this: "), p.reasons.join("; ")) : null,
     item.status === "duplicate" ? h("div", { class: "sub" }, "This matches an invoice already in your inbox, so it wasn't queued again.") : null,
   );
@@ -756,23 +848,36 @@ function approveBlock(item) {
 }
 
 function verifyBlock(item) {
-  const p = item.payout, f = item.fields, key = `pay:${item.id}`;
+  const p = item.payout, f = item.fields, key = `pay:${item.id}`, pc = item.penny, contact = item.contact_on_file;
   const ok = Boolean(state.verified[item.id]);
-  return [
-    h("div", { class: "alert" },
-      h("b", {}, icon("shield", 15), " Sayso is holding this one until you call."),
-      p?.reasons?.length ? h("ul", {}, p.reasons.map((r) => h("li", {}, r))) : null,
-      h("p", { style: "margin:8px 0 0" }, `Call ${f.payeeName ?? "the payee"} on a number you already had (not one from this email) and read them these details: `, h("code", {}, bankLine(f, false))),
-    ),
+  const pay = (extra) => { state.recent.add(item.id); act(key, () => approveInvoice(item.id, extra), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); };
+  const head = h("div", { class: "alert" },
+    h("b", {}, icon("shield", 15), " Sayso is holding this one until the payee confirms."),
+    p?.reasons?.length ? h("ul", {}, p.reasons.map((r) => h("li", {}, r))) : null);
+  if (pc?.status === "confirmed") return [
+    h("div", { class: "alert ok" }, h("b", {}, icon("check", 15), ` ${pc.contact} confirmed the new details`), "\u00a0with the code from the 1-cent payment."),
+    h("div", { class: "actions" }, h("button", { class: "btn pay", disabled: state.busy[key], onclick: () => pay({}) }, `Pay ${money(p.amount, p.currency)}`), ignoreButton(item)),
+  ];
+  if (pc?.status === "denied" || pc?.status === "failed") return [
+    h("div", { class: "alert" }, h("b", {}, icon("hand", 15), pc.status === "denied" ? ` ${pc.contact} says these are not their bank details.` : " The payee never gave the right code."), " Don't pay this invoice; it is very likely fraud."),
+    h("div", { class: "actions" }, ignoreButton(item)),
+  ];
+  const call = [
+    h("p", { class: "small", style: "margin:0" }, `Or call ${f.payeeName ?? "the payee"} on a number you already had (not one from this email) and read them: `, h("code", {}, bankLine(f, false))),
     h("label", { class: "check" },
       h("input", { type: "checkbox", checked: ok, onchange: (e) => { state.verified[item.id] = e.target.checked; render(); } }),
-      h("span", {}, "I confirmed these bank details with the payee myself."),
-    ),
-    h("div", { class: "actions" },
-      h("button", { class: "btn pay", disabled: !ok || state.busy[key], onclick: () => { state.recent.add(item.id); act(key, () => approveInvoice(item.id, { verified_with_payee: true }), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); } }, `Pay ${money(p.amount, p.currency)}`),
-      ignoreButton(item),
-    ),
+      h("span", {}, "I confirmed these bank details with the payee myself.")),
+    h("div", { class: "actions" }, h("button", { class: "btn pay", disabled: !ok || state.busy[key], onclick: () => pay({ verified_with_payee: true }) }, `Pay ${money(p.amount, p.currency)}`), ignoreButton(item)),
   ];
+  if (pc?.status === "sent") return [head,
+    h("div", { class: "alert note" }, h("b", {}, "Waiting for the payee's code."), ` Sayso sent 0.01 ${p.currency} to the account ending ${(f.iban ?? f.accountNumber ?? "").replace(/\s/g, "").slice(-4)} with a code in its reference, and asked ${pc.contact} (from your earlier invoices) to enter it.`,
+      pc.simStatementReference ? h("div", { class: "small", style: "margin-top:6px" }, "Demo: the payee's statement reads ", h("code", {}, pc.simStatementReference), ". ", h("a", { href: pc.simLink, target: "_blank", rel: "noopener" }, "Open the payee's page")) : null),
+    h("details", {}, h("summary", { class: "small" }, "Can't wait? Call them instead"), call)];
+  if (contact) return [head,
+    h("p", { class: "small", style: "margin:4px 0 0" }, `Sayso can send 0.01 ${p.currency} with a code to the new account, and ask ${contact} (the address on your earlier invoices, not this sender) to type it in. Only the real owner of the account sees the code.`),
+    h("div", { class: "actions" }, h("button", { class: "btn pay", disabled: state.busy[`penny:${item.id}`], onclick: () => act(`penny:${item.id}`, () => api(`/v1/inbox/${encodeURIComponent(item.id)}/penny`, {}), "Sent. Waiting for the payee's code.") }, state.busy[`penny:${item.id}`] ? "Sending…" : "Check with a 1-cent code"), ignoreButton(item)),
+    h("details", {}, h("summary", { class: "small" }, "Or call them yourself"), call)];
+  return [head, ...call];
 }
 
 const FIELDS = [
@@ -854,7 +959,10 @@ function payoutRow(p) {
     timeline(p, from === "Inbox"),
     failure(p),
     p.status === "needs_review" && !linkedPayouts().has(p.id) ? reviewBlock(p) : null,
-    h("button", { class: "btn quiet small", style: "justify-self:start;padding-left:0", onclick: () => { state.open[p.id] = !open; render(); } }, open ? "Hide details" : "Details"),
+    h("div", { class: "spaced" },
+      h("button", { class: "btn quiet small", style: "padding-left:0", onclick: () => { state.open[p.id] = !open; render(); } }, open ? "Hide details" : "Details"),
+      whyButton(p.id)),
+    whyPanel(p.id),
     open ? h("div", { class: "proofs" },
       row("Payout id", p.id), row("Method", p.method),
       from === "Agent" ? row("Agent paid", `${usdz(p.price_usdz)} (fee ${usdz(p.fee_usdz)})`) : null,
@@ -915,6 +1023,7 @@ function agentsView() {
   return h("div", {},
     h("div", { class: "head" }, h("h2", {}, "Agents")),
     h("p", { class: "summary" }, `Agents have paid ${agentPays.length} ${agentPays.length === 1 ? "invoice" : "invoices"} with ${usdz(received)} over x402, and ${money(swept, "USD")} of Sayso's earnings has moved into Airwallex.`),
+    escrowBox(),
     connectAgents(origin),
     h("h3", { class: "section" }, "Recent agent payouts"),
     h("div", { class: "list" }, agentPays.length ? agentPays.slice(0, 10).map(payoutRow) : h("div", { class: "empty" }, "No agent has paid yet. Connect one above, and its payouts show up here.")),
@@ -922,8 +1031,21 @@ function agentsView() {
       h("summary", {}, "Developer setup"),
       h("p", { class: "small muted" }, "For an agent with its own Metal wallet: it gets a free quote, pays the exact price over x402, and Metal won't sign above the cap you set."),
       snippet("Run the MCP server next to the agent", mcp),
+      h("p", { class: "small muted" }, "Better: the agent's owner gives it a budget on Metal (Sayso as the only payee, a cap per payment, a total), and the agent pays from the owner's account. Metal refuses anything outside it."),
+      snippet("The owner binds a budget, then the agent uses it", `SAYSO_PAY_TO=${state.summary?.pay_to ?? "<pay_to from /healthz>"} npm run setup:agent-budget -- --cap 250 --budget 1000 --days 30\n\nclaude mcp add sayso -e SAYSO_URL=${origin} \\\n  -e SAYSO_MANDATE=.metal/agent-budget.json -- npx tsx src/mcp/server.ts`),
       snippet("Or call the API", curl),
     ),
+  );
+}
+function escrowBox() {
+  const e = state.summary?.escrow;
+  if (!e) return null;
+  const m = state.summary.mandates;
+  return h("div", { class: "card escrow" },
+    h("div", { class: "esc" }, h("div", {}, h("div", { class: "lbl" }, "In escrow on Metal"), h("b", {}, usdz(e.heldMinor / 100)), h("div", { class: "small muted" }, e.heldPayouts ? `behind ${e.heldPayouts} ${e.heldPayouts === 1 ? "payout" : "payouts"} on their way` : "nothing on its way")),
+      h("div", {}, h("div", { class: "lbl" }, "Earned by delivered payouts"), h("b", {}, usdz(e.deliveredMinor / 100)), h("div", { class: "small muted" }, `${usdz(e.sweptMinor / 100)} released to Airwallex`))),
+    h("p", { class: "small muted", style: "margin:12px 0 0" }, "An agent's USDZ leaves escrow only when its payout is delivered (to the ramp, under a mandate that pays nobody else) or bounces (back to the agent, under the capped refund mandate). Metal enforces both.",
+      m === "required" ? " Agents must pay under a Metal mandate their owner bound, and sign each exact order." : m === "verify" ? " Payments made under an owner's Metal mandate are verified on chain and shown under Why." : ""),
   );
 }
 function snippet(title, text) {

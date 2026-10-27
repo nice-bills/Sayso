@@ -28,8 +28,9 @@ export interface PennyCheck {
   attempts: number;
   transferId: string | null;
   createdAt: string;
-  /** Offline only: what the payee's bank statement would show, so a demo can play the payee. */
+  /** Offline only: what the payee's bank statement would show, and the emailed link, so a demo can play the payee. */
   simStatementReference?: string;
+  simLink?: string;
 }
 
 const MAX_ATTEMPTS = 3;
@@ -149,7 +150,7 @@ function decode(r: Record<string, string | number | null>): PennyCheck {
   return {
     id: String(r.id), inboxId: String(r.inbox_id), payoutId: String(r.payout_id), contact: String(r.contact), status: r.status as PennyStatus,
     attempts: Number(r.attempts), transferId: (r.transfer_id as string | null) ?? null, createdAt: String(r.created_at),
-    ...(r.sim_reference ? { simStatementReference: String(r.sim_reference) } : {}),
+    ...(r.sim_reference ? { simStatementReference: String(r.sim_reference), simLink: `/v/${String(r.token)}` } : {}),
   };
 }
 

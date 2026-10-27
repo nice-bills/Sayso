@@ -477,3 +477,45 @@ pre { background: var(--surface-2); border-radius: var(--r-sm); padding: 12px 14
 @keyframes lift { 0% { transform: none; } 30% { transform: translateY(-3px); } 100% { transform: none; } }
 @keyframes breathe { from { opacity: .45; } to { opacity: 1; } }
 @keyframes toast { from { opacity: 0; transform: translate(-50%, 14px); } }
+
+/* say it: the words heard, then how Sayso read them */
+.say { background: var(--surface); border-radius: 24px; padding: 18px; margin-bottom: 18px; display: grid; gap: 12px; }
+.say-row { display: flex; gap: 12px; align-items: center; }
+.say-row form { display: flex; }
+.say-field { width: 100%; font-size: 17px; }
+.mic { flex: none; width: 52px; height: 52px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); }
+.mic.on { background: var(--stop); }
+@media (prefers-reduced-motion: no-preference) { .mic.on { animation: listen 1.2s ease-in-out infinite; } }
+@keyframes listen { 50% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--stop) 18%, transparent); } }
+.say-live { margin: 0; font-size: clamp(22px, 2.4vw, 30px); line-height: 1.25; letter-spacing: -.02em; font-weight: 500; min-height: 1.25em; }
+.say-note { margin: 0; }
+.heard-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 12px; }
+.heard, .understood { background: var(--surface-2); border-radius: 16px; padding: 14px 16px; min-width: 0; }
+.heard blockquote { margin: 6px 0 4px; font-size: 20px; line-height: 1.35; overflow-wrap: anywhere; }
+.lbl { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); }
+.understood dl { margin: 6px 0 0; display: grid; gap: 6px; }
+.u-row { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.u-row dt { color: var(--muted); font-size: 14px; }
+.u-row dd { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; min-width: 0; }
+.u-row dd b { overflow-wrap: anywhere; }
+.src { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--warn-bg); color: var(--warn); }
+.src.said { background: var(--info-bg); color: var(--info); }
+.heard-grid > .alert, .say-item { grid-column: 1 / -1; }
+@media (max-width: 640px) { .heard-grid { grid-template-columns: 1fr; } }
+.alert.note { background: var(--info-bg); }
+.alert.ok { background: var(--go-bg); color: var(--go); }
+.alert.ok b { color: var(--go); }
+
+/* why: each step behind a payment */
+.why { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 8px; }
+.why-step { display: flex; gap: 10px; align-items: baseline; font-size: 14px; }
+.why-k { flex: none; width: 82px; font-size: 12px; font-weight: 650; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
+.why-step.go .why-k { color: var(--go); }
+.why-step.warn .why-k { color: var(--warn); }
+.why-step.stop .why-k { color: var(--stop); }
+.why-btn { justify-self: start; }
+
+/* escrow on Metal */
+.escrow { margin-bottom: 18px; }
+.esc { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+.esc b { display: block; font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin: 2px 0; }

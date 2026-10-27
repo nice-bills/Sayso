@@ -346,7 +346,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   // The app's own views: every payout (agents' and the inbox's), and the money on hand.
   app.get("/v1/payouts", auth.requireOwner, (_req, res) => res.json(svc.book.list().map(publicView)));
-  app.get("/v1/summary", auth.requireOwner, (_req, res) => res.json({ offline: opts.offline, sandbox, balances: lastBalances, sweeps: ledger.all(), reconcile: lastReconcile, escrow: escrow(svc.book, ledger, refundReserveMinor()), mandates: policy }));
+  app.get("/v1/summary", auth.requireOwner, (_req, res) => res.json({ offline: opts.offline, sandbox, balances: lastBalances, sweeps: ledger.all(), reconcile: lastReconcile, escrow: escrow(svc.book, ledger, refundReserveMinor()), mandates: policy, pay_to: mode.kind === "x402" ? mode.payTo : SIM_PAY_TO }));
   // Why a payment happened: every step, with its proof.
   app.get("/v1/payouts/:id/why", auth.requireOwner, (req, res) => {
     const p = svc.book.get(String(req.params.id));

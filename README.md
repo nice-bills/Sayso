@@ -9,6 +9,11 @@ The rails decide what is allowed, not the prompt:
 - **The risk rules are code.** They cover blocked countries, caps, velocity and large first payouts. An invoice that asks to pay new bank details is held until a person confirms with the payee.
 - **A bounced payout is refunded in full**, even when the bank returns it after Airwallex said `PAID`, under a Metal **refund mandate**. Metal caps each refund and the lifetime total.
 - **Earnings reach the Airwallex float only through a Metal sweep mandate whose only payee is the ramp.** A compromised agent trying to drain them is refused on chain.
+- **An agent can spend only what its owner allowed, on chain.** The owner binds a Metal mandate whose only payee is Sayso, with a cap per payment, a total budget and an expiry. The agent pays from the owner's account and signs Sayso's exact offer. Sayso checks every such payment with Metal's four verification steps and keeps the proof. With `SAYSO_AGENT_MANDATES=required`, any other payment is refused before it settles.
+- **An agent's USDZ stays in escrow until its payout is delivered.** Only delivered payouts are released to the ramp. Money behind a payout still on its way is never swept, so a bounce can always be refunded.
+- **Every final payout gets a receipt anchored on Metal.** Anyone can hash the receipt and compare it with the anchor transaction, without trusting Sayso.
+- **A changed bank account has to prove itself.** Sayso sends 0.01 with a 6-digit code to the new account and asks the payee for it at the address on file from an earlier paid invoice, not the address that sent the new one.
+- **You see what Sayso heard.** Say a payment and the app shows the exact words heard next to what Sayso understood, with where each field came from. Bank details never come from speech.
 - **Reconciliation is arithmetic, to the cent.**
 
 Built for the Airwallex Agentic Banking Hackathon (2026). Demo script: [docs/DEMO-SCRIPT.md](docs/DEMO-SCRIPT.md). Write-up: [docs/SUBMISSION.md](docs/SUBMISSION.md).
@@ -43,8 +48,18 @@ claude mcp add sayso -e SAYSO_URL=http://127.0.0.1:4021 -e SAYSO_BUYER_KEY=0x...
 | `pay_batch` | Pays many people with one USDZ payment, if the batch costs at most `max_usdz`. |
 | `pay_quote` | Pays an existing quote by id. |
 | `payout_status` | Reports where a payout is. |
+| `payout_receipt` | A final payout's receipt and the Metal transaction anchoring its hash. |
 
 Metal itself refuses to sign above `SAYSO_MAX_USDZ`.
+
+**Better: pay under the owner's budget.** The agent's owner (not Sayso, not the agent) binds a mandate on Metal, and the agent then pays from the owner's account:
+
+```
+SAYSO_PAY_TO=<pay_to from GET /healthz> npm run setup:agent-budget -- --cap 250 --budget 1000 --days 30
+claude mcp add sayso -e SAYSO_URL=... -e SAYSO_MANDATE=.metal/agent-budget.json -- npx tsx src/mcp/server.ts
+```
+
+Metal refuses any payment above the cap, past the budget, after the expiry, or to anyone but Sayso. The owner can revoke it at any time with `metal-agent mandate revoke`.
 
 ## API
 
@@ -53,6 +68,7 @@ Metal itself refuses to sign above `SAYSO_MAX_USDZ`.
 | `POST /v1/quotes` | free | Price, payee check, risk. Returns a quote, `needs_review` or `rejected`, with reasons. |
 | `POST /v1/payouts/:id/pay` | x402: the quote total | Locks the quote. The payout runs once the payment settles. |
 | `GET /v1/payouts/:id` | free | Status, Airwallex transfer id, refund tx. Never returns bank details. |
+| `GET /v1/payouts/:id/receipt` | free | The final payout's receipt, its hash, and the Metal anchor transaction. |
 | `POST /v1/batches` | free | Up to 100 payouts quoted under one price. Lines it won't pay are set aside with reasons. |
 | `POST /v1/batches/:id/pay` | x402: the batch total | One payment funds every line. A line that bounces is refunded on its own. |
 | `POST /mcp` | agent key | The hosted MCP endpoint: `forward_invoice`, `list_invoices`, `quote_payout`, `payout_status`. |
@@ -62,6 +78,9 @@ Metal itself refuses to sign above `SAYSO_MAX_USDZ`.
 | `POST /v1/inbox/:id/approve` | owner | The one tap. `verified_with_payee: true` is needed for held invoices. |
 | `POST /v1/inbox/:id/details` | owner | Fill in what the extractor couldn't find; the invoice is checked again. |
 | `GET /v1/payouts`, `POST /v1/payouts/:id/review` | owner | Every payout; allow or block a held agent payout. |
+| `GET /v1/payouts/:id/why` | owner | Every step behind a payout, with its proof: what was said or read, the rules, the bank, the mandate, Airwallex, the receipt. |
+| `POST /v1/say` | owner | `{ transcript }`: what you said becomes an invoice to approve, with what was heard, what was understood and where each field came from. |
+| `POST /v1/inbox/:id/penny` | owner | Starts the one-cent code check on an invoice held for new bank details. The payee answers at `/v/:token`. |
 
 "Owner" means the app's session cookie or `Authorization: Bearer <OWNER_TOKEN>`. The owner signs in with a passkey (Face ID, Touch ID, a fingerprint), an emailed one-time link to `OWNER_EMAIL`, Google (with `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`), or the owner token. Once a passkey exists, every approval needs a fresh passkey check bound to that payment, so a stolen session or an agent driving the browser can't pay.
 
@@ -69,7 +88,7 @@ Agents sign themselves up through [auth.md](https://github.com/workos/auth.md): 
 
 ## The app
 
-`/` is the app: an inbox of forwarded invoices with one-tap pay, a phone-call check for invoices that change bank details, a form for missing details, every payment with its progress, and how to connect an agent. `/ops/` is the live back office feed. Both sit behind the owner's sign-in, and the page renders invoice text as text under a strict CSP.
+`/` is the app. It has a say-it bar with a live transcript (the browser's speech recognition, or type it), an inbox of forwarded invoices with one-tap pay, the one-cent code check (or a phone call) for invoices that change bank details, a "Why?" view on every payment, escrow on the Agents tab, a form for missing details, every payment with its progress, and how to connect an agent. `/ops/` is the live back office feed. Both sit behind the owner's sign-in, and the page renders invoice text as text under a strict CSP.
 
 ## Live run (sandbox keys and Metal testnet)
 
@@ -103,9 +122,10 @@ Claude.ai, ChatGPT, approval links on a phone and Airwallex webhooks need Sayso 
 | Path | What it does |
 | --- | --- |
 | `src/payouts/` | The product: pricing, risk, the payout book (compare-and-set states), the service, and the x402 API. |
-| `src/inbox/` | Invoice extraction (Claude, or patterns with no key), the one-tap inbox, and IMAP polling. |
+| `src/inbox/` | Invoice extraction (Claude, or patterns with no key), the one-tap inbox, saying a payment, the one-cent code check, and IMAP polling. |
 | `src/mcp/server.ts` | The MCP tools agents install. |
-| `src/metal/` | Mandates through the official `metal-agent` CLI (sweep, refunds, on-chain refusals), finality checks, and on-chain earnings. |
+| `src/metal/` | Mandates through the official `metal-agent` CLI (sweep, refunds, on-chain refusals), agents' owner mandates verified on chain, escrow release, receipts anchored on chain, finality checks, and on-chain earnings. |
+| `src/trail.ts` | Each payout's reasons, step by step (the "why" view). |
 | `src/bridge/` | The off-ramp ledger: one Airwallex credit per finalized Metal event. |
 | `src/airwallex/` | Typed REST client, signed and deduped webhooks, and the agent card. |
 | `src/reconcile.ts` | Metal swept == ramp credited == Airwallex deposits, and every currency's balance explained. |
@@ -122,3 +142,5 @@ Claude.ai, ChatGPT, approval links on a phone and Airwallex webhooks need Sayso 
 - `@x402/*` is pinned to 2.21.0. `@metalntwx/metal-pay` 0.2.0's `ClearingDebitServerScheme` has no `paymentFlows`, which `@x402/core` 2.22+ requires at runtime.
 - Payload fields marked `VERIFY` follow the Airwallex docs as we understand them. They get checked against the docs MCP on the first live run.
 - The x402 payment path (dynamic price per quote, settle hooks) has run end to end against Metal's facilitator on testnet (live demo run, 18 Oct 2026). Offline, the same routes run with simulated payments.
+- Not yet run live on testnet: agents paying under an owner's mandate (`setup:agent-budget`, `SAYSO_MANDATE`, the on-chain verification and `SAYSO_AGENT_MANDATES=required`), and receipt anchors (`METAL_RECEIPT_KEY`, which `setup:metal` now creates and funds). Both use Metal's own SDK calls and are covered offline by the simulators and tests. Without `METAL_RECEIPT_KEY`, receipts are kept and anchored by the simulator (`sim:`).
+- The one-cent check proves that whoever reads the payee's mail on file also sees the new account's statement. That stops lookalike senders, the common case. It does not stop a payee whose own mailbox is compromised. For that, call them.

@@ -76,6 +76,9 @@ export interface SayResult {
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const sameName = (a: string, b: string) => { const x = norm(a), y = norm(b); return x.length > 1 && y.length > 1 && (x === y || x.includes(y) || y.includes(x)); };
 const mask = (f: { iban?: string | null; accountNumber?: string | null }) => { const n = f.iban ?? f.accountNumber; return n ? `•••• ${n.slice(-4)}` : null; };
+const addressOf = (from: string) => from.match(/<([^>]+)>/)?.[1] ?? from;
+/** The payee as matched, noting the words said when they differ ("Kreuzberg Studio" for "Kreuzberg Studio GmbH"). */
+const named = (u: Understood, full: string | null, said: string) => Object.assign(u, { value: full, source: full && norm(full) !== norm(said) ? `you said “${said}”` : "you said" });
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 export async function say(inbox: Inbox, transcript: string, now = new Date()): Promise<SayResult> {
@@ -92,12 +95,13 @@ export async function say(inbox: Inbox, transcript: string, now = new Date()): P
   const waiting = items.find((i) => (i.status === "awaiting_approval" || i.status === "needs_verification") && i.fields.payeeName && sameName(i.fields.payeeName, intent.payee!)
     && (!intent.amount || Number(i.fields.amount) === Number(intent.amount)));
   if (waiting) {
+    const from = `the invoice from ${addressOf(waiting.from)}`;
     for (const [field, v] of [["amount", waiting.fields.amount], ["currency", waiting.fields.currency], ["reference", waiting.fields.reference]] as const) {
       const u = understood.find((x) => x.field === field)!;
-      if (!u.value) Object.assign(u, { value: v, source: `the invoice from ${waiting.from}` });
+      if (!u.value) Object.assign(u, { value: v, source: from });
     }
-    understood.find((x) => x.field === "payee")!.value = waiting.fields.payeeName;
-    understood.push({ field: "bank", value: mask(waiting.fields), source: `the invoice from ${waiting.from}` });
+    named(understood.find((x) => x.field === "payee")!, waiting.fields.payeeName, intent.payee);
+    understood.push({ field: "bank", value: mask(waiting.fields), source: from });
     return out(null, waiting);
   }
 
@@ -107,11 +111,13 @@ export async function say(inbox: Inbox, transcript: string, now = new Date()): P
   if (!known) return out(`I haven't paid ${intent.payee} before, so I don't have their bank details. Forward me their invoice instead.`);
   const currency = intent.currency ?? known.fields.currency;
   if (!intent.currency) Object.assign(understood.find((x) => x.field === "currency")!, { value: currency, source: `your last payment to ${known.fields.payeeName}` });
-  understood.find((x) => x.field === "payee")!.value = known.fields.payeeName;
+  named(understood.find((x) => x.field === "payee")!, known.fields.payeeName, intent.payee);
   understood.push({ field: "bank", value: mask(known.fields), source: `your payment to ${known.fields.payeeName} on ${day(known.receivedAt)}` });
 
+  const reference = intent.reference ?? `Said ${now.toISOString().slice(0, 10)}`;
+  if (!intent.reference) Object.assign(understood.find((x) => x.field === "reference")!, { value: reference, source: "Sayso, since you named none" });
   const item = await inbox.receiveFields({
     messageId: `said-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`, from: "You (said)", subject: `Said: ${heard.slice(0, 60)}`, body: heard, receivedAt: now,
-  }, { ...known.fields, amount: intent.amount, currency, reference: intent.reference ?? `Said ${now.toISOString().slice(0, 10)}`, dueDate: null });
+  }, { ...known.fields, amount: intent.amount, currency, reference, dueDate: null });
   return out(null, item);
 }

@@ -26,7 +26,11 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 | No payout is ever sent twice | The payout id is Airwallex's `request_id`; every state change is compare-and-set. |
 | The payee is real before anyone pays | Airwallex beneficiary validation and account verification at quote time. The payee's bank says whose account it is; a name mismatch waits for a person. |
 | Caps, velocity, blocked countries, large first payments | Risk rules in code, not in the prompt. |
-| "New bank details" invoices wait for a human phone check | The inbox refuses to pay a held invoice without an explicit confirmation. |
+| "New bank details" invoices wait until the payee proves the account | Sayso sends 0.01 with a code to the new account and asks for it at the address on file from an earlier paid invoice. The right code, or a person's phone check, lifts the hold; "these aren't our details" blocks it. |
+| An agent spends only what its owner allowed | A Metal mandate the owner binds: Sayso as the only payee, a cap, a budget, an expiry. The agent signs Sayso's exact offer, and Sayso verifies each payment on chain. `required` mode refuses anything else before it settles. |
+| An agent's USDZ waits in escrow until its payout is delivered | Only delivered payouts are released to the ramp; money behind a payout on its way stays for a refund. |
+| Anyone can check a payout happened | A receipt for each final payout, its hash anchored on Metal, verifiable without Sayso. |
+| You see what Sayso heard | Say a payment: the words heard and what was understood, side by side, with each field's source. Bank details never come from speech. |
 | A bounced payout is refunded in full | A Metal refund mandate, capped per refund and in total. |
 | Earnings can only leave to Airwallex | A Metal sweep mandate whose only payee is the ramp. Anything else is refused on chain, and the refusal is recorded. |
 | The books close | Reconciliation: Metal swept = ramp credited = Airwallex deposits, and every currency balance explained, to the cent. |
@@ -34,7 +38,7 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 ## How we built it
 
 - **Airwallex:** FX rates and conversions (only the shortfall is converted), beneficiary validation, account verification with bank name matching (VoP/CoP) and creation, transfers with `request_id` idempotency and a purpose code, signed webhooks for transfer status (including bank returns after `PAID`), balances, and deposit simulation for the off-ramp.
-- **Metal:** x402 payments with `@metalntwx/metal-pay` on Metal testnet (USDZ), and two mandates through the official `metal-agent` CLI: a ramp-only sweep mandate and a capped refund mandate. On-chain refusals are recorded for the heist.
+- **Metal:** x402 payments with `@metalntwx/metal-pay` on Metal testnet (USDZ), and two mandates through the official `metal-agent` CLI: a ramp-only sweep mandate and a capped refund mandate. On-chain refusals are recorded for the heist. Agents can pay under their owner's mandate (Verifiable Intent): Sayso asks for the agent's signed order with `requireSignedOffer`, runs `verifyMandatePayment`'s four steps on every such payment, and reads the remaining budget with `readMandateState`. Sweeps release only delivered payouts (escrow), and each final payout's receipt hash is anchored on chain through the MIP20 gas envelope (`@metalntwx/metal-ts`).
 - **Claude:** reads invoice emails into structured fields with a strict schema (Claude Opus 5.5 with structured outputs). A pattern extractor takes over with no key; neither one decides money.
 - **MCP, two ways.** A local server for agents with their own Metal wallet (`pay_invoice`, `pay_batch`, `pay_quote`, `quote_payout`, `payout_status`, `batch_status`). A hosted endpoint for any agent, with per-agent keys and caps (`forward_invoice`, `list_invoices`, `quote_payout`, `payout_status`). Approving is deliberately not a tool.
 - **Everywhere else:** a Claude Code plugin with a skill that teaches the approval flow, a skill for OpenClaw-style agents, AgentMail email intake (Svix-signed webhooks), and ntfy phone notifications that open the approval page.

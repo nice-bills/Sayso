@@ -57,6 +57,20 @@ Show: the card has a red edge, "Check before paying", and "Sayso is holding this
 
 Tap the checkbox only after "calling". Pay. (Or ignore it, which is the right call for a real scam.)
 
+## New beats to fit in (pick what the cut has room for)
+
+**Say it (20s).** Home, tap the mic: "Pay Kreuzberg Studio 280 euros for invoice 130." The words appear as you speak. Then two panels: **I heard** (the exact words) and **I understood** (payee, amount, reference, and the account ending 3000, tagged "from your payment to Kreuzberg Studio GmbH"). Tap Pay and confirm with Face ID.
+
+> What you see is exactly what the agent heard. And it never takes bank details from your voice, only from a payee you've already paid.
+
+**The lookalike (30s).** The second Kreuzberg Studio invoice came from `kreuzberg-studlo.example` with new bank details. It's held. Tap **Check with a 1-cent code**: Sayso sends 0.01 to the new account with a code in the reference, and emails the studio at the address from last week's paid invoice. Open the payee's page (the demo shows it), tap "These aren't our bank details", and the invoice is blocked for good. (Or enter the code and it pays.)
+
+> The fraudster owns the new account, but they never see the studio's real inbox. Only the real payee can pass this.
+
+**Why? (20s).** Payments, open the Rechenzentrum payout, tap **Why?**: the risk rules, what the payee's bank said, the quote, the agent's payment under its owner's Metal mandate ("Sayso only, up to 250 USDZ a payment, 891 of 1000 left; the agent signed this exact order"), the Airwallex transfer, and the receipt anchored on Metal.
+
+**Escrow (10s).** Agents tab: USDZ in escrow behind payouts on their way, and what delivered payouts have earned and released to Airwallex.
+
 ## 3:30 A payout bounces (30s)
 
 Have the agent pay an account that bounces (live: the Airwallex transfer simulation: `SENT`, then `FAILED` with `failure_type` `ACCOUNT_CLOSED`).

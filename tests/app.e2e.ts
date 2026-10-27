@@ -61,3 +61,25 @@ test('connecting an agent shows its key once, and agent payouts are listed', asy
   await expect(screen.getByText('Lingua Freelance')).toBeVisible();
   await expect(screen.getByText('Rechenzentrum Nord GmbH')).toBeVisible();
 });
+
+test('saying a payment shows what was heard and what was understood', async ({ app, screen, browser }) => {
+  await signIn(app, screen);
+  const say = browser.locator('.say-field');
+  await say.fill('Pay Kreuzberg Studio 280 euros for invoice 130');
+  await say.press('Enter');
+  await expect(browser.locator('.heard blockquote')).toHaveText('“Pay Kreuzberg Studio 280 euros for invoice 130”');
+  await expect(browser.locator('.understood')).toContainText('•••• 3000');
+  await expect(browser.locator('.understood')).toContainText('from your payment to Kreuzberg Studio GmbH');
+  await expect(browser.locator('.say-item .btn.pay')).toHaveText('Pay €280.00');
+});
+
+test('a lookalike asking for new bank details is checked with a 1-cent code', async ({ app, screen, browser }) => {
+  await signIn(app, screen);
+  await screen.getByRole('button', 'Check with a 1-cent code').tap();
+  const note = browser.locator('.alert.note').first();
+  await expect(note).toContainText('billing@kreuzberg-studio.example');
+  const link = await note.locator('a').getAttribute('href');
+  await app.open(link!);
+  await screen.getByRole('button', "These aren't our bank details").tap();
+  await expect(browser.locator('h1')).toContainText("We won't pay those details");
+});
