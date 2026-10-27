@@ -56,3 +56,21 @@ export const vagueEmail: InboundEmail = {
   receivedAt: at("2026-11-02T11:00:00Z"),
   body: "Hey, can you send the money we talked about? Thanks",
 };
+
+/** The classic: a lookalike address (studlo, not studio) says Kreuzberg Studio's bank details changed. */
+export const studioBankChange: InboundEmail = {
+  messageId: "<inv-121@kreuzberg-studlo.example>",
+  from: "\"Kreuzberg Studio GmbH\" <billing@kreuzberg-studlo.example>",
+  subject: "Invoice INV-2026-121 (please note our new bank details)",
+  receivedAt: at("2026-11-09T08:30:00Z"),
+  body: `Hi,
+
+Invoice number: INV-2026-121
+Total due: EUR 340,00
+
+Please note we have changed banks. Please send payment to our new account from now on.
+Payable to: Kreuzberg Studio GmbH
+IBAN: NL91 ABNA 0417 1643 00
+
+Thanks!`,
+};

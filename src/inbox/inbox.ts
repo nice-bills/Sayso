@@ -37,7 +37,13 @@ export class Inbox {
   async receive(e: InboundEmail): Promise<InboxItem> {
     const existing = this.get(e.messageId);
     if (existing) return existing; // the same email delivered twice
-    const fields = await extractInvoice(e);
+    return this.receiveFields(e, await extractInvoice(e));
+  }
+
+  /** An invoice whose fields are already known (a payment the owner said), checked like any other. */
+  async receiveFields(e: InboundEmail, fields: InvoiceFields & { extractor?: string }): Promise<InboxItem> {
+    const existing = this.get(e.messageId);
+    if (existing) return existing;
     const { status, payoutId, missing, fingerprint } = await this.triage(fields, e);
     this.store.db.prepare("INSERT INTO inbox (id, sender, subject, received_at, body, fields, missing, payout_id, status, fingerprint) VALUES (?,?,?,?,?,?,?,?,?,?)")
       .run(e.messageId, e.from, e.subject, e.receivedAt.toISOString(), e.body, JSON.stringify(fields), JSON.stringify(missing), payoutId, status, fingerprint);
