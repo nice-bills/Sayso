@@ -30,6 +30,7 @@ test('one tap pays a forwarded invoice', async ({ app, screen, browser }) => {
 
 test('a bank-details change waits for a confirmed phone call', async ({ app, screen, browser }) => {
   await signIn(app, screen);
+  await screen.getByRole('button', 'Check it').tap();
   const pay = screen.getByRole('button', 'Pay €60.00');
   await expect(pay).toBeDisabled();
   await screen.getByRole('checkbox', 'I confirmed these bank details with the payee myself.').tap();
@@ -78,7 +79,7 @@ test('a lookalike asking for new bank details is checked with a 1-cent code', as
   await screen.getByRole('button', 'Check with a 1-cent code').tap();
   const note = browser.locator('.alert.note').first();
   await expect(note).toContainText('billing@kreuzberg-studio.example');
-  const link = await note.locator('a').getAttribute('href');
+  const link = await browser.locator('.alert.note a').first().getAttribute('href');
   await app.open(link!);
   await screen.getByRole('button', "These aren't our bank details").tap();
   await expect(browser.locator('h1')).toContainText("We won't pay those details");
