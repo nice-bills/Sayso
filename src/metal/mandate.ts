@@ -96,14 +96,15 @@ export class MetalMandate {
    * One-time: write a credential and bind it on the owner's account. By default it may pay ONLY
    * the ramp; `anyPayee` (the refund mandate) drops the payee list and relies on cap and budget.
    */
-  async setup(limits: { capCents: number; budgetCents: number; expiresInSeconds?: number; anyPayee?: boolean; description?: string }): Promise<{ principal: Address; reference: string; gasKeyAddress: string }> {
+  async setup(limits: { capCents: number; budgetCents: number; expiresInSeconds?: number; anyPayee?: boolean; description?: string; payeeName?: string }): Promise<{ principal: Address; reference: string; gasKeyAddress: string }> {
+    const payeeName = limits.payeeName ?? "SaysoRamp";
     const principal = await this.account();
     const create = await this.cli([
       "mandate", "credential", "create",
       "--principal", principal,
       "--cap", centsToUsdz(limits.capCents),
       "--budget", centsToUsdz(limits.budgetCents),
-      ...(limits.anyPayee ? [] : ["--payee", `${this.cfg.rampAddress},SaysoRamp`]),
+      ...(limits.anyPayee ? [] : ["--payee", `${this.cfg.rampAddress},${payeeName}`]),
       "--description", limits.description ?? "Sayso earnings sweep to the Airwallex off-ramp",
       ...(limits.expiresInSeconds ? ["--expires-in", String(limits.expiresInSeconds)] : []),
       "--key", this.cfg.ownerKey,
@@ -111,7 +112,7 @@ export class MetalMandate {
     ]);
     const kv = parseCliOutput(create.stdout);
     await this.cli(["mandate", "bind", "--credential", this.cfg.credential, "--key", this.cfg.ownerKey]);
-    emit("act", limits.anyPayee ? "Bound refund mandate: any payee, capped per refund and in total" : "Bound sweep mandate: payee is the ramp only", { principal, cap: centsToUsdz(limits.capCents), budget: centsToUsdz(limits.budgetCents) }, kv.reference);
+    emit("act", limits.anyPayee ? "Bound refund mandate: any payee, capped per refund and in total" : payeeName === "SaysoRamp" ? "Bound sweep mandate: payee is the ramp only" : `Bound mandate: payee is ${payeeName} only`, { principal, cap: centsToUsdz(limits.capCents), budget: centsToUsdz(limits.budgetCents) }, kv.reference);
     return { principal, reference: kv.reference ?? "", gasKeyAddress: kv["gas-key-address"] ?? "" };
   }
 

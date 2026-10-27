@@ -15,20 +15,30 @@
 import express, { type Router } from "express";
 import { paymentMiddleware } from "@x402/express";
 import type { x402ResourceServer } from "@x402/core/server";
+import { mandateRefOf, signedOfferOf, SIGNED_OFFER_REQUIRED } from "@metalntwx/metal-pay/mandates";
 import { emit } from "../events.js";
+import type { MandateChecker, MandatePolicy, MandateProof, SimMandates } from "../metal/agent-mandate.js";
 import { PayoutError, publicView, type PayoutService } from "./service.js";
 import type { BatchBook } from "./batch.js";
 
 export type PaymentMode =
-  | { kind: "x402"; server: x402ResourceServer; network: string; payTo: string }
-  /** Offline: the request names its payer in x-sim-payer and is treated as settled. */
-  | { kind: "sim" };
+  | { kind: "x402"; server: x402ResourceServer; network: string; payTo: string; mandates?: MandateChecker }
+  /** Offline: the request names its payer in x-sim-payer (or its mandate in x-sim-mandate) and is treated as settled. */
+  | { kind: "sim"; mandates?: SimMandates };
+
+/** How agents' Metal mandates are treated, and where a verified mandate is recorded. */
+export interface MandateOptions {
+  policy: MandatePolicy;
+  /** Called with the payouts one payment funded and Metal's verification of the mandate it was made under. */
+  record(payoutIds: string[], proof: MandateProof): void;
+}
 
 const PAY = /^\/v1\/payouts\/([0-9a-f-]{36})\/pay$/;
 const PAY_BATCH = /^\/v1\/batches\/([0-9a-f-]{36})\/pay$/;
 
-export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchBook): Router {
+export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchBook, mandates: MandateOptions = { policy: "verify", record: () => {} }): Router {
   const r = express.Router();
+  const linesOf = (x: { kind: "payout" | "batch"; id: string }) => (x.kind === "payout" ? [x.id] : batches.get(x.id)?.payoutIds ?? []);
   r.use(express.json({ limit: "1mb" }));
 
   r.post("/v1/batches", async (req, res) => {
@@ -82,8 +92,22 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
       // Do not hold the buyer's response on the bank: the payout runs after the reply.
       const run = x.kind === "payout" ? svc.onFunded(x.id, ctx.result.payer ?? "", ctx.result.transaction) : batches.onFunded(x.id, ctx.result.payer ?? "", ctx.result.transaction);
       void run.catch((e) => emit("escalate", `${x.kind} ${x.id.slice(0, 8)} crashed after funding: ${String(e)}`));
+      // Paid under the owner's mandate: check it from the chain and keep the proof on the payout.
+      const ref = mandateRefOf(ctx.paymentPayload as never);
+      if (ref && mode.mandates && mandates.policy !== "off") {
+        void mode.mandates.check({ tx: ctx.result.transaction, requirements: ctx.requirements, ref, checkoutMandate: signedOfferOf(ctx.paymentPayload as never) || undefined })
+          .then((proof) => mandates.record(linesOf(x), proof))
+          .catch((e) => emit("escalate", `Could not verify the mandate behind ${x.kind} ${x.id.slice(0, 8)}: ${String(e).slice(0, 200)}`));
+      }
     });
     mode.server.onSettleFailure(async (ctx) => release(ctx.transportContext));
+    // "required": a payment that names no owner mandate is refused before it settles; nothing moves.
+    if (mandates.policy === "required") {
+      mode.server.onBeforeVerify(async (ctx) => {
+        if (target(ctx.transportContext) && !mandateRefOf(ctx.paymentPayload as never)) return { abort: true as const, reason: "mandate_required", message: "Pay under a Metal mandate your owner bound, with Sayso as its payee" };
+      });
+    }
+    const extra = mandates.policy === "required" ? { extra: { ...SIGNED_OFFER_REQUIRED } } : {};
     mode.server.onVerifiedPaymentCanceled(async (ctx) => release(ctx.transportContext));
     r.use(paymentMiddleware({
       "POST /v1/payouts/:id/pay": {
@@ -92,6 +116,7 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
           network: mode.network,
           payTo: mode.payTo,
           price: (ctx: { path: string }) => svc.priceOf(ctx.path.match(PAY)?.[1] ?? "") ?? "0",
+          ...extra,
         }],
         description: "Pay a real-world invoice in local currency through Airwallex",
       },
@@ -101,29 +126,36 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
           network: mode.network,
           payTo: mode.payTo,
           price: (ctx: { path: string }) => batches.priceOf(ctx.path.match(PAY_BATCH)?.[1] ?? "") ?? "0",
+          ...extra,
         }],
         description: "Pay many people in local currency through Airwallex, with one payment",
       },
     } as Parameters<typeof paymentMiddleware>[0], mode.server));
   } else {
-    r.use("/v1/payouts/:id/pay", (req, res, next) => {
-      const payer = req.header("x-sim-payer");
-      if (!payer) return void res.status(402).json({ error: "payment required", price_usdz: svc.priceOf(String(req.params.id)) });
+    const simPay = (kind: "payout" | "batch"): express.RequestHandler => (req, res, next) => {
+      const id = String(req.params.id);
+      const price = kind === "payout" ? svc.priceOf(id) : batches.priceOf(id);
+      const ref = req.header("x-sim-mandate");
+      let payer = req.header("x-sim-payer");
+      if (!payer && !ref) return void res.status(402).json({ error: "payment required", price_usdz: price });
+      if (mandates.policy === "required" && !ref) return void res.status(402).json({ error: "mandate_required: pay under a Metal mandate your owner bound, with Sayso as its payee", price_usdz: price });
+      if (ref && mode.mandates && price) {
+        // What Metal checks at settlement: the payee, the cap, the budget, the expiry.
+        const refused = mode.mandates.spend(ref, Math.round(Number(price) * 100));
+        if (refused) return void res.status(402).json({ error: `payment refused: ${refused}`, price_usdz: price });
+        payer = mode.mandates.principalOf(ref);
+      }
+      if (!payer) return void res.status(402).json({ error: "payment refused: mandate_not_bound", price_usdz: price });
+      const tx = `sim:0xsettle${id.slice(0, 8)}`;
       res.on("finish", () => {
-        if (res.statusCode < 400) void svc.onFunded(String(req.params.id), payer, `sim:0xsettle${String(req.params.id).slice(0, 8)}`);
-        else svc.release(String(req.params.id));
+        if (res.statusCode >= 400) return void (kind === "payout" ? svc.release(id) : batches.release(id));
+        void (kind === "payout" ? svc.onFunded(id, payer!, tx) : batches.onFunded(id, payer!, tx));
+        if (ref && mode.mandates && mandates.policy !== "off") void mode.mandates.check({ tx, ref, checkoutMandate: req.header("x-sim-signed-order") }).then((proof) => mandates.record(linesOf({ kind, id }), proof));
       });
       next();
-    });
-    r.use("/v1/batches/:id/pay", (req, res, next) => {
-      const payer = req.header("x-sim-payer");
-      if (!payer) return void res.status(402).json({ error: "payment required", price_usdz: batches.priceOf(String(req.params.id)) });
-      res.on("finish", () => {
-        if (res.statusCode < 400) void batches.onFunded(String(req.params.id), payer, `sim:0xsettle${String(req.params.id).slice(0, 8)}`);
-        else batches.release(String(req.params.id));
-      });
-      next();
-    });
+    };
+    r.use("/v1/payouts/:id/pay", simPay("payout"));
+    r.use("/v1/batches/:id/pay", simPay("batch"));
   }
 
   r.post("/v1/batches/:id/pay", (req, res) => {

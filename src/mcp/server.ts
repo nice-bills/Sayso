@@ -4,11 +4,15 @@
 //
 //   claude mcp add sayso -- npx tsx src/mcp/server.ts
 //   env: SAYSO_URL, SAYSO_BUYER_KEY (a Metal testnet key), SAYSO_MAX_USDZ (spend cap per payout)
-//   offline: SAYSO_SIM_PAYER=0x... against `npm run serve:offline`
+//   or:  SAYSO_MANDATE (a credential from `npm run setup:agent-budget`): pay from the owner's account,
+//        within the limits the owner bound on Metal, signing each exact order with the mandate key
+//   offline: SAYSO_SIM_PAYER=0x... (or SAYSO_SIM_MANDATE=<ref>) against `npm run serve:offline`
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { readFileSync } from "node:fs";
 import { createMetalPaymentClient, usdzBaseUnits } from "@metalntwx/metal-pay";
+import { createMandatePaymentClient, p256DigestSigner, parseCredential, privateKeyHex, type Es256Key } from "@metalntwx/metal-pay/mandates";
 import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
 import { invoiceShape, toRequest, type Invoice } from "./tools.js";
@@ -16,9 +20,20 @@ import { invoiceShape, toRequest, type Invoice } from "./tools.js";
 const base = process.env.SAYSO_URL ?? "http://127.0.0.1:4021";
 const maxUsdz = process.env.SAYSO_MAX_USDZ ?? "250";
 const simPayer = process.env.SAYSO_SIM_PAYER;
+const simMandate = process.env.SAYSO_SIM_MANDATE;
 
 function payingFetch(): typeof fetch {
+  if (simMandate) return (url, init) => fetch(url, { ...init, headers: { ...(init?.headers as Record<string, string>), "x-sim-mandate": simMandate, "x-sim-signed-order": "sim" } });
   if (simPayer) return (url, init) => fetch(url, { ...init, headers: { ...(init?.headers as Record<string, string>), "x-sim-payer": simPayer } });
+  const mandate = process.env.SAYSO_MANDATE;
+  if (mandate) {
+    // The owner's account pays; Metal refuses anything outside the mandate the owner bound, and the
+    // agent's mandate key signs Sayso's exact offer, so a payment can't be replayed for another quote.
+    const agentKeyFile = process.env.SAYSO_MANDATE_AGENT_KEY ?? mandate.replace(/\.json$/, ".agent-key.json");
+    const agent = JSON.parse(readFileSync(agentKeyFile, "utf8")) as Es256Key;
+    const credential = parseCredential(JSON.parse(readFileSync(mandate, "utf8")));
+    return createMandatePaymentClient({ credential, signDigest: p256DigestSigner(privateKeyHex(agent)), network: "testnet", signedOffer: "always" }).fetchWithPayment as typeof fetch;
+  }
   const key = process.env.SAYSO_BUYER_KEY as `0x${string}` | undefined;
   if (!key) throw new Error("Set SAYSO_BUYER_KEY (a Metal testnet private key) or SAYSO_SIM_PAYER for offline use");
   // Metal refuses to sign above maxAmount, so a wrong quote can never overspend the agent's wallet.
@@ -76,6 +91,11 @@ server.registerTool("pay_quote", {
   description: "Pay an existing Sayso quote by id.",
   inputSchema: { quote_id: z.string() },
 }, async ({ quote_id }) => text(await pay(quote_id)));
+
+server.registerTool("payout_receipt", {
+  description: "A final payout's receipt and the Metal transaction anchoring its hash, so the agent can prove the money was delivered (or refunded) without trusting Sayso.",
+  inputSchema: { payout_id: z.string() },
+}, async ({ payout_id }) => text(await (await fetch(`${base}/v1/payouts/${payout_id}/receipt`)).json()));
 
 server.registerTool("payout_status", {
   description: "Where a payout is: quoted, needs_review, accepted, funded, submitted, paid, failed, refunded.",

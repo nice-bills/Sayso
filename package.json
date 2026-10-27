@@ -17,13 +17,15 @@
     "mcp": "tsx --env-file-if-exists=.env src/mcp/server.ts",
     "test:e2e": "e2e run",
     "bundle:metal": "tar czf - .metal | base64 -w0",
-    "start": "sh scripts/start.sh"
+    "start": "sh scripts/start.sh",
+    "setup:agent-budget": "tsx --env-file-if-exists=.env scripts/setup-agent-budget.ts"
   },
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
     "@metalntwx/metal-agent": "^0.2.0",
     "@metalntwx/metal-pay": "^0.2.0",
+    "@metalntwx/metal-ts": "0.3.2",
     "@modelcontextprotocol/sdk": "1.32.1",
     "@simplewebauthn/server": "^13.3.3",
     "@x402/core": "2.21.0",

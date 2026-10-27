@@ -15,7 +15,7 @@ const key = (name: string) => `.metal/${name}.json`;
 const address = (name: string) => JSON.parse(readFileSync(key(name), "utf8")).address as Address;
 
 const base = new MetalMandate({ network: "testnet", rpcUrl: process.env.METAL_RPC_URL, ownerKey: key("owner"), credential: ".metal/mandate.json", rampAddress: "0x0000000000000000000000000000000000000000" });
-for (const name of ["owner", "ramp", "buyer1", "buyer2", "buyer3"]) {
+for (const name of ["owner", "ramp", "receipts", "buyer1", "buyer2", "buyer3"]) {
   if (!existsSync(key(name))) await base.cli(["key", "create", "--out", key(name)]).catch(() => undefined);
 }
 const mandate = new MetalMandate({ ...base.cfg, rampAddress: address("ramp") });
@@ -26,7 +26,8 @@ const { principal, gasKeyAddress } = await mandate.setup({ capCents: toMinor(500
 const refunds = new MetalMandate({ ...mandate.cfg, credential: ".metal/refund.json" });
 const refund = await refunds.setup({ capCents: toMinor(2500), budgetCents: toMinor(10000), anyPayee: true, description: "Sayso refunds to buyer agents" });
 
-for (const a of [gasKeyAddress, refund.gasKeyAddress, ...["buyer1", "buyer2", "buyer3"].map(address)]) {
+// The receipt key anchors each final payout's receipt hash on chain, paying gas in USDZ.
+for (const a of [gasKeyAddress, refund.gasKeyAddress, address("receipts"), ...["buyer1", "buyer2", "buyer3"].map(address)]) {
   if (a) await mandate.cli(["fund", a]).then(() => console.log(`funded ${a}`)).catch((e) => console.error(`fund ${a}: ${String(e).slice(0, 200)}`));
 }
 
@@ -37,4 +38,5 @@ METAL_RAMP_ADDRESS=${address("ramp")}
 METAL_OWNER_KEY=${key("owner")}
 METAL_MANDATE=.metal/mandate.json
 METAL_REFUND_MANDATE=.metal/refund.json
+METAL_RECEIPT_KEY=${JSON.parse(readFileSync(key("receipts"), "utf8")).privateKey as string}
 METAL_BUYER_KEYS=${buyers.join(",")}`);

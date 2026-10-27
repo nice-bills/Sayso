@@ -28,6 +28,11 @@ import { imapFromEnv, pollImap } from "./inbox/imap.js";
 import { AgentMailPoller, agentMailRouter, agentMailSenderFromEnv } from "./inbox/agentmail.js";
 import { ChainEarnings, type EarningsSource } from "./metal/earnings.js";
 import { MandateRefunder, MandateSweepVerifier, MetalMandate, type PullResult } from "./metal/mandate.js";
+import { ChainMandateChecker, describeMandate, mandatePolicy, SimMandates } from "./metal/agent-mandate.js";
+import { escrow } from "./metal/escrow.js";
+import { MetalAnchorer, Receipts, SimAnchorer, type Anchorer } from "./metal/receipts.js";
+import { requireSignedOffer } from "@metalntwx/metal-pay/mandates";
+import { Trail } from "./trail.js";
 import { payoutApi, type PaymentMode } from "./payouts/http.js";
 import { BatchBook } from "./payouts/batch.js";
 import { PayoutError, PayoutService, publicView, type PayoutAirwallex, type Refunder } from "./payouts/service.js";
@@ -42,18 +47,17 @@ const SWEEP_CAP_MINOR = toMinor(5000);
 /** USDZ kept on the principal for refunds instead of being swept. */
 const refundReserveMinor = () => toMinor(Number(process.env.SAYSO_REFUND_RESERVE_USDZ ?? 200));
 
-/** Offline earnings: what buyers paid (minus refunds) that has not been swept yet. */
+/** Offline earnings: what delivered payouts earned that has not been released from escrow yet. */
 class BookEarnings implements EarningsSource {
   constructor(private readonly book: PayoutBook, private readonly ledger: RampLedger) {}
   async pending() {
-    const external = this.book.list(10_000).filter((p) => p.fundingTx && !p.buyer?.startsWith("internal:"));
-    const received = external.reduce((s, p) => s + p.totalMinor, 0);
-    const refunded = external.filter((p) => p.status === "refunded").reduce((s, p) => s + p.totalMinor, 0);
-    const swept = this.ledger.all().filter((x) => x.status !== "rejected").reduce((s, x) => s + x.amountMinor, 0);
-    const amountMinor = Math.min(received - refunded - swept - refundReserveMinor(), SWEEP_CAP_MINOR);
+    const amountMinor = Math.min(escrow(this.book, this.ledger, refundReserveMinor()).releasableMinor, SWEEP_CAP_MINOR);
     return amountMinor > 0 ? { epoch: `epoch-${this.ledger.all().length + 1}`, amountMinor } : undefined;
   }
 }
+
+/** Sayso's own Metal address in offline mode, where agents' payments and mandates name it as payee. */
+export const SIM_PAY_TO = "0x5a7505a7505a7505a7505a7505a7505a7505a75";
 
 export interface Sayso {
   offline: boolean;
@@ -66,6 +70,11 @@ export interface Sayso {
   tick(): Promise<void>;
   reconcileNow(): Promise<ReturnType<typeof reconcile>>;
   balances(): Promise<Record<string, number>>;
+  /** Each payout's reasons, step by step. */
+  trail: Trail;
+  receipts: Receipts;
+  /** Offline only: the simulator's Metal mandates, so a demo can bind one for an agent. */
+  simMandates?: SimMandates;
   /** The owner's sign-in token (Bearer, or POST /auth/login). */
   ownerToken: string;
   keys: AgentKeys;
@@ -93,6 +102,10 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   let heist: (to: string, cents: number) => Promise<PullResult>;
   let mode: PaymentMode;
   let earningsFor: (svc: PayoutService) => EarningsSource;
+  let anchorer: Anchorer;
+  let anchorAddress: Address | undefined;
+  let simMandates: SimMandates | undefined;
+  const policy = mandatePolicy();
 
   if (opts.offline || opts.simMetal) {
     if (opts.offline) emit("observe", "Running OFFLINE: Airwallex and Metal are simulated; every proof starts with sim:");
@@ -102,8 +115,10 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     const sweepMandate = new FakeMandate("0xRamp000000000000000000000000000000000001", SWEEP_CAP_MINOR);
     verifier = sweepMandate;
     heist = (to, cents) => sweepMandate.attemptAndRecordRefusal(to, cents);
-    mode = { kind: "sim" };
+    simMandates = new SimMandates(SIM_PAY_TO);
+    mode = { kind: "sim", mandates: simMandates };
     earningsFor = (svc) => new BookEarnings(svc.book, ledger);
+    anchorer = new SimAnchorer();
   } else {
     const rpc = process.env.METAL_RPC_URL;
     if (!rpc) throw new Error("Set METAL_RPC_URL");
@@ -115,18 +130,33 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     heist = (to, cents) => sweep.attemptAndRecordRefusal(to as Address, cents);
     const token = process.env.METAL_SELLER_TOKEN;
     const facilitator = new HTTPFacilitatorClient({ url: METAL_NETWORKS.testnet.facilitatorUrl, ...(token ? { createAuthHeaders: sellerToken(token) } : {}) });
-    mode = { kind: "x402", server: registerMetalScheme(new x402ResourceServer(facilitator), { networks: ["testnet"] }), network: METAL_NETWORKS.testnet.network, payTo: principal };
-    earningsFor = () => {
+    const server = registerMetalScheme(new x402ResourceServer(facilitator), { networks: ["testnet"] });
+    // "required": the agent must sign Sayso's exact offer with its mandate key, checked before settlement.
+    if (policy === "required") requireSignedOffer(server, { rpcUrl: rpc });
+    mode = { kind: "x402", server, network: METAL_NETWORKS.testnet.network, payTo: principal, mandates: new ChainMandateChecker(rpc) };
+    earningsFor = (svc) => {
       const chain = new ChainEarnings(rpc, principal, ledger, SWEEP_CAP_MINOR);
-      return { pending: async () => { const e = await chain.pending(); return e && e.amountMinor > refundReserveMinor() ? { ...e, amountMinor: e.amountMinor - refundReserveMinor() } : undefined; } };
+      // The chain says what is there; escrow says how much of it delivered payouts have earned.
+      return { pending: async () => {
+        const e = await chain.pending();
+        const amountMinor = Math.min((e?.amountMinor ?? 0) - refundReserveMinor(), escrow(svc.book, ledger, refundReserveMinor()).releasableMinor);
+        return e && amountMinor > 0 ? { ...e, amountMinor } : undefined;
+      } };
     };
+    const live = MetalAnchorer.fromEnv();
+    if (!live) emit("observe", "No METAL_RECEIPT_KEY: payout receipts are kept but anchored by the simulator (sim:)");
+    anchorer = live ?? new SimAnchorer();
+    anchorAddress = live?.address;
   }
 
   // The Airwallex sandbox says NOT_MATCHED for every payee name, so the name check is off there unless asked for.
   const sandbox = (process.env.AWX_BASE_URL ?? "https://api.sandbox.airwallex.com").includes("sandbox");
   const nameCheck = opts.offline || process.env.AWX_NAME_CHECK === "on" || (!sandbox && process.env.AWX_NAME_CHECK !== "off");
   if (!nameCheck) emit("observe", "Airwallex sandbox: payee name matching is off (the sandbox answers NOT_MATCHED for every name); account existence is still checked");
-  const svc = new PayoutService({ awx, store, refunder, nameCheck });
+  const trail = new Trail(store);
+  trail.follow();
+  const receipts = new Receipts(store, anchorer, anchorAddress);
+  const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, onFinal: (p) => void receipts.issue(p) });
   const inbox = new Inbox(store, svc);
   const credit = new SimulatedDepositCredit(awx, process.env.AWX_GLOBAL_ACCOUNT_ID ?? "sim:ga_usd");
   const earnings = earningsFor(svc);
@@ -163,6 +193,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   async function tick() {
     await sweep().catch((e) => emit("escalate", `Sweep failed: ${String(e).slice(0, 200)}`));
     await svc.follow().catch((e) => emit("escalate", `Following payouts failed: ${String(e).slice(0, 200)}`));
+    await receipts.retry();
     if (imap) await pollImap(imap, inbox);
     if (agentMail) await agentMail.poll((e) => inbox.receive(e)).catch((e) => emit("escalate", `AgentMail poll failed: ${String(e).slice(0, 200)}`));
     lastBalances = await balances().catch(() => lastBalances);
@@ -170,7 +201,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   // ---------- HTTP ----------
   const app = express();
-  app.get("/healthz", (_req, res) => res.json({ ok: true, offline: opts.offline }));
+  // pay_to is Sayso's Metal address: what an owner names as the only payee of an agent's mandate.
+  app.get("/healthz", (_req, res) => res.json({ ok: true, offline: opts.offline, pay_to: mode.kind === "x402" ? mode.payTo : SIM_PAY_TO, agent_mandates: policy }));
   if (!opts.offline && process.env.AWX_WEBHOOK_SECRET) {
     app.use("/webhooks/airwallex", webhookRouter(process.env.AWX_WEBHOOK_SECRET, store, async (e) => {
       if (e.name.startsWith("payout.transfer.")) await svc.onTransfer(e.data.object as unknown as Transfer);
@@ -178,7 +210,20 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   }
   if (process.env.AGENTMAIL_WEBHOOK_SECRET) app.use(agentMailRouter(process.env.AGENTMAIL_WEBHOOK_SECRET, (e) => inbox.receive(e)));
   const batches = new BatchBook(store, svc);
-  app.use(payoutApi(svc, mode, batches));
+  app.use(payoutApi(svc, mode, batches, { policy, record: (ids, proof) => ids.forEach((id) => trail.add(id, "mandate", describeMandate(proof), proof as unknown as Record<string, unknown>)) }));
+
+  // A payout's receipt, and the Metal transaction that anchors its hash. Public, like the payout itself:
+  // it holds no bank details, and anyone can check it against the chain.
+  app.get("/v1/payouts/:id/receipt", (req, res) => {
+    const p = svc.book.get(String(req.params.id));
+    if (!p) return void res.status(404).json({ error: "no such payout" });
+    const anchored = receipts.get(p.id);
+    if (!anchored.length) return void res.status(409).json({ error: `payout is ${p.status}; a receipt is issued once it is paid or refunded` });
+    res.json({
+      anchors: anchored, anchor_address: anchorAddress ?? null,
+      how_to_verify: "SHA-256 the receipt's JSON with its keys sorted (no spaces); the anchor transaction's data is 0x534159534f31 (\"SAYSO1\") followed by that hash, sent by anchor_address to itself.",
+    });
+  });
 
   const webDir = fileURLToPath(new URL("./web", import.meta.url));
   // The app itself: static files under a strict CSP, since it renders text from strangers' emails.
@@ -251,7 +296,13 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   // The app's own views: every payout (agents' and the inbox's), and the money on hand.
   app.get("/v1/payouts", auth.requireOwner, (_req, res) => res.json(svc.book.list().map(publicView)));
-  app.get("/v1/summary", auth.requireOwner, (_req, res) => res.json({ offline: opts.offline, sandbox, balances: lastBalances, sweeps: ledger.all(), reconcile: lastReconcile }));
+  app.get("/v1/summary", auth.requireOwner, (_req, res) => res.json({ offline: opts.offline, sandbox, balances: lastBalances, sweeps: ledger.all(), reconcile: lastReconcile, escrow: escrow(svc.book, ledger, refundReserveMinor()), mandates: policy }));
+  // Why a payment happened: every step, with its proof.
+  app.get("/v1/payouts/:id/why", auth.requireOwner, (req, res) => {
+    const p = svc.book.get(String(req.params.id));
+    if (!p) return void res.status(404).json({ error: "no such payout" });
+    res.json({ payout: publicView(p), steps: trail.for(p.id), receipts: receipts.get(p.id) });
+  });
   app.post("/v1/payouts/:id/review", auth.requireOwner, express.json(), async (req, res) => {
     if (req.body?.decision !== "reject" && !(await auth.confirmed(req, req.body?.confirmation, "review", String(req.params.id)))) return void res.status(401).json({ error: "Confirm with your passkey to allow it.", need: "passkey" });
     try {
@@ -302,5 +353,5 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     });
   };
 
-  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances, ownerToken: auth.ownerToken, keys, card, cardReady, treasury };
+  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances, ownerToken: auth.ownerToken, keys, card, cardReady, treasury, trail, receipts, simMandates };
 }

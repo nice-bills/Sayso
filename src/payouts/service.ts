@@ -15,6 +15,7 @@ import { AirwallexError, chargedFeeDetail, transferFailure, type Airwallex, type
 import { readAuto, type Findings } from "../agent/reader.js";
 import { emit } from "../events.js";
 import type { Store } from "../store.js";
+import type { Trail } from "../trail.js";
 import { fmt, toMajor, toMinor } from "../treasury/money.js";
 import { PayoutBook, payeeHash, type Payout } from "./book.js";
 import { DEFAULT_PRICING, price, transferFee, type PricingConfig } from "./pricing.js";
@@ -64,6 +65,10 @@ export interface PayoutDeps {
   read?: (text: string) => Promise<Findings>;
   /** Hold payouts whose account name the bank doesn't fully match. Off for the Airwallex sandbox, which answers NOT_MATCHED for every name. */
   nameCheck?: boolean;
+  /** Where each payout's reasons are kept, step by step (the app's "why" view). */
+  trail?: Trail;
+  /** Called once a payout is final (paid, or refunded): Sayso anchors its receipt on Metal. */
+  onFinal?: (p: Payout) => void;
 }
 
 const HOUR = 3_600_000;
@@ -95,7 +100,13 @@ export class PayoutService {
     const pr = price(amountMinor, r.currency, r.method, rate, this.pricing);
     const bank = { account_currency: r.currency, bank_country_code: r.payee.bank_country_code, account_name: r.payee.name, ...r.payee.bank };
     const hash = payeeHash(bank);
+    const id = randomUUID();
     const findings = r.invoice_text ? await this.read(r.invoice_text) : undefined;
+    if (findings) {
+      this.d.trail?.add(id, "read", `Claude read the invoice: ${findings.summary}`, {
+        kind: findings.kind, asks_for_new_bank_details: findings.requestsNewBankDetails, pressure_tactics: findings.pressureTactics, citations: findings.citations,
+      }, undefined, now);
+    }
 
     const verdict = assess({
       usdValueMinor: pr.costMinor,
@@ -113,16 +124,19 @@ export class PayoutService {
       bank_details: bank,
     };
     const reasons = verdict.verdict === "allow" ? [] : [...verdict.reasons];
+    this.d.trail?.add(id, "risk", verdict.verdict === "allow" ? "Within every risk rule: caps, country, velocity and payee history" : `Risk rules said ${verdict.verdict}: ${verdict.reasons.join("; ")}`, { verdict: verdict.verdict }, undefined, now);
     let status: Payout["status"] = verdict.verdict === "reject" ? "rejected" : verdict.verdict === "hold" ? "needs_review" : "quoted";
 
     // Airwallex checks the bank details before anyone pays for anything.
     if (status !== "rejected") {
       try {
         await this.d.awx.validateBeneficiary(beneficiary, [r.method]);
+        this.d.trail?.add(id, "payee", "Airwallex accepted the bank details as valid", undefined, undefined, now);
       } catch (err) {
         if (err instanceof AirwallexError && err.status < 500) {
           status = "rejected";
           reasons.push(`Airwallex rejected the bank details: ${err.code ?? err.status}`);
+          this.d.trail?.add(id, "payee", `Airwallex rejected the bank details: ${err.code ?? err.status}`, undefined, undefined, now);
         } else throw err;
       }
     }
@@ -130,12 +144,13 @@ export class PayoutService {
     // Then the bank itself: does the account exist, and is it really the payee's? (VoP / CoP)
     if (status !== "rejected" && r.method === "LOCAL") {
       const check = await this.checkAccount(r.payee.entity_type, bank);
+      if (check) this.d.trail?.add(id, "payee", check.said, undefined, undefined, now);
       if (check?.verdict === "reject") { status = "rejected"; reasons.push(check.reason); }
       else if (check?.verdict === "hold") { if (status === "quoted") status = "needs_review"; reasons.push(check.reason); }
     }
 
     const p: Payout = {
-      id: randomUUID(), buyer: r.buyer ?? null, currency: r.currency, amountMinor, method: r.method,
+      id, buyer: r.buyer ?? null, currency: r.currency, amountMinor, method: r.method,
       bankCountry: r.payee.bank_country_code, payeeName: r.payee.name, payeeHash: hash, beneficiary, reference: r.reference,
       costMinor: pr.costMinor, feeMinor: pr.feeMinor, totalMinor: pr.totalMinor, rateUsed: pr.rateUsed,
       status, reasons, createdAt: now.toISOString(),
@@ -153,13 +168,13 @@ export class PayoutService {
   /** The operator looked at a held payout and is happy to quote it. */
   approveReview(id: string, operator: string, now = new Date(), ttlMs = this.ttl): Payout {
     if (!this.book.transition(id, ["needs_review"], "quoted", { expiresAt: new Date(now.getTime() + ttlMs).toISOString() })) throw new PayoutError(409, "not awaiting review");
-    emit("decide", `${operator} cleared payout ${id.slice(0, 8)} after review`);
+    emit("decide", `${operator} cleared payout ${id.slice(0, 8)} after review`, { payout: id });
     return this.book.get(id)!;
   }
 
   rejectReview(id: string, operator: string): Payout {
     if (!this.book.transition(id, ["needs_review"], "rejected")) throw new PayoutError(409, "not awaiting review");
-    emit("refuse", `${operator} rejected payout ${id.slice(0, 8)} after review`);
+    emit("refuse", `${operator} rejected payout ${id.slice(0, 8)} after review`, { payout: id });
     return this.book.get(id)!;
   }
 
@@ -185,7 +200,7 @@ export class PayoutService {
 
   /** Settlement failed or the request was cancelled: the quote can be paid again until it expires. */
   release(id: string): void {
-    if (this.book.transition(id, ["accepted"], "quoted")) emit("observe", `Payment for ${id.slice(0, 8)} did not settle; quote released`);
+    if (this.book.transition(id, ["accepted"], "quoted")) emit("observe", `Payment for ${id.slice(0, 8)} did not settle; quote released`, { payout: id });
   }
 
   /**
@@ -194,7 +209,7 @@ export class PayoutService {
    */
   async payInternally(id: string, approver: string, now = new Date()): Promise<Payout> {
     this.accept(id, now);
-    emit("decide", `${approver} approved paying ${id.slice(0, 8)} from Sayso's own balance`);
+    emit("decide", `${approver} approved paying ${id.slice(0, 8)} from Sayso's own balance`, { payout: id });
     return this.onFunded(id, `internal:${approver}`, `internal:${id}`, now);
   }
 
@@ -203,7 +218,7 @@ export class PayoutService {
   async onFunded(id: string, payer: string, fundingTx: string, now = new Date()): Promise<Payout> {
     if (!this.book.transition(id, ["accepted"], "funded", { buyer: payer, fundingTx })) return this.book.get(id)!;
     const p = this.book.get(id)!;
-    if (!payer.startsWith("internal:")) emit("observe", `Received ${toMajor(p.totalMinor).toFixed(2)} USDZ from ${short(payer)} for payout ${id.slice(0, 8)}`, {}, fundingTx);
+    if (!payer.startsWith("internal:")) emit("observe", `Received ${toMajor(p.totalMinor).toFixed(2)} USDZ from ${short(payer)} for payout ${id.slice(0, 8)}`, { payout: id }, fundingTx);
 
     // Limits are re-checked against the payer who actually settled, not the one the request claimed.
     const limits = assess({
@@ -249,16 +264,17 @@ export class PayoutService {
   }
 
   /** Airwallex account verification. Anything short of a full name match waits for a person; an outage never blocks. */
-  private async checkAccount(entityType: "COMPANY" | "PERSONAL", bank: Record<string, string>): Promise<{ verdict: "reject" | "hold"; reason: string } | undefined> {
+  private async checkAccount(entityType: "COMPANY" | "PERSONAL", bank: Record<string, string>): Promise<{ verdict?: "reject" | "hold"; reason: string; said: string } | undefined> {
     if (!this.d.awx.verifyAccount) return undefined;
     const v = await this.d.awx.verifyAccount({ entity_type: entityType, transfer_method: "LOCAL", bank_details: bank }).catch(() => undefined);
     if (!v) return undefined;
-    if (v.code === "INVALID") return { verdict: "reject", reason: "the bank says this account does not exist or is closed" };
+    if (v.code === "INVALID") return { verdict: "reject", reason: "the bank says this account does not exist or is closed", said: "The payee's bank says this account does not exist or is closed" };
     const match = v.details?.account_name_match_result;
-    if (this.d.nameCheck === false) return undefined;
-    if (v.code !== "VERIFIED" || !match || match === "FULL_MATCH") return undefined;
     const holder = v.details?.resolved_account_name;
-    return { verdict: "hold", reason: holder ? `the bank says this account belongs to ${holder}, not ${bank.account_name}` : `the account name does not fully match the bank's record (${match})` };
+    const said = holder ? `The payee's bank says the account belongs to ${holder}` : `The payee's bank checked the account (${v.code})`;
+    if (this.d.nameCheck === false) return { reason: "", said: `The payee's bank says the account exists (name matching is off on the sandbox)` };
+    if (v.code !== "VERIFIED" || !match || match === "FULL_MATCH") return { reason: "", said };
+    return { verdict: "hold", reason: holder ? `the bank says this account belongs to ${holder}, not ${bank.account_name}` : `the account name does not fully match the bank's record (${match})`, said };
   }
 
   private async submit(p: Payout, beneficiaryId: string): Promise<Payout> {
@@ -280,7 +296,7 @@ export class PayoutService {
       t = (await this.d.awx.transferByRequestId(p.id).catch(() => undefined)) ?? (await this.d.awx.createTransfer(body).catch(() => undefined));
       if (!t) {
         this.d.store.updateOp(p.id, "ambiguous", null, String(err));
-        emit("escalate", `Payout ${p.id.slice(0, 8)} outcome unknown after one retry; held for a person, buyer not refunded yet`);
+        emit("escalate", `Payout ${p.id.slice(0, 8)} outcome unknown after one retry; held for a person, buyer not refunded yet`, { payout: p.id });
         return this.book.get(p.id)!;
       }
     }
@@ -300,6 +316,7 @@ export class PayoutService {
       this.d.store.updateOp(p.id, "settled");
       this.book.markPayeePaid(p.payeeHash, now);
       emit("reconcile", `Delivered ${fmt(p.amountMinor, p.currency)} to ${p.payeeName}`, { payout: p.id }, t.id);
+      this.d.onFinal?.(this.book.get(p.id)!);
     } else if ((t.status === "FAILED" || t.status === "CANCELLED") && (p.status === "submitted" || p.status === "paid")) {
       // A bank can return a payout after Airwallex reported it PAID, so a late failure refunds too.
       // Keep the fee in the op's detail: Airwallex returns the payout on a bounce but keeps its fee.
@@ -321,24 +338,25 @@ export class PayoutService {
 
   private async fail(p: Payout, reason: string, from: Payout["status"][] = ["funded"]): Promise<Payout> {
     if (!this.book.transition(p.id, from, "failed", { failure: reason })) return this.book.get(p.id)!;
-    emit("refuse", `Payout ${p.id.slice(0, 8)} failed: ${reason}`);
+    emit("refuse", `Payout ${p.id.slice(0, 8)} failed: ${reason}`, { payout: p.id });
     const buyer = this.book.get(p.id)!.buyer;
     if (buyer?.startsWith("internal:")) {
-      emit("escalate", `Your invoice payout ${p.id.slice(0, 8)} to ${p.payeeName} failed: ${reason}. The money is still in your Airwallex balance.`);
+      emit("escalate", `Your invoice payout ${p.id.slice(0, 8)} to ${p.payeeName} failed: ${reason}. The money is still in your Airwallex balance.`, { payout: p.id });
       return this.book.get(p.id)!;
     }
     if (!buyer) {
       this.book.transition(p.id, ["failed"], "refund_failed", { failure: `${reason}; no payer to refund` });
-      emit("escalate", `Payout ${p.id.slice(0, 8)} failed with no known payer to refund`);
+      emit("escalate", `Payout ${p.id.slice(0, 8)} failed with no known payer to refund`, { payout: p.id });
       return this.book.get(p.id)!;
     }
     try {
       const { tx } = await this.d.refunder.refund(buyer, p.totalMinor, p.id);
       this.book.transition(p.id, ["failed"], "refunded", { refundTx: tx });
       emit("act", `Refunded ${toMajor(p.totalMinor).toFixed(2)} USDZ to ${short(buyer)} in full`, { payout: p.id }, tx);
+      this.d.onFinal?.(this.book.get(p.id)!);
     } catch (err) {
       this.book.transition(p.id, ["failed"], "refund_failed", { failure: `${reason}; refund failed: ${String(err).slice(0, 200)}` });
-      emit("escalate", `Refund for ${p.id.slice(0, 8)} failed; a person must return ${toMajor(p.totalMinor).toFixed(2)} USDZ to ${short(buyer)}`);
+      emit("escalate", `Refund for ${p.id.slice(0, 8)} failed; a person must return ${toMajor(p.totalMinor).toFixed(2)} USDZ to ${short(buyer)}`, { payout: p.id });
     }
     return this.book.get(p.id)!;
   }
