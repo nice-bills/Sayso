@@ -30,7 +30,7 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 | An agent spends only what its owner allowed | A Metal mandate the owner binds: Sayso as the only payee, a cap, a budget, an expiry. The agent signs Sayso's exact offer, and Sayso verifies each payment on chain. `required` mode refuses anything else before it settles. |
 | An agent's USDZ waits in escrow until its payout is delivered | Only delivered payouts are released to the ramp; money behind a payout on its way stays for a refund. |
 | Anyone can check a payout happened | A receipt for each final payout, its hash anchored on Metal, verifiable without Sayso. |
-| You see what Sayso heard | Say a payment: the words heard and what was understood, side by side, with each field's source. Bank details never come from speech. |
+| You see what Sayso heard | Say a payment: the words heard and what was understood, side by side, with each field's source. Whisper runs in the browser, so the voice never leaves the device. Bank details never come from speech. |
 | A bounced payout is refunded in full | A Metal refund mandate, capped per refund and in total. |
 | Earnings can only leave to Airwallex | A Metal sweep mandate whose only payee is the ramp. Anything else is refused on chain, and the refusal is recorded. |
 | The books close | Reconciliation: Metal swept = ramp credited = Airwallex deposits, and every currency balance explained, to the cent. |

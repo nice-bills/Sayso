@@ -23,6 +23,7 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
+    "@huggingface/transformers": "4.3.1",
     "@metalntwx/metal-agent": "^0.2.0",
     "@metalntwx/metal-pay": "^0.2.0",
     "@metalntwx/metal-ts": "0.3.2",

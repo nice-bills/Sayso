@@ -519,3 +519,5 @@ pre { background: var(--surface-2); border-radius: var(--r-sm); padding: 12px 14
 .escrow { margin-bottom: 18px; }
 .esc { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
 .esc b { display: block; font-size: 26px; font-weight: 600; letter-spacing: -.02em; margin: 2px 0; }
+.say-engine { margin: 0; color: var(--muted, #6b6b76); }
+.linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }

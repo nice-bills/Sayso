@@ -75,11 +75,29 @@ export interface SayResult {
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const sameName = (a: string, b: string) => { const x = norm(a), y = norm(b); return x.length > 1 && y.length > 1 && (x === y || x.includes(y) || y.includes(x)); };
+// Speech-to-text spells names it doesn't know by ear ("Cruzeburg" for "Kreuzberg"). A rough sound key
+// (consonants, with letters that sound alike merged) matches those, and the owner sees both spellings.
+const LEGAL = new Set(["gmbh", "ltd", "limited", "inc", "llc", "bv", "sa", "sarl", "ag", "plc", "co", "company", "the"]);
+const soundKey = (w: string) => w.replace(/ph/g, "f").replace(/[cq]/g, "k").replace(/[zx]/g, "s").replace(/[aeiouyhw]/g, "").replace(/(.)\1+/g, "$1");
+const soundsLike = (full: string, said: string) => {
+  const keys = norm(full).split(" ").filter((w) => !LEGAL.has(w)).map(soundKey);
+  const words = norm(said).split(" ").filter((w) => !LEGAL.has(w));
+  return words.length > 0 && words.every((w) => soundKey(w).length >= 2 && keys.includes(soundKey(w)));
+};
 const mask = (f: { iban?: string | null; accountNumber?: string | null }) => { const n = f.iban ?? f.accountNumber; return n ? `•••• ${n.slice(-4)}` : null; };
 const addressOf = (from: string) => from.match(/<([^>]+)>/)?.[1] ?? from;
 /** The payee as matched, noting the words said when they differ ("Kreuzberg Studio" for "Kreuzberg Studio GmbH"). */
 const named = (u: Understood, full: string | null, said: string) => Object.assign(u, { value: full, source: full && norm(full) !== norm(said) ? `you said “${said}”` : "you said" });
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+
+/** The item for the payee said: by name, else by sound, but only when exactly one payee sounds like it. */
+function pick<T extends InboxItem>(items: T[], said: string): T | undefined {
+  const named = items.filter((i) => i.fields.payeeName);
+  const exact = named.find((i) => sameName(i.fields.payeeName!, said));
+  if (exact) return exact;
+  const alike = named.filter((i) => soundsLike(i.fields.payeeName!, said));
+  return new Set(alike.map((i) => norm(i.fields.payeeName!))).size === 1 ? alike[0] : undefined;
+}
 
 export async function say(inbox: Inbox, transcript: string, now = new Date()): Promise<SayResult> {
   const heard = transcript.trim().slice(0, 500);
@@ -92,8 +110,7 @@ export async function say(inbox: Inbox, transcript: string, now = new Date()): P
 
   const items = inbox.list();
   // An invoice already waiting for this payee: the words just point at it.
-  const waiting = items.find((i) => (i.status === "awaiting_approval" || i.status === "needs_verification") && i.fields.payeeName && sameName(i.fields.payeeName, intent.payee!)
-    && (!intent.amount || Number(i.fields.amount) === Number(intent.amount)));
+  const waiting = pick(items.filter((i) => (i.status === "awaiting_approval" || i.status === "needs_verification") && (!intent.amount || Number(i.fields.amount) === Number(intent.amount))), intent.payee);
   if (waiting) {
     const from = `the invoice from ${addressOf(waiting.from)}`;
     for (const [field, v] of [["amount", waiting.fields.amount], ["currency", waiting.fields.currency], ["reference", waiting.fields.reference]] as const) {
@@ -107,7 +124,7 @@ export async function say(inbox: Inbox, transcript: string, now = new Date()): P
 
   if (!intent.amount) return out(`How much should I pay ${intent.payee}?`);
   // Bank details only from a payee already paid; never from speech.
-  const known = items.find((i) => i.payout?.status === "paid" && i.fields.payeeName && sameName(i.fields.payeeName, intent.payee!));
+  const known = pick(items.filter((i) => i.payout?.status === "paid"), intent.payee);
   if (!known) return out(`I haven't paid ${intent.payee} before, so I don't have their bank details. Forward me their invoice instead.`);
   const currency = intent.currency ?? known.fields.currency;
   if (!intent.currency) Object.assign(understood.find((x) => x.field === "currency")!, { value: currency, source: `your last payment to ${known.fields.payeeName}` });

@@ -60,6 +60,24 @@ describe("say a payment", () => {
     }
   });
 
+  it("matches a name speech-to-text misspelled, shows both spellings, and won't guess at a stranger", async () => {
+    const { server, post, payStudio } = await start();
+    try {
+      await payStudio();
+      // What Whisper actually wrote for a spoken "Pay Kreuzberg Studio 280 euros".
+      const r = await post("/v1/say", { transcript: "Pay Cruzeburg Studio €280." });
+      const payee = r.body.understood.find((u: { field: string }) => u.field === "payee");
+      expect(payee).toMatchObject({ value: "Kreuzberg Studio GmbH", source: "you said “Cruzeburg Studio”" });
+      expect(r.body.item.payout.amount).toBe("280.00");
+
+      const other = await post("/v1/say", { transcript: "Pay Kreuzberg Bakery 50 euros" });
+      expect(other.body.item).toBeNull();
+      expect(other.body.problem).toMatch(/haven't paid/);
+    } finally {
+      server.close();
+    }
+  });
+
   it("points at an invoice already waiting instead of making a new one", async () => {
     const { server, post, forward } = await start();
     try {

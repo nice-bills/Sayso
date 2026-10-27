@@ -620,8 +620,24 @@ function upNext(q, pick) {
 // heard, then Sayso shows how it read them, field by field, and where each field came from. Bank
 // details never come from speech. Nothing pays until you tap Pay and confirm with your passkey.
 const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+const canRecord = !!navigator.mediaDevices?.getUserMedia && !!window.AudioContext;
 let recog;
+// Two ways to hear: the browser's own speech recognition (Chrome and Safari send the audio to Google
+// or Apple), or Whisper running right here on the device. Whisper is the default where the browser
+// has none (Firefox), and the owner can pick it anywhere.
+const pref = (() => { try { return localStorage.getItem("sayso.voice"); } catch { return null; } })();
+state.say.engine = pref === "browser" && Speech ? "browser" : pref === "whisper" || !Speech ? (canRecord ? "whisper" : null) : "browser";
+function setEngine(engine) {
+  state.say.engine = engine;
+  try { localStorage.setItem("sayso.voice", engine); } catch {}
+  render();
+}
+function setLive(text) {
+  const live = document.getElementById("say-live");
+  if (live) live.textContent = text;
+}
 function startListening() {
+  if (state.say.engine === "whisper") return void startWhisper();
   const s = state.say;
   recog = new Speech();
   recog.lang = navigator.language || "en-GB";
@@ -632,12 +648,82 @@ function startListening() {
   // The live words go straight into their element: a full re-render per syllable would flicker.
   recog.onresult = (e) => {
     s.text = Array.from(e.results, (r) => r[0].transcript).join("").trim();
-    const live = document.getElementById("say-live");
-    if (live) live.textContent = s.text || "Listening…";
+    setLive(s.text || "Listening…");
   };
   recog.onerror = (e) => { s.listening = false; toast(e.error === "not-allowed" || e.error === "service-not-allowed" ? "Allow the microphone to say a payment, or type it." : e.error === "no-speech" ? "I didn't hear anything." : "I didn't catch that. Try again, or type it."); };
   recog.onend = () => { s.listening = false; if (s.text) understand(s.text); else render(); };
   try { recog.start(); } catch { s.listening = false; render(); }
+}
+
+let whisper; // { worker, ready, mb, waits }
+function whisperWorker() {
+  if (whisper) return whisper;
+  const worker = new Worker("/whisper-worker.js", { type: "module" });
+  whisper = { worker, ready: false, mb: 0, waits: new Map(), next: 1 };
+  worker.onmessage = ({ data }) => {
+    if (data.type === "progress") { whisper.mb = data.mb; if (state.say.listening && !whisper.ready) setLive(loadingLine()); }
+    else if (data.type === "ready") whisper.ready = true;
+    else if (data.id && whisper.waits.has(data.id)) { const w = whisper.waits.get(data.id); whisper.waits.delete(data.id); data.type === "error" ? w.reject(new Error(data.message)) : w.resolve(data.text); }
+    else if (data.type === "error") toast("Whisper couldn't start here. Type the payment instead.");
+  };
+  worker.onerror = () => toast("Whisper couldn't start here. Type the payment instead.");
+  worker.postMessage({ type: "load" });
+  return whisper;
+}
+const loadingLine = () => `Getting Whisper onto this device${whisper?.mb ? ` (${whisper.mb} MB so far)` : ""}. Only the first time. Keep talking, I'm recording.`;
+function transcribe(audio, rate) {
+  const w = whisperWorker(), id = w.next++;
+  return new Promise((resolve, reject) => { w.waits.set(id, { resolve, reject }); w.worker.postMessage({ type: "transcribe", id, audio, rate }); });
+}
+
+let stopWhisper = null;
+async function startWhisper() {
+  const s = state.say;
+  Object.assign(s, { listening: true, text: "", result: null });
+  render();
+  const w = whisperWorker();
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
+  catch { s.listening = false; render(); return toast("Allow the microphone to say a payment, or type it."); }
+  setLive(w.ready ? "Listening…" : loadingLine());
+  const ctx = new AudioContext();
+  const rate = ctx.sampleRate;
+  const src = ctx.createMediaStreamSource(stream);
+  const node = ctx.createScriptProcessor(4096, 1, 1);
+  const chunks = [];
+  let length = 0, spoke = false, quietSince = 0, busy = false, done = false;
+  const audio = () => { const out = new Float32Array(length); let o = 0; for (const c of chunks) { out.set(c, o); o += c.length; } return out; };
+  node.onaudioprocess = (e) => {
+    const d = new Float32Array(e.inputBuffer.getChannelData(0));
+    chunks.push(d); length += d.length;
+    let sum = 0; for (let i = 0; i < d.length; i++) sum += d[i] * d[i];
+    const loud = Math.sqrt(sum / d.length) > 0.012, now = performance.now();
+    if (loud) { spoke = true; quietSince = 0; } else if (!quietSince) quietSince = now;
+    // Stop after 1.8 s of quiet once something was said, or at 20 s.
+    if ((spoke && quietSince && now - quietSince > 1800) || length > rate * 20) finish();
+  };
+  src.connect(node); node.connect(ctx.destination);
+  // While talking, re-read everything so far about once a second: that's the live transcript.
+  const live = setInterval(async () => {
+    if (done || busy || !spoke || !w.ready) return;
+    busy = true;
+    try { const t = await transcribe(audio(), rate); if (!done && t) { s.text = t; setLive(t); } } catch {} finally { busy = false; }
+  }, 900);
+  async function finish() {
+    if (done) return;
+    done = true; stopWhisper = null;
+    clearInterval(live);
+    node.disconnect(); src.disconnect(); stream.getTracks().forEach((t) => t.stop()); ctx.close();
+    if (!spoke) { s.listening = false; render(); return toast("I didn't hear anything."); }
+    setLive(w.ready ? (s.text || "Reading what you said…") : "Whisper is still downloading. I'll read what you said as soon as it's here.");
+    try { s.text = await transcribe(audio(), rate); } catch { s.text = ""; }
+    s.listening = false;
+    if (s.text) understand(s.text); else { render(); toast("I didn't catch that. Try again, or type it."); }
+  }
+  stopWhisper = finish;
+}
+function stopListening() {
+  if (stopWhisper) stopWhisper(); else recog?.stop();
 }
 function understand(text) {
   document.activeElement?.blur?.();
@@ -654,15 +740,19 @@ function sayCard() {
   const s = state.say, r = s.result;
   return h("section", { class: "say", "aria-label": "Say a payment" },
     h("div", { class: "say-row" },
-      Speech ? h("button", { class: `mic${s.listening ? " on" : ""}`, type: "button", "aria-label": s.listening ? "Stop listening" : "Say a payment", "aria-pressed": String(s.listening), onclick: () => (s.listening ? recog?.stop() : startListening()) }, icon("mic", 22)) : null,
+      s.engine ? h("button", { class: `mic${s.listening ? " on" : ""}`, type: "button", "aria-label": s.listening ? "Stop listening" : "Say a payment", "aria-pressed": String(s.listening), onclick: () => (s.listening ? stopListening() : startListening()) }, icon("mic", 22)) : null,
       h("form", { class: "grow", onsubmit: (e) => { e.preventDefault(); const t = e.target.elements.say.value.trim(); if (t) understand(t); } },
         h("input", { class: "field say-field", name: "say", autocomplete: "off", value: s.listening ? "" : s.text, "aria-label": "Say or type a payment",
-          placeholder: Speech ? "Tap the mic and say it, or type: Pay Kreuzberg Studio 280 euros" : "Type it: Pay Kreuzberg Studio 280 euros", oninput: (e) => { s.text = e.target.value; } })),
+          placeholder: s.engine ? "Tap the mic and say it, or type: Pay Kreuzberg Studio 280 euros" : "Type it: Pay Kreuzberg Studio 280 euros", oninput: (e) => { s.text = e.target.value; } })),
     ),
     s.listening ? h("p", { class: "say-live", id: "say-live", "aria-live": "polite" }, s.text || "Listening…") : null,
     state.busy.say ? h("p", { class: "muted small say-note" }, "Checking what I heard…")
       : r ? sayResult(r)
       : h("p", { class: "muted small say-note" }, "Say who to pay and how much. You'll see the exact words I heard and how I read them before anything moves."),
+    s.engine && !s.listening ? h("p", { class: "small say-engine" },
+      s.engine === "whisper" ? "Heard by Whisper, on this device: your voice isn't sent anywhere. " : "Heard by your browser's speech recognition. ",
+      s.engine === "whisper" && Speech ? h("button", { class: "linkish", type: "button", onclick: () => setEngine("browser") }, "Use the browser's instead")
+        : s.engine === "browser" && canRecord ? h("button", { class: "linkish", type: "button", onclick: () => setEngine("whisper") }, "Use Whisper on this device instead") : null) : null,
   );
 }
 

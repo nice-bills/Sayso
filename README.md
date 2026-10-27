@@ -13,7 +13,7 @@ The rails decide what is allowed, not the prompt:
 - **An agent's USDZ stays in escrow until its payout is delivered.** Only delivered payouts are released to the ramp. Money behind a payout still on its way is never swept, so a bounce can always be refunded.
 - **Every final payout gets a receipt anchored on Metal.** Anyone can hash the receipt and compare it with the anchor transaction, without trusting Sayso.
 - **A changed bank account has to prove itself.** Sayso sends 0.01 with a 6-digit code to the new account and asks the payee for it at the address on file from an earlier paid invoice, not the address that sent the new one.
-- **You see what Sayso heard.** Say a payment and the app shows the exact words heard next to what Sayso understood, with where each field came from. Bank details never come from speech.
+- **You see what Sayso heard.** Say a payment and the app shows the exact words heard next to what Sayso understood, with where each field came from. Whisper can transcribe on the device itself (the default where the browser has no speech recognition, like Firefox), so the voice is never sent anywhere. A name speech-to-text misspells ("Cruzeburg") is matched by sound to a payee already paid, and both spellings are shown. Bank details never come from speech.
 - **Reconciliation is arithmetic, to the cent.**
 
 Built for the Airwallex Agentic Banking Hackathon (2026). Demo script: [docs/DEMO-SCRIPT.md](docs/DEMO-SCRIPT.md). Write-up: [docs/SUBMISSION.md](docs/SUBMISSION.md).
@@ -88,7 +88,7 @@ Agents sign themselves up through [auth.md](https://github.com/workos/auth.md): 
 
 ## The app
 
-`/` is the app. It has a say-it bar with a live transcript (the browser's speech recognition, or type it), an inbox of forwarded invoices with one-tap pay, the one-cent code check (or a phone call) for invoices that change bank details, a "Why?" view on every payment, escrow on the Agents tab, a form for missing details, every payment with its progress, and how to connect an agent. `/ops/` is the live back office feed. Both sit behind the owner's sign-in, and the page renders invoice text as text under a strict CSP.
+`/` is the app. It has a say-it bar with a live transcript (Whisper on the device, the browser's speech recognition, or type it), an inbox of forwarded invoices with one-tap pay, the one-cent code check (or a phone call) for invoices that change bank details, a "Why?" view on every payment, escrow on the Agents tab, a form for missing details, every payment with its progress, and how to connect an agent. `/ops/` is the live back office feed. Both sit behind the owner's sign-in, and the page renders invoice text as text under a strict CSP.
 
 ## Live run (sandbox keys and Metal testnet)
 
