@@ -86,8 +86,9 @@ const soundsLike = (full: string, said: string) => {
 };
 const mask = (f: { iban?: string | null; accountNumber?: string | null }) => { const n = f.iban ?? f.accountNumber; return n ? `•••• ${n.slice(-4)}` : null; };
 const addressOf = (from: string) => from.match(/<([^>]+)>/)?.[1] ?? from;
-/** The payee as matched, noting the words said when they differ ("Kreuzberg Studio" for "Kreuzberg Studio GmbH"). */
-const named = (u: Understood, full: string | null, said: string) => Object.assign(u, { value: full, source: full && norm(full) !== norm(said) ? `you said “${said}”` : "you said" });
+/** The payee as matched, noting the words said when they only sound alike ("Cruzeburg Studio" for "Kreuzberg Studio GmbH"). */
+const named = (u: Understood, full: string | null, said: string) => Object.assign(u, { value: full, source: full && !sameName(full, said) ? `you said “${said}”` : "you said" });
+const SAID_FROM = "You (said)";
 const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 /** The item for the payee said: by name, else by sound, but only when exactly one payee sounds like it. */
@@ -112,13 +113,13 @@ export async function say(inbox: Inbox, transcript: string, now = new Date()): P
   // An invoice already waiting for this payee: the words just point at it.
   const waiting = pick(items.filter((i) => (i.status === "awaiting_approval" || i.status === "needs_verification") && (!intent.amount || Number(i.fields.amount) === Number(intent.amount))), intent.payee);
   if (waiting) {
-    const from = `the invoice from ${addressOf(waiting.from)}`;
+    const from = waiting.from === SAID_FROM ? "what you said earlier" : `the invoice from ${addressOf(waiting.from)}`;
     for (const [field, v] of [["amount", waiting.fields.amount], ["currency", waiting.fields.currency], ["reference", waiting.fields.reference]] as const) {
       const u = understood.find((x) => x.field === field)!;
       if (!u.value) Object.assign(u, { value: v, source: from });
     }
     named(understood.find((x) => x.field === "payee")!, waiting.fields.payeeName, intent.payee);
-    understood.push({ field: "bank", value: mask(waiting.fields), source: from });
+    understood.push({ field: "bank", value: mask(waiting.fields), source: waiting.from === SAID_FROM ? `your earlier payment to ${waiting.fields.payeeName}` : from });
     return out(null, waiting);
   }
 
@@ -134,7 +135,7 @@ export async function say(inbox: Inbox, transcript: string, now = new Date()): P
   const reference = intent.reference ?? `Said ${now.toISOString().slice(0, 10)}`;
   if (!intent.reference) Object.assign(understood.find((x) => x.field === "reference")!, { value: reference, source: "Sayso, since you named none" });
   const item = await inbox.receiveFields({
-    messageId: `said-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`, from: "You (said)", subject: `Said: ${heard.slice(0, 60)}`, body: heard, receivedAt: now,
+    messageId: `said-${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`, from: SAID_FROM, subject: `Said: ${heard.slice(0, 60)}`, body: heard, receivedAt: now,
   }, { ...known.fields, amount: intent.amount, currency, reference, dueDate: null });
   return out(null, item);
 }

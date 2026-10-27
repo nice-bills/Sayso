@@ -494,14 +494,11 @@ function claimView() {
 }
 
 /** Offered once signed in, until there's a passkey: Face ID becomes the way in and the way to pay. */
-function passkeyBanner() {
-  if (!state.me || state.me.passkeys || state.laterPasskey || !canPasskey()) return null;
-  return h("section", { class: "nudge" },
-    h("span", { class: "agent-mark", "aria-hidden": "true" }, icon("face", 22)),
-    h("div", { class: "grow" }, h("b", {}, "Turn on Face ID"), h("p", { class: "small muted" }, "Sign in and approve payments with your face or fingerprint. An agent can't fake it.")),
-    h("button", { class: "btn pay", disabled: state.busy.passkey, onclick: () => act("passkey", addPasskey, "Face ID is on. You'll use it to sign in and to pay.") }, "Turn on"),
-    h("button", { class: "btn quiet", onclick: () => { state.laterPasskey = true; sessionSet("laterPasskey", "1"); render(); } }, "Later"),
-  );
+/** A small header button until the owner has a passkey: approving with a face or fingerprint is something an agent can't fake. */
+function passkeyButton() {
+  if (!state.me || state.me.passkeys || !canPasskey()) return null;
+  return h("button", { class: "btn quiet small faceid", title: "Sign in and approve payments with your face or fingerprint. An agent can't fake it.", disabled: state.busy.passkey, onclick: () => act("passkey", addPasskey, "Face ID is on. You'll use it to sign in and to pay.") },
+    icon("face", 16), h("span", { class: "tab-label" }, "Turn on Face ID"));
 }
 
 function footer() {
@@ -542,6 +539,7 @@ function appView() {
       brand(),
       h("nav", { class: "tabs", role: "tablist" }, tabs.map(([id, label, ic, n]) => h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === id && !state.focus), onclick: () => { state.tab = id; sessionSet("tab", id); shown.clear(); leaveFocus(); render(); window.scrollTo(0, 0); } }, icon(ic, 20), h("span", { class: "tab-label" }, label), n ? h("span", { class: "count" }, n) : null))),
       h("div", { class: "top-right" },
+        passkeyButton(),
         s?.balances?.USD ? h("span", { class: "bal" }, "Available ", h("b", {}, money(s.balances.USD / 100, "USD"))) : null,
         s ? h("span", { class: "mode", title: s.offline ? "Airwallex and Metal are simulated" : "Real Airwallex and Metal APIs" }, h("span", { class: `dot${s.offline ? "" : " live"}` }), s.offline ? "Offline demo" : s.sandbox ? "Sandbox" : "Live") : null,
         h("a", { class: "btn quiet icon-btn", href: "/ops/", target: "_blank", rel: "noopener", title: "Back office", "aria-label": "Back office" }, icon("ledger", 18)),
@@ -559,7 +557,8 @@ function homeView() {
   const order = ["needs_verification", "awaiting_approval", "needs_details"];
   const needs = state.inbox.filter(NEEDS).sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
   const reviews = reviewable();
-  const queue = [...reviews.map((p) => ({ key: p.id, payout: p })), ...needs.map((i) => ({ key: i.id, item: i }))];
+  const said = state.say.result?.item?.id;
+  const queue = [...reviews.map((p) => ({ key: p.id, payout: p })), ...needs.filter((i) => i.id !== said || i.status !== "awaiting_approval").map((i) => ({ key: i.id, item: i }))];
   const n = queue.length;
   const at = Math.max(0, queue.findIndex((q) => q.key === state.pick));
   const cur = queue[at];
@@ -567,16 +566,14 @@ function homeView() {
   const pick = (key) => { state.pick = key; render(); };
   // Keep what you just approved in view, so you can watch it go through.
   const recent = state.inbox.filter((i) => state.recent.has(i.id) && !NEEDS(i));
-  const byAgents = state.payouts.filter((p) => p.source === "agent" && p.status === "paid");
-  return h("div", { class: "home" }, passkeyBanner(), sayCard(), h("div", { class: "home-grid" },
+  return h("div", { class: "home" }, sayCard(), h("div", { class: "home-grid" },
     h("section", { class: "stage", "aria-labelledby": "needs-h" },
       h("div", { class: "stage-head" },
         h("h2", { id: "needs-h" }, "Needs you"),
-        n ? h("span", { class: "stage-count" }, `${at + 1} of ${n}`) : null,
-        n > 1 ? h("div", { class: "dots", "aria-hidden": "true" }, queue.map((_, i) => h("i", { class: i === at ? "on" : "" }))) : null,
+        n > 1 ? h("span", { class: "stage-count" }, `${at + 1} of ${n}`) : null,
+        n > 1 ? h("button", { class: "btn quiet small skip", type: "button", onclick: () => pick(queue[(at + 1) % n].key) }, "Skip") : null,
       ),
-      cur ? h("div", { class: "stage-card" }, cur.item ? invoiceCard(cur.item) : payoutRow(cur.payout),
-        n > 1 ? h("button", { class: "btn quiet skip", type: "button", onclick: () => pick(queue[(at + 1) % n].key) }, "Not now, show the next one") : null)
+      cur ? h("div", { class: "stage-card" }, cur.item ? invoiceCard(cur.item) : payoutRow(cur.payout))
         : h("div", { class: "stage-card clear" }, h("b", { class: "clear-title" }, "All clear"), h("p", { class: "muted" }, "Nothing needs you. Your agents will bring the next invoice here.")),
     ),
     h("div", { class: "side" },
@@ -585,11 +582,6 @@ function homeView() {
         h("div", { class: "next-list" }, rest.map((q) => upNext(q, pick))),
       ) : null,
       recent.length ? h("section", { class: "box" }, h("h3", { class: "box-h" }, "Just approved"), h("div", { class: "list" }, recent.map(invoiceCard))) : null,
-      h("section", { class: "box" },
-        h("h3", { class: "box-h" }, "Your agents"),
-        h("div", { class: "big-num" }, `${byAgents.length} paid`), h("p", { class: "muted small", style: "margin:0 0 6px" }, "without needing you"),
-        byAgents.slice(0, 4).map((p) => h("div", { class: "done-row" }, h("span", { class: "tick", "aria-hidden": "true" }, icon("check", 14)), h("div", { class: "grow" }, h("b", {}, `${money(p.amount, p.currency)} to ${p.payee}`), h("div", { class: "small muted" }, p.created_at ? ago(p.created_at) : "Delivered")))),
-      ),
     ),
   ));
 }
@@ -743,16 +735,11 @@ function sayCard() {
       s.engine ? h("button", { class: `mic${s.listening ? " on" : ""}`, type: "button", "aria-label": s.listening ? "Stop listening" : "Say a payment", "aria-pressed": String(s.listening), onclick: () => (s.listening ? stopListening() : startListening()) }, icon("mic", 22)) : null,
       h("form", { class: "grow", onsubmit: (e) => { e.preventDefault(); const t = e.target.elements.say.value.trim(); if (t) understand(t); } },
         h("input", { class: "field say-field", name: "say", autocomplete: "off", value: s.listening ? "" : s.text, "aria-label": "Say or type a payment",
-          placeholder: s.engine ? "Tap the mic and say it, or type: Pay Kreuzberg Studio 280 euros" : "Type it: Pay Kreuzberg Studio 280 euros", oninput: (e) => { s.text = e.target.value; } })),
+          placeholder: "Say or type a payment: “Pay Kreuzberg Studio 280 euros”", oninput: (e) => { s.text = e.target.value; } })),
     ),
-    s.listening ? h("p", { class: "say-live", id: "say-live", "aria-live": "polite" }, s.text || "Listening…") : null,
-    state.busy.say ? h("p", { class: "muted small say-note" }, "Checking what I heard…")
-      : r ? sayResult(r)
-      : h("p", { class: "muted small say-note" }, "Say who to pay and how much. You'll see the exact words I heard and how I read them before anything moves."),
-    s.engine && !s.listening ? h("p", { class: "small say-engine" },
-      s.engine === "whisper" ? "Heard by Whisper, on this device: your voice isn't sent anywhere. " : "Heard by your browser's speech recognition. ",
-      s.engine === "whisper" && Speech ? h("button", { class: "linkish", type: "button", onclick: () => setEngine("browser") }, "Use the browser's instead")
-        : s.engine === "browser" && canRecord ? h("button", { class: "linkish", type: "button", onclick: () => setEngine("whisper") }, "Use Whisper on this device instead") : null) : null,
+    s.listening ? [h("p", { class: "say-live", id: "say-live", "aria-live": "polite" }, s.text || "Listening…"),
+      h("p", { class: "small muted say-note" }, s.engine === "whisper" ? "Whisper, on this device. Your voice isn't sent anywhere." : "Your browser's speech recognition.")] : null,
+    state.busy.say ? h("p", { class: "muted small say-note" }, "Reading what you said…") : r ? sayResult(r) : null,
   );
 }
 
@@ -760,18 +747,22 @@ const SAID = { payee: "Pay", amount: "Amount", reference: "Reference", bank: "In
 function sayResult(r) {
   const ccy = r.understood.find((u) => u.field === "currency")?.value;
   const item = r.item ? state.inbox.find((i) => i.id === r.item.id) ?? r.item : null;
+  const s = state.say;
+  const other = s.engine === "whisper" && Speech ? ["browser", "Use the browser's speech recognition"] : s.engine === "browser" && canRecord ? ["whisper", "Use Whisper on this device"] : null;
   return h("div", { class: "heard-grid" },
-    h("div", { class: "heard" }, h("div", { class: "lbl" }, "I heard"), h("blockquote", {}, `“${r.heard}”`),
-      h("button", { class: "btn quiet small", type: "button", onclick: () => { state.say.result = null; render(); document.querySelector(".say-field")?.focus(); } }, "That's not what I said")),
-    h("div", { class: "understood" }, h("div", { class: "lbl" }, "I understood"),
-      h("dl", {}, r.understood.filter((u) => SAID[u.field]).map((u) => h("div", { class: "u-row" },
+    h("div", { class: "heard" }, h("span", { class: "lbl" }, "I heard"), h("blockquote", {}, `“${r.heard}”`)),
+    r.understood.some((u) => u.value) ? h("div", { class: "understood" }, h("span", { class: "lbl" }, "I understood"),
+      h("dl", {}, r.understood.filter((u) => SAID[u.field] && (u.value || u.field !== "reference")).map((u) => h("div", { class: "u-row" },
         h("dt", {}, SAID[u.field]),
         h("dd", {}, h("b", {}, u.value ? (u.field === "amount" ? money(u.value, ccy || "USD") : u.value) : "?"),
-          h("span", { class: `src${u.source.startsWith("you said") ? " said" : ""}` }, u.source.startsWith("you said") ? u.source : `from ${u.source}`)))))),
+          u.source === "you said" ? null : h("span", { class: `src${u.source.startsWith("you said") ? " said" : ""}` }, u.source.startsWith("you said") ? u.source : `from ${u.source}`)))))) : null,
     r.problem ? h("div", { class: "alert note" }, r.problem) : null,
     item ? h("div", { class: "say-item" }, item.status === "awaiting_approval" ? approveBlock(item)
       : NEEDS(item) ? h("p", { class: "small", style: "margin:0" }, item.status === "needs_verification" ? "That's an invoice Sayso is holding: it asks to pay new bank details. It's open below under Needs you." : "That invoice is missing details. It's open below under Needs you.")
       : invoiceCard(item)) : null,
+    h("div", { class: "say-foot small" },
+      h("button", { class: "linkish", type: "button", onclick: () => { s.result = null; s.text = ""; render(); document.querySelector(".say-field")?.focus(); } }, "That's not what I said"),
+      other ? h("button", { class: "linkish quiet-link", type: "button", onclick: () => setEngine(other[0]) }, other[1]) : null),
   );
 }
 
@@ -914,7 +905,7 @@ function invoiceCard(item) {
     item.status === "needs_verification" ? verifyBlock(item) : null,
     item.status === "needs_details" ? (state.open[item.id] ? detailsBlock(item)
       : [h("div", { class: "sub" }, `Sayso couldn't find the ${item.missing.join(", ")}.`), h("div", { class: "actions" }, h("button", { class: "btn", onclick: () => { state.open[item.id] = true; render(); } }, "Add missing details"), ignoreButton(item))]) : null,
-    item.status === "paying" && p ? [timeline(p, true), failure(p), whyButton(p.id), whyPanel(p.id)] : null,
+    item.status === "paying" && p ? [p.status === "paid" ? null : timeline(p, true), failure(p), whyButton(p.id), whyPanel(p.id)] : null,
     item.status === "rejected" && p?.reasons?.length ? h("div", { class: "alert" }, h("b", {}, "Sayso won't pay this: "), p.reasons.join("; ")) : null,
     item.status === "duplicate" ? h("div", { class: "sub" }, "This matches an invoice already in your inbox, so it wasn't queued again.") : null,
   );
@@ -931,9 +922,8 @@ function bankLine(f, masked) {
 function approveBlock(item) {
   const p = item.payout, key = `pay:${item.id}`;
   return h("div", { class: "actions" },
-    h("button", { class: "btn pay", disabled: state.busy[key], onclick: () => { state.recent.add(item.id); act(key, () => approveInvoice(item.id), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); } }, state.busy[key] ? "Paying…" : `Pay ${money(p.amount, p.currency)}`),
+    h("button", { class: "btn pay", title: `From your Airwallex balance by ${p.method === "SWIFT" ? "SWIFT" : "local transfer"}, about ${money(p.price_usdz, "USD")}.`, disabled: state.busy[key], onclick: () => { state.recent.add(item.id); act(key, () => approveInvoice(item.id), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); } }, state.busy[key] ? "Paying…" : `Pay ${money(p.amount, p.currency)}`),
     ignoreButton(item),
-    h("span", { class: "muted small" }, `From your Airwallex balance by ${p.method === "SWIFT" ? "SWIFT" : "local transfer"}, about ${money(p.price_usdz, "USD")}.`),
   );
 }
 
@@ -941,9 +931,7 @@ function verifyBlock(item) {
   const p = item.payout, f = item.fields, key = `pay:${item.id}`, pc = item.penny, contact = item.contact_on_file;
   const ok = Boolean(state.verified[item.id]);
   const pay = (extra) => { state.recent.add(item.id); act(key, () => approveInvoice(item.id, extra), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); };
-  const head = h("div", { class: "alert" },
-    h("b", {}, icon("shield", 15), " Sayso is holding this one until the payee confirms."),
-    p?.reasons?.length ? h("ul", {}, p.reasons.map((r) => h("li", {}, r))) : null);
+  const head = h("div", { class: "alert" }, h("b", {}, icon("shield", 15), " Held:"), "\u00a0" + sentence((p?.reasons ?? []).join("; ") || "check the bank details with the payee") + ".");
   if (pc?.status === "confirmed") return [
     h("div", { class: "alert ok" }, h("b", {}, icon("check", 15), ` ${pc.contact} confirmed the new details`), "\u00a0with the code from the 1-cent payment."),
     h("div", { class: "actions" }, h("button", { class: "btn pay", disabled: state.busy[key], onclick: () => pay({}) }, `Pay ${money(p.amount, p.currency)}`), ignoreButton(item)),
@@ -960,12 +948,12 @@ function verifyBlock(item) {
     h("div", { class: "actions" }, h("button", { class: "btn pay", disabled: !ok || state.busy[key], onclick: () => pay({ verified_with_payee: true }) }, `Pay ${money(p.amount, p.currency)}`), ignoreButton(item)),
   ];
   if (pc?.status === "sent") return [head,
-    h("div", { class: "alert note" }, h("b", {}, "Waiting for the payee's code."), ` Sayso sent 0.01 ${p.currency} to the account ending ${(f.iban ?? f.accountNumber ?? "").replace(/\s/g, "").slice(-4)} with a code in its reference, and asked ${pc.contact} (from your earlier invoices) to enter it.`,
+    h("div", { class: "alert note" }, h("b", {}, "Waiting for the payee's code."), ` Sent 1 cent with a code to the account ending ${(f.iban ?? f.accountNumber ?? "").replace(/\s/g, "").slice(-4)}, and asked ${pc.contact} for it.`,
       pc.simStatementReference ? h("div", { class: "small", style: "margin-top:6px" }, "Demo: the payee's statement reads ", h("code", {}, pc.simStatementReference), ". ", h("a", { href: pc.simLink, target: "_blank", rel: "noopener" }, "Open the payee's page")) : null),
     h("details", {}, h("summary", { class: "small" }, "Can't wait? Call them instead"), call)];
   if (contact) return [head,
-    h("p", { class: "small", style: "margin:4px 0 0" }, `Sayso can send 0.01 ${p.currency} with a code to the new account, and ask ${contact} (the address on your earlier invoices, not this sender) to type it in. Only the real owner of the account sees the code.`),
-    h("div", { class: "actions" }, h("button", { class: "btn pay", disabled: state.busy[`penny:${item.id}`], onclick: () => act(`penny:${item.id}`, () => api(`/v1/inbox/${encodeURIComponent(item.id)}/penny`, {}), "Sent. Waiting for the payee's code.") }, state.busy[`penny:${item.id}`] ? "Sending…" : "Check with a 1-cent code"), ignoreButton(item)),
+    h("div", { class: "actions" }, h("button", { class: "btn pay", title: `Sends 1 cent with a code to the new account, and asks ${contact} (from your earlier invoices, not this sender) for it. Only the account's real owner sees the code.`, disabled: state.busy[`penny:${item.id}`], onclick: () => act(`penny:${item.id}`, () => api(`/v1/inbox/${encodeURIComponent(item.id)}/penny`, {}), "Sent. Waiting for the payee's code.") }, state.busy[`penny:${item.id}`] ? "Sending…" : "Check with a 1-cent code"), ignoreButton(item)),
+    h("p", { class: "small muted", style: "margin:0" }, `Sends 1 cent with a code to the new account and asks ${contact}, from your earlier invoices, for it.`),
     h("details", {}, h("summary", { class: "small" }, "Or call them yourself"), call)];
   return [head, ...call];
 }
@@ -1040,20 +1028,17 @@ const reviewable = () => state.payouts.filter((p) => p.status === "needs_review"
 function payoutRow(p) {
   const tapPending = linkedPayouts().has(p.id) && ["quoted", "needs_review"].includes(p.status);
   const [label, tone] = tapPending ? (p.status === "quoted" ? ["Waiting for your tap", "coin"] : ["Check before paying", "stop"]) : PAYOUT_PILL[p.status] ?? [p.status, ""];
-  const open = state.open[p.id];
   const from = p.source === "agent" ? "Agent" : p.source === "inbox" || linkedPayouts().has(p.id) ? "Inbox" : "Quote";
   const m = motion(`pay:${p.id}`, p.status);
   return h("article", { class: `row${m.cls}`, style: m.style, "data-status": p.status },
     h("div", { class: "line" }, h("b", {}, p.payee), h("span", { class: "amt" }, money(p.amount, p.currency))),
     h("div", { class: "line small" }, h("span", { class: "muted spaced" }, [from, p.reference, p.created_at && ago(p.created_at)].filter(Boolean).map((x) => h("span", {}, x))), h("span", { class: `pill ${tone}` }, label)),
-    timeline(p, from === "Inbox"),
+    ["paid", "refunded", "expired", "rejected"].includes(p.status) ? null : timeline(p, from === "Inbox"),
     failure(p),
     p.status === "needs_review" && !linkedPayouts().has(p.id) ? reviewBlock(p) : null,
-    h("div", { class: "spaced" },
-      h("button", { class: "btn quiet small", style: "padding-left:0", onclick: () => { state.open[p.id] = !open; render(); } }, open ? "Hide details" : "Details"),
-      whyButton(p.id)),
+    p.status === "quoted" ? null : whyButton(p.id),
     whyPanel(p.id),
-    open ? h("div", { class: "proofs" },
+    state.why[p.id] ? h("div", { class: "proofs" },
       row("Payout id", p.id), row("Method", p.method),
       from === "Agent" ? row("Agent paid", `${usdz(p.price_usdz)} (fee ${usdz(p.fee_usdz)})`) : null,
       row("Metal payment", p.funding_tx), row("Airwallex transfer", p.airwallex_transfer_id), row("Refund", p.refund_tx),
@@ -1105,18 +1090,14 @@ function byCcy(ps) {
 // ---------- agents ----------
 function agentsView() {
   const agentPays = state.payouts.filter((p) => p.source === "agent");
-  const received = agentPays.filter((p) => p.status !== "refunded").reduce((s, p) => s + Number(p.price_usdz), 0);
-  const swept = (state.summary?.sweeps ?? []).filter((s) => s.status === "credited").reduce((s, x) => s + x.amountMinor, 0) / 100;
   const origin = location.origin;
   const mcp = `claude mcp add sayso \\\n  -e SAYSO_URL=${origin} \\\n  -e SAYSO_BUYER_KEY=0x… \\\n  -e SAYSO_MAX_USDZ=500 \\\n  -- npx tsx src/mcp/server.ts`;
   const curl = `curl -X POST ${origin}/v1/quotes \\\n  -H 'content-type: application/json' \\\n  -d '{"amount":"180.00","currency":"EUR","reference":"Oct",\n       "payee":{"name":"Lingua Freelance","bank":{"iban":"FR14…"},\n       "bank_country_code":"FR","address":{"country_code":"FR","city":"Paris"}}}'`;
   return h("div", {},
     h("div", { class: "head" }, h("h2", {}, "Agents")),
-    h("p", { class: "summary" }, `Agents have paid ${agentPays.length} ${agentPays.length === 1 ? "invoice" : "invoices"} with ${usdz(received)} over x402, and ${money(swept, "USD")} of Sayso's earnings has moved into Airwallex.`),
     escrowBox(),
+    agentPays.length ? [h("h3", { class: "section" }, "Recent agent payouts"), h("div", { class: "list" }, agentPays.slice(0, 10).map(payoutRow))] : null,
     connectAgents(origin),
-    h("h3", { class: "section" }, "Recent agent payouts"),
-    h("div", { class: "list" }, agentPays.length ? agentPays.slice(0, 10).map(payoutRow) : h("div", { class: "empty" }, "No agent has paid yet. Connect one above, and its payouts show up here.")),
     h("details", { class: "dev" },
       h("summary", {}, "Developer setup"),
       h("p", { class: "small muted" }, "For an agent with its own Metal wallet: it gets a free quote, pays the exact price over x402, and Metal won't sign above the cap you set."),
@@ -1134,8 +1115,8 @@ function escrowBox() {
   return h("div", { class: "card escrow" },
     h("div", { class: "esc" }, h("div", {}, h("div", { class: "lbl" }, "In escrow on Metal"), h("b", {}, usdz(e.heldMinor / 100)), h("div", { class: "small muted" }, e.heldPayouts ? `behind ${e.heldPayouts} ${e.heldPayouts === 1 ? "payout" : "payouts"} on their way` : "nothing on its way")),
       h("div", {}, h("div", { class: "lbl" }, "Earned by delivered payouts"), h("b", {}, usdz(e.deliveredMinor / 100)), h("div", { class: "small muted" }, `${usdz(e.sweptMinor / 100)} released to Airwallex`))),
-    h("p", { class: "small muted", style: "margin:12px 0 0" }, "An agent's USDZ leaves escrow only when its payout is delivered (to the ramp, under a mandate that pays nobody else) or bounces (back to the agent, under the capped refund mandate). Metal enforces both.",
-      m === "required" ? " Agents must pay under a Metal mandate their owner bound, and sign each exact order." : m === "verify" ? " Payments made under an owner's Metal mandate are verified on chain and shown under Why." : ""),
+    h("p", { class: "small muted", style: "margin:10px 0 0" }, "Released only when a payout is delivered; a bounce goes back to the agent. Metal enforces both.",
+      m === "required" ? " Agents must pay under a budget their owner set on Metal." : ""),
   );
 }
 function snippet(title, text) {
