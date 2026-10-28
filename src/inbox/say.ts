@@ -27,7 +27,8 @@ export function parseSpoken(transcript: string): Intent {
   const m = t.match(amountRe);
   const amount = m ? Number((m[2] ?? m[3])!.replace(/,/g, "")).toFixed(2) : null;
   const currency = m ? WORDS[(m[1] ?? m[4])!.toLowerCase()] ?? null : null;
-  const reference = t.match(/\b(?:invoice|reference|ref)\s*(?:number|no\.?|#)?\s*([A-Z0-9][A-Z0-9-]{1,30})/i)?.[1]?.toUpperCase() ?? null;
+  // Speech-to-text sometimes writes "invoice 130" as "invoice €130": a currency sign there is not part of the number.
+  const reference = t.match(/\b(?:invoice|reference|ref)\s*(?:number|no\.?|#)?\s*[€£$]?\s*([A-Z0-9][A-Z0-9-]{1,30})/i)?.[1]?.toUpperCase() ?? null;
   // "pay Acme GmbH 480 euros", "send 200 pounds to the plumber", "pay the Kreuzberg Studio invoice"
   const stop = /\s+(?:\d|[€£$]|for\b|invoice\b|ref\b|reference\b|euros?\b|pounds?\b|dollars?\b|now\b|today\b|please\b)/i;
   const after = (re: RegExp) => { const x = t.match(re)?.[1]; return x ? x.split(stop)[0]!.replace(/^(?:the|my|our)\s+/i, "").replace(/['’]s$/i, "").trim() : null; };

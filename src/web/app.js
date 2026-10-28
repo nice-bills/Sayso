@@ -495,10 +495,10 @@ function claimView() {
 
 /** Offered once signed in, until there's a passkey: Face ID becomes the way in and the way to pay. */
 /** A small header button until the owner has a passkey: approving with a face or fingerprint is something an agent can't fake. */
-function passkeyButton() {
+function passkeyButton(iconOnly = false) {
   if (!state.me || state.me.passkeys || !canPasskey()) return null;
   return h("button", { class: "btn quiet small faceid", title: "Sign in and approve payments with your face or fingerprint. An agent can't fake it.", disabled: state.busy.passkey, onclick: () => act("passkey", addPasskey, "Face ID is on. You'll use it to sign in and to pay.") },
-    icon("face", 16), h("span", { class: "tab-label" }, "Turn on Face ID"));
+    icon("face", iconOnly ? 20 : 16), iconOnly ? null : h("span", { class: "tab-label" }, "Turn on Face ID"));
 }
 
 function footer() {
@@ -534,6 +534,7 @@ function appView() {
   const needsYou = state.inbox.filter(NEEDS).length + reviewable().length;
   const tabs = [["home", "Home", "home", needsYou], ["inbox", "Inbox", "inbox", 0], ["payments", "Payments", "payments", 0], ["agents", "Agents", "bot", 0]];
   const s = state.summary;
+  if (state.tab === "home" && !state.focus) return homeView();
   return h("div", { class: "shell" },
     h("header", { class: "top" }, h("div", { class: "wrap" },
       brand(),
@@ -552,58 +553,123 @@ function appView() {
   );
 }
 
-// ---------- home: one thing at a time, with what's next beside it ----------
+// ---------- home: your balance, one card, and you say what you want ----------
+// No buttons to learn. Hold the orb and say it; the words appear as they're heard, and one card
+// shows how Sayso read them, where each detail came from, and the single thing to approve.
+// Whatever already needs you (a held invoice, one ready to pay) sits in that same card.
 function homeView() {
   const order = ["needs_verification", "awaiting_approval", "needs_details"];
+  const s = state.say, r = s.result;
   const needs = state.inbox.filter(NEEDS).sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
-  const reviews = reviewable();
-  const said = state.say.result?.item?.id;
-  const queue = [...reviews.map((p) => ({ key: p.id, payout: p })), ...needs.filter((i) => i.id !== said || i.status !== "awaiting_approval").map((i) => ({ key: i.id, item: i }))];
-  const n = queue.length;
+  const queue = [...reviewable().map((p) => ({ key: p.id, payout: p })), ...needs.map((i) => ({ key: i.id, item: i }))];
   const at = Math.max(0, queue.findIndex((q) => q.key === state.pick));
   const cur = queue[at];
-  const rest = queue.filter((_, i) => i !== at);
-  const pick = (key) => { state.pick = key; render(); };
-  // Keep what you just approved in view, so you can watch it go through.
-  const recent = state.inbox.filter((i) => state.recent.has(i.id) && !NEEDS(i));
-  return h("div", { class: "home" }, sayCard(), h("div", { class: "home-grid" },
-    h("section", { class: "stage", "aria-labelledby": "needs-h" },
-      h("div", { class: "stage-head" },
-        h("h2", { id: "needs-h" }, "Needs you"),
-        n > 1 ? h("span", { class: "stage-count" }, `${at + 1} of ${n}`) : null,
-        n > 1 ? h("button", { class: "btn quiet small skip", type: "button", onclick: () => pick(queue[(at + 1) % n].key) }, "Skip") : null,
-      ),
-      cur ? h("div", { class: "stage-card" }, cur.item ? invoiceCard(cur.item) : payoutRow(cur.payout))
-        : h("div", { class: "stage-card clear" }, h("b", { class: "clear-title" }, "All clear"), h("p", { class: "muted" }, "Nothing needs you. Your agents will bring the next invoice here.")),
+  const sum = state.summary;
+  const bal = sum?.balances?.USD;
+  // What you just approved stays in view until it's paid, like a receipt.
+  const done = state.inbox.find((i) => i.id === state.lastPaid && i.payout);
+  const said = r?.item ? state.inbox.find((i) => i.id === r.item.id) ?? r.item : null;
+  const card = done && !r ? paidCard(done)
+    : r ? (said ? itemCard(said, r) : null)
+    : cur ? (cur.item ? itemCard(cur.item) : h("div", { class: "card-x" }, payoutRow(cur.payout))) : null;
+  return h("div", { class: "say-home" },
+    h("header", { class: "sh-top" },
+      h("span", { class: "sh-mark" }, "sayso"),
+      h("div", { class: "sh-icons" },
+        sum?.offline ? h("span", { class: "sh-mode", title: "Airwallex and Metal are simulated" }, "Demo") : null,
+        passkeyButton(true),
+        h("button", { class: "sh-icon", title: "Everything: inbox, payments, agents", "aria-label": "Everything", onclick: () => { state.tab = "inbox"; sessionSet("tab", "inbox"); render(); window.scrollTo(0, 0); } }, icon("ledger", 20)),
+      )),
+    h("main", { class: `sh-main${card ? "" : " empty"}` },
+      h("div", { class: `sh-balance${card ? " up" : ""}` },
+        h("div", { class: "sh-amount" }, bal != null ? money(bal / 100, "USD") : "…"),
+        h("div", { class: "sh-sub" }, "available")),
+      card ? h("div", { class: `sh-card${firstShow(`card:${r ? "said" : done ? `paid:${done.id}` : cur?.key}:${r?.heard ?? ""}`) ? " rise" : ""}` }, card) : null,
+      !r && !done && queue.length > 1 ? h("button", { class: "sh-more", type: "button", onclick: () => { state.pick = queue[(at + 1) % queue.length].key; render(); } }, `${queue.length - 1} more waiting · next`) : null,
     ),
-    h("div", { class: "side" },
-      rest.length ? h("section", { class: "box" },
-        h("h3", { class: "box-h" }, "Up next", h("span", {}, String(rest.length))),
-        h("div", { class: "next-list" }, rest.map((q) => upNext(q, pick))),
-      ) : null,
-      recent.length ? h("section", { class: "box" }, h("h3", { class: "box-h" }, "Just approved"), h("div", { class: "list" }, recent.map(invoiceCard))) : null,
+    h("footer", { class: "sh-foot" },
+      h("p", { class: `sh-heard${s.listening || s.text ? " on" : ""}`, id: "say-live", "aria-live": "polite" }, heardLine()),
+      replyLine(r),
+      s.typing ? h("form", { class: "sh-type", onsubmit: (e) => { e.preventDefault(); const t = e.target.elements.say.value.trim(); if (t) understand(t); } },
+        h("input", { class: "field say-field", name: "say", autocomplete: "off", "aria-label": "Type a payment", placeholder: "Pay Kreuzberg Studio 280 euros", value: "", autofocus: true })) : null,
+      h("button", { class: `orb${s.listening ? " on" : ""}${state.busy.say ? " busy" : ""}`, type: "button", "aria-label": s.listening ? "Stop listening" : "Hold to talk", "aria-pressed": String(s.listening), disabled: !s.engine,
+        onpointerdown: (e) => { if (!s.listening) { e.preventDefault(); orbDown = performance.now(); startListening(); } },
+        onpointerup: () => { if (s.listening && orbDown && performance.now() - orbDown > 400) stopListening(); orbDown = 0; },
+        onclick: () => { if (s.listening && !orbDown) stopListening(); },
+        onkeydown: (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); s.listening ? stopListening() : startListening(); } } }),
+      h("div", { class: "sh-hint" },
+        s.listening ? (s.engine === "whisper" ? "Whisper, on this device" : "Listening") : s.engine ? "Hold to talk" : "Type what to pay",
+        " · ",
+        h("button", { class: "linkish", type: "button", onclick: () => { s.typing = !s.typing; render(); if (s.typing) setTimeout(() => document.querySelector(".say-field")?.focus(), 0); } }, s.typing ? "hide keyboard" : "type instead")),
     ),
-  ));
+  );
+}
+let orbDown = 0;
+const seenCards = new Set();
+const firstShow = (key) => !seenCards.has(key) && seenCards.add(key);
+
+/** What was heard: settled words in ink, words still being heard in grey. */
+function heardLine() {
+  const s = state.say;
+  if (s.listening && !s.text && !s.interim) return h("span", { class: "tail" }, s.status || "Listening…");
+  if (!s.text && !s.interim) return state.busy.say ? "" : h("span", { class: "tail" }, "Say who to pay, and how much.");
+  return [s.text ? `“${s.text}` : "“", s.interim ? h("span", { class: "tail" }, (s.text ? " " : "") + s.interim) : null, s.listening ? "" : "”"];
+}
+function setLive() {
+  const el = document.getElementById("say-live");
+  if (el) { el.replaceChildren(...[heardLine()].flat().filter((x) => x != null && x !== "").map((x) => typeof x === "string" ? document.createTextNode(x) : x)); el.classList.toggle("on", true); }
 }
 
-/** A queued payment as one short row. A ready one can be paid right here; the rest open in the main card. */
-function upNext(q, pick) {
-  if (q.payout) {
-    const p = q.payout;
-    return h("div", { class: "next warn" }, h("span", { class: "ic" }, "!"), h("div", { class: "grow" }, h("b", {}, p.payee), h("div", { class: "small muted" }, "Held for review")), h("button", { class: "btn small", onclick: () => pick(q.key) }, "Review"));
-  }
-  const i = q.item, f = i.fields, p = i.payout, key = `pay:${i.id}`;
-  const amt = f.amount && f.currency ? money(f.amount, f.currency) : "";
-  const action = i.status === "awaiting_approval"
-    ? h("button", { class: "btn pay small", disabled: state.busy[key], onclick: () => { state.recent.add(i.id); act(key, () => approveInvoice(i.id), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); } }, state.busy[key] ? "Paying…" : `Pay ${money(p.amount, p.currency)}`)
-    : i.status === "needs_details"
-      ? h("button", { class: "btn small", onclick: () => { state.open[i.id] = true; pick(i.id); } }, "Add missing details")
-      : h("button", { class: "btn small", onclick: () => pick(i.id) }, "Check it");
-  const why = { awaiting_approval: "Ready to pay", needs_details: "A few details are missing", needs_verification: amt ? `${amt}, held: check the bank details` : "Held: check the bank details" }[i.status];
-  return h("div", { class: `next${i.status === "needs_verification" ? " stop" : ""}` },
-    h("span", { class: "ic" }, i.status === "needs_verification" ? "!" : (f.currency ? { EUR: "€", GBP: "£", USD: "$" }[f.currency] ?? "·" : "?")),
-    h("div", { class: "grow" }, h("b", {}, f.payeeName ?? sender(i.from)), h("div", { class: "small muted" }, why)),
-    action,
+/** Sayso's answer, in one sentence, under what you said. */
+function replyLine(r) {
+  if (state.busy.say) return h("p", { class: "sh-reply" }, h("i", { class: "dot" }), "Reading what you said…");
+  if (!r) return null;
+  const item = r.item ? state.inbox.find((i) => i.id === r.item.id) ?? r.item : null;
+  const bank = r.understood.find((u) => u.field === "bank");
+  const p = item?.payout;
+  const text = r.problem ? r.problem
+    : !item ? "I couldn't make that into a payment."
+    : item.status === "awaiting_approval" ? `${money(p.amount, p.currency)} to ${p.payee}${/^your (earlier )?payment/.test(bank?.source ?? "") ? ", to the account you paid before" : ""}. Approve it and it goes.`
+    : item.status === "needs_verification" ? "That invoice is on hold: it asks to pay new bank details."
+    : item.status === "needs_details" ? "That invoice is missing details."
+    : `That one's already ${INBOX_PILL[item.status]?.[0]?.toLowerCase() ?? item.status}.`;
+  return h("p", { class: "sh-reply" }, h("i", { class: "dot" }), text,
+    " ", h("button", { class: "linkish soft-link", type: "button", onclick: () => { Object.assign(state.say, { result: null, text: "", interim: "" }); render(); } }, "That's not what I said"));
+}
+
+/** One invoice as the tweet-style card: the amount, a few rows, one action. */
+function itemCard(item, r) {
+  const f = item.fields, p = item.payout;
+  const src = (field) => { const u = r?.understood.find((x) => x.field === field); return u && u.source !== "you said" ? (u.source.startsWith("you said") ? u.source : `from ${u.source}`) : null; };
+  const held = item.status === "needs_verification";
+  const badge = held ? ["Held", "stop"] : item.status === "awaiting_approval" ? ["Ready", ""] : item.status === "needs_details" ? ["Missing details", "warn"] : INBOX_PILL[item.status] ?? [item.status, ""];
+  const line = (k, v, note) => v ? h("div", { class: "kv" }, h("span", { class: "k" }, k), h("span", { class: "v" }, v, note ? h("small", {}, note) : null)) : null;
+  const from = item.from === "You (said)" ? "You said it" : agentOf(item) ? `From ${agentOf(item)}` : sender(item.from);
+  return h("article", { class: `pcard${held ? " held" : ""}`, "data-status": item.status },
+    h("div", { class: "pc-head" }, h("span", { class: "pc-from" }, from), h("span", { class: `badge ${badge[1]}` }, badge[0])),
+    f.amount && f.currency ? h("div", { class: "pc-amt" }, money(f.amount, f.currency)) : h("div", { class: "pc-amt small-amt" }, item.subject),
+    h("div", { class: "kvs" },
+      line("To", f.payeeName, src("payee")),
+      line("Into", bankLine(f, !held) || null, src("bank")),
+      line("Reference", f.reference, src("reference")),
+      p && item.status === "awaiting_approval" ? line("From", `Airwallex, about ${money(p.price_usdz, "USD")}`) : null,
+    ),
+    item.status === "awaiting_approval" ? approveBlock(item)
+      : held ? verifyBlock(item, true)
+      : item.status === "needs_details" ? h("div", { class: "actions" }, h("button", { class: "btn pay wide", onclick: () => { state.open[item.id] = true; state.tab = "inbox"; render(); } }, "Add the missing details"), ignoreButton(item))
+      : item.status === "paying" && p ? [timeline(p, true), whyButton(p.id), whyPanel(p.id)] : null,
+  );
+}
+
+/** After the tap: the payment going through, then "Paid". */
+function paidCard(item) {
+  const p = item.payout, paid = p.status === "paid", failed = ["failed", "refunded", "refund_failed"].includes(p.status);
+  return h("article", { class: "pcard paid" },
+    h("div", { class: `paid-mark${paid ? " ok" : failed ? " bad" : ""}` }, paid ? icon("check", 28) : failed ? icon("hand", 26) : h("i", { class: "spin" })),
+    h("b", { class: "paid-title" }, paid ? "Paid" : failed ? PAYOUT_PILL[p.status]?.[0] ?? "Bounced" : "Sending"),
+    h("div", { class: "muted" }, `${money(p.amount, p.currency)} to ${p.payee}`),
+    h("div", { class: "paid-actions" }, whyButton(p.id), h("button", { class: "btn quiet small", onclick: () => { state.lastPaid = null; render(); } }, "Done")),
+    whyPanel(p.id),
   );
 }
 
@@ -624,10 +690,6 @@ function setEngine(engine) {
   try { localStorage.setItem("sayso.voice", engine); } catch {}
   render();
 }
-function setLive(text) {
-  const live = document.getElementById("say-live");
-  if (live) live.textContent = text;
-}
 function startListening() {
   if (state.say.engine === "whisper") return void startWhisper();
   const s = state.say;
@@ -635,15 +697,18 @@ function startListening() {
   recog.lang = navigator.language || "en-GB";
   recog.interimResults = true;
   recog.continuous = false;
-  Object.assign(s, { listening: true, text: "", result: null });
+  Object.assign(s, { listening: true, text: "", interim: "", result: null, status: "" });
+  state.lastPaid = null;
   render();
   // The live words go straight into their element: a full re-render per syllable would flicker.
   recog.onresult = (e) => {
-    s.text = Array.from(e.results, (r) => r[0].transcript).join("").trim();
-    setLive(s.text || "Listening…");
+    const all = Array.from(e.results);
+    s.text = all.filter((r) => r.isFinal).map((r) => r[0].transcript).join("").trim();
+    s.interim = all.filter((r) => !r.isFinal).map((r) => r[0].transcript).join("").trim();
+    setLive();
   };
   recog.onerror = (e) => { s.listening = false; toast(e.error === "not-allowed" || e.error === "service-not-allowed" ? "Allow the microphone to say a payment, or type it." : e.error === "no-speech" ? "I didn't hear anything." : "I didn't catch that. Try again, or type it."); };
-  recog.onend = () => { s.listening = false; if (s.text) understand(s.text); else render(); };
+  recog.onend = () => { s.listening = false; const t = [s.text, s.interim].filter(Boolean).join(" "); s.interim = ""; if (t) understand(t); else render(); };
   try { recog.start(); } catch { s.listening = false; render(); }
 }
 
@@ -653,7 +718,7 @@ function whisperWorker() {
   const worker = new Worker("/whisper-worker.js", { type: "module" });
   whisper = { worker, ready: false, mb: 0, waits: new Map(), next: 1 };
   worker.onmessage = ({ data }) => {
-    if (data.type === "progress") { whisper.mb = data.mb; if (state.say.listening && !whisper.ready) setLive(loadingLine()); }
+    if (data.type === "progress") { whisper.mb = data.mb; if (state.say.listening && !whisper.ready) { state.say.status = loadingLine(); setLive(); } }
     else if (data.type === "ready") whisper.ready = true;
     else if (data.id && whisper.waits.has(data.id)) { const w = whisper.waits.get(data.id); whisper.waits.delete(data.id); data.type === "error" ? w.reject(new Error(data.message)) : w.resolve(data.text); }
     else if (data.type === "error") toast("Whisper couldn't start here. Type the payment instead.");
@@ -662,7 +727,7 @@ function whisperWorker() {
   worker.postMessage({ type: "load" });
   return whisper;
 }
-const loadingLine = () => `Getting Whisper onto this device${whisper?.mb ? ` (${whisper.mb} MB so far)` : ""}. Only the first time. Keep talking, I'm recording.`;
+const loadingLine = () => `Getting Whisper onto this device${whisper?.mb ? ` (${whisper.mb} MB)` : ""}. Keep talking, I'm recording.`;
 function transcribe(audio, rate) {
   const w = whisperWorker(), id = w.next++;
   return new Promise((resolve, reject) => { w.waits.set(id, { resolve, reject }); w.worker.postMessage({ type: "transcribe", id, audio, rate }); });
@@ -671,13 +736,15 @@ function transcribe(audio, rate) {
 let stopWhisper = null;
 async function startWhisper() {
   const s = state.say;
-  Object.assign(s, { listening: true, text: "", result: null });
+  Object.assign(s, { listening: true, text: "", interim: "", result: null, status: "" });
+  state.lastPaid = null;
   render();
   const w = whisperWorker();
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
   catch { s.listening = false; render(); return toast("Allow the microphone to say a payment, or type it."); }
-  setLive(w.ready ? "Listening…" : loadingLine());
+  s.status = w.ready ? "Listening…" : loadingLine();
+  setLive();
   const ctx = new AudioContext();
   const rate = ctx.sampleRate;
   const src = ctx.createMediaStreamSource(stream);
@@ -699,7 +766,7 @@ async function startWhisper() {
   const live = setInterval(async () => {
     if (done || busy || !spoke || !w.ready) return;
     busy = true;
-    try { const t = await transcribe(audio(), rate); if (!done && t) { s.text = t; setLive(t); } } catch {} finally { busy = false; }
+    try { const t = await transcribe(audio(), rate); if (!done && t) { s.interim = t; setLive(); } } catch {} finally { busy = false; }
   }, 900);
   async function finish() {
     if (done) return;
@@ -707,8 +774,10 @@ async function startWhisper() {
     clearInterval(live);
     node.disconnect(); src.disconnect(); stream.getTracks().forEach((t) => t.stop()); ctx.close();
     if (!spoke) { s.listening = false; render(); return toast("I didn't hear anything."); }
-    setLive(w.ready ? (s.text || "Reading what you said…") : "Whisper is still downloading. I'll read what you said as soon as it's here.");
+    s.status = w.ready ? "Reading what you said…" : "Whisper is still downloading. I'll read what you said as soon as it's here.";
+    setLive();
     try { s.text = await transcribe(audio(), rate); } catch { s.text = ""; }
+    s.interim = "";
     s.listening = false;
     if (s.text) understand(s.text); else { render(); toast("I didn't catch that. Try again, or type it."); }
   }
@@ -719,7 +788,7 @@ function stopListening() {
 }
 function understand(text) {
   document.activeElement?.blur?.();
-  state.say.text = text;
+  Object.assign(state.say, { text, interim: "", typing: false });
   act("say", async () => {
     state.say.result = await api("/v1/say", { transcript: text });
     // An invoice that still needs something opens as the main card under Needs you.
@@ -728,43 +797,7 @@ function understand(text) {
   });
 }
 
-function sayCard() {
-  const s = state.say, r = s.result;
-  return h("section", { class: "say", "aria-label": "Say a payment" },
-    h("div", { class: "say-row" },
-      s.engine ? h("button", { class: `mic${s.listening ? " on" : ""}`, type: "button", "aria-label": s.listening ? "Stop listening" : "Say a payment", "aria-pressed": String(s.listening), onclick: () => (s.listening ? stopListening() : startListening()) }, icon("mic", 22)) : null,
-      h("form", { class: "grow", onsubmit: (e) => { e.preventDefault(); const t = e.target.elements.say.value.trim(); if (t) understand(t); } },
-        h("input", { class: "field say-field", name: "say", autocomplete: "off", value: s.listening ? "" : s.text, "aria-label": "Say or type a payment",
-          placeholder: "Say or type a payment: “Pay Kreuzberg Studio 280 euros”", oninput: (e) => { s.text = e.target.value; } })),
-    ),
-    s.listening ? [h("p", { class: "say-live", id: "say-live", "aria-live": "polite" }, s.text || "Listening…"),
-      h("p", { class: "small muted say-note" }, s.engine === "whisper" ? "Whisper, on this device. Your voice isn't sent anywhere." : "Your browser's speech recognition.")] : null,
-    state.busy.say ? h("p", { class: "muted small say-note" }, "Reading what you said…") : r ? sayResult(r) : null,
-  );
-}
-
 const SAID = { payee: "Pay", amount: "Amount", reference: "Reference", bank: "Into" };
-function sayResult(r) {
-  const ccy = r.understood.find((u) => u.field === "currency")?.value;
-  const item = r.item ? state.inbox.find((i) => i.id === r.item.id) ?? r.item : null;
-  const s = state.say;
-  const other = s.engine === "whisper" && Speech ? ["browser", "Use the browser's speech recognition"] : s.engine === "browser" && canRecord ? ["whisper", "Use Whisper on this device"] : null;
-  return h("div", { class: "heard-grid" },
-    h("div", { class: "heard" }, h("span", { class: "lbl" }, "I heard"), h("blockquote", {}, `“${r.heard}”`)),
-    r.understood.some((u) => u.value) ? h("div", { class: "understood" }, h("span", { class: "lbl" }, "I understood"),
-      h("dl", {}, r.understood.filter((u) => SAID[u.field] && (u.value || u.field !== "reference")).map((u) => h("div", { class: "u-row" },
-        h("dt", {}, SAID[u.field]),
-        h("dd", {}, h("b", {}, u.value ? (u.field === "amount" ? money(u.value, ccy || "USD") : u.value) : "?"),
-          u.source === "you said" ? null : h("span", { class: `src${u.source.startsWith("you said") ? " said" : ""}` }, u.source.startsWith("you said") ? u.source : `from ${u.source}`)))))) : null,
-    r.problem ? h("div", { class: "alert note" }, r.problem) : null,
-    item ? h("div", { class: "say-item" }, item.status === "awaiting_approval" ? approveBlock(item)
-      : NEEDS(item) ? h("p", { class: "small", style: "margin:0" }, item.status === "needs_verification" ? "That's an invoice Sayso is holding: it asks to pay new bank details. It's open below under Needs you." : "That invoice is missing details. It's open below under Needs you.")
-      : invoiceCard(item)) : null,
-    h("div", { class: "say-foot small" },
-      h("button", { class: "linkish", type: "button", onclick: () => { s.result = null; s.text = ""; render(); document.querySelector(".say-field")?.focus(); } }, "That's not what I said"),
-      other ? h("button", { class: "linkish quiet-link", type: "button", onclick: () => setEngine(other[0]) }, other[1]) : null),
-  );
-}
 
 // ---------- why: every step behind a payment, with its proof ----------
 const WHY = { heard: "You said", read: "Claude read", risk: "Rules", payee: "Bank", mandate: "Mandate", observe: "Seen", decide: "Decided", act: "Moved", reconcile: "Settled", escalate: "Flagged", refuse: "Refused", receipt: "Receipt" };
@@ -919,19 +952,26 @@ function bankLine(f, masked) {
   return `${f.iban ? "IBAN" : "Account"} ending ${digits.slice(-4)}`;
 }
 
+/** Approving keeps the payment on Home as a receipt that turns into "Paid". */
+function paidFrom(id) {
+  state.recent.add(id);
+  if (state.tab === "home") { state.lastPaid = id; Object.assign(state.say, { result: null, text: "", interim: "" }); }
+}
+
 function approveBlock(item) {
   const p = item.payout, key = `pay:${item.id}`;
   return h("div", { class: "actions" },
-    h("button", { class: "btn pay", title: `From your Airwallex balance by ${p.method === "SWIFT" ? "SWIFT" : "local transfer"}, about ${money(p.price_usdz, "USD")}.`, disabled: state.busy[key], onclick: () => { state.recent.add(item.id); act(key, () => approveInvoice(item.id), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); } }, state.busy[key] ? "Paying…" : `Pay ${money(p.amount, p.currency)}`),
+    h("button", { class: "btn pay", title: `From your Airwallex balance by ${p.method === "SWIFT" ? "SWIFT" : "local transfer"}, about ${money(p.price_usdz, "USD")}.`, disabled: state.busy[key], onclick: () => { paidFrom(item.id); act(key, () => approveInvoice(item.id)); } }, state.me?.passkeys ? icon("face", 18) : null, state.busy[key] ? "Paying…" : `Pay ${money(p.amount, p.currency)}`),
     ignoreButton(item),
   );
 }
 
-function verifyBlock(item) {
+function verifyBlock(item, compact = false) {
   const p = item.payout, f = item.fields, key = `pay:${item.id}`, pc = item.penny, contact = item.contact_on_file;
   const ok = Boolean(state.verified[item.id]);
-  const pay = (extra) => { state.recent.add(item.id); act(key, () => approveInvoice(item.id, extra), `Paying ${money(p.amount, p.currency)} to ${p.payee}.`); };
-  const head = h("div", { class: "alert" }, h("b", {}, icon("shield", 15), " Held:"), "\u00a0" + sentence((p?.reasons ?? []).join("; ") || "check the bank details with the payee") + ".");
+  const pay = (extra) => { paidFrom(item.id); act(key, () => approveInvoice(item.id, extra)); };
+  const why = sentence((p?.reasons ?? []).join("; ") || "check the bank details with the payee") + ".";
+  const head = compact ? h("p", { class: "pc-why" }, icon("shield", 15), why) : h("div", { class: "alert" }, h("b", {}, icon("shield", 15), " Held:"), "\u00a0" + why);
   if (pc?.status === "confirmed") return [
     h("div", { class: "alert ok" }, h("b", {}, icon("check", 15), ` ${pc.contact} confirmed the new details`), "\u00a0with the code from the 1-cent payment."),
     h("div", { class: "actions" }, h("button", { class: "btn pay", disabled: state.busy[key], onclick: () => pay({}) }, `Pay ${money(p.amount, p.currency)}`), ignoreButton(item)),
@@ -953,7 +993,7 @@ function verifyBlock(item) {
     h("details", {}, h("summary", { class: "small" }, "Can't wait? Call them instead"), call)];
   if (contact) return [head,
     h("div", { class: "actions" }, h("button", { class: "btn pay", title: `Sends 1 cent with a code to the new account, and asks ${contact} (from your earlier invoices, not this sender) for it. Only the account's real owner sees the code.`, disabled: state.busy[`penny:${item.id}`], onclick: () => act(`penny:${item.id}`, () => api(`/v1/inbox/${encodeURIComponent(item.id)}/penny`, {}), "Sent. Waiting for the payee's code.") }, state.busy[`penny:${item.id}`] ? "Sending…" : "Check with a 1-cent code"), ignoreButton(item)),
-    h("p", { class: "small muted", style: "margin:0" }, `Sends 1 cent with a code to the new account and asks ${contact}, from your earlier invoices, for it.`),
+    h("p", { class: "small muted", style: "margin:0" }, `Sends 1 cent with a code to the new account. ${contact}, from your earlier invoices, has to read it back.`),
     h("details", {}, h("summary", { class: "small" }, "Or call them yourself"), call)];
   return [head, ...call];
 }

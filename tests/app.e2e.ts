@@ -9,7 +9,14 @@ async function signIn(app: { open(path: string): Promise<unknown> }, screen: Scr
   await app.open('/');
   await screen.getByLabel('Owner token').fill('sayso-demo');
   await screen.getByRole('button', 'Sign in').tap();
-  await expect(screen.getByRole('heading', 'Needs you')).toBeVisible();
+  await expect(screen.getByRole('button', 'Hold to talk')).toBeVisible();
+}
+
+/** Home is just the balance, one card and the orb; everything else is one tap away. */
+async function openEverything(app: { open(path: string): Promise<unknown> }, screen: Screen) {
+  await signIn(app, screen);
+  await screen.getByRole('button', 'Everything').tap();
+  await expect(screen.getByRole('heading', 'Inbox')).toBeVisible();
 }
 
 test('a wrong token does not get in', async ({ app, screen }) => {
@@ -17,11 +24,11 @@ test('a wrong token does not get in', async ({ app, screen }) => {
   await screen.getByLabel('Owner token').fill('not-the-token');
   await screen.getByRole('button', 'Sign in').tap();
   await expect(screen.getByRole('alert')).toContainText("That token isn't right.");
-  await expect(screen.getByRole('heading', 'Needs you')).not.toBeVisible();
+  await expect(screen.getByRole('button', 'Hold to talk')).not.toBeVisible();
 });
 
 test('one tap pays a forwarded invoice', async ({ app, screen, browser }) => {
-  await signIn(app, screen);
+  await openEverything(app, screen);
   await screen.getByRole('button', 'Pay £72.00').tap();
   const card = browser.locator('article.inv:has-text("Holloway Print Ltd")');
   await expect(card).toContainText('Sent by Airwallex', { timeout: 10_000 });
@@ -29,8 +36,7 @@ test('one tap pays a forwarded invoice', async ({ app, screen, browser }) => {
 });
 
 test('a bank-details change waits for a confirmed phone call', async ({ app, screen, browser }) => {
-  await signIn(app, screen);
-  await screen.getByRole('button', 'Check it').tap();
+  await openEverything(app, screen);
   const pay = screen.getByRole('button', 'Pay €60.00');
   await expect(pay).toBeDisabled();
   await screen.getByRole('checkbox', 'I confirmed these bank details with the payee myself.').tap();
@@ -40,7 +46,7 @@ test('a bank-details change waits for a confirmed phone call', async ({ app, scr
 });
 
 test('missing details can be filled in, then it is ready to pay', async ({ app, screen }) => {
-  await signIn(app, screen);
+  await openEverything(app, screen);
   await screen.getByRole('button', 'Add missing details').tap();
   await screen.getByLabel('Payee name').fill('Kreuzberg Studio GmbH');
   await screen.getByLabel('Amount').fill('120.00');
@@ -52,7 +58,7 @@ test('missing details can be filled in, then it is ready to pay', async ({ app, 
 });
 
 test('connecting an agent shows its key once, and agent payouts are listed', async ({ app, screen }) => {
-  await signIn(app, screen);
+  await openEverything(app, screen);
   await screen.getByRole('tab', 'Agents').tap();
   await screen.getByLabel('Agent name').fill('My phone assistant');
   await screen.getByRole('button', 'Create a key').tap();
@@ -65,13 +71,15 @@ test('connecting an agent shows its key once, and agent payouts are listed', asy
 
 test('saying a payment shows what was heard and what was understood', async ({ app, screen, browser }) => {
   await signIn(app, screen);
+  await screen.getByRole('button', 'type instead').tap();
   const say = browser.locator('.say-field');
   await say.fill('Pay Kreuzberg Studio 280 euros for invoice 130');
   await say.press('Enter');
-  await expect(browser.locator('.heard blockquote')).toHaveText('“Pay Kreuzberg Studio 280 euros for invoice 130”');
-  await expect(browser.locator('.understood')).toContainText('•••• 3000');
-  await expect(browser.locator('.understood')).toContainText('from your payment to Kreuzberg Studio GmbH');
-  await expect(browser.locator('.say-item .btn.pay')).toHaveText('Pay €280.00');
+  await expect(browser.locator('#say-live')).toHaveText('“Pay Kreuzberg Studio 280 euros for invoice 130”');
+  const card = browser.locator('.sh-card');
+  await expect(card).toContainText('IBAN ending 3000');
+  await expect(card).toContainText('from your payment to Kreuzberg Studio GmbH');
+  await expect(browser.locator('.sh-card .btn.pay')).toHaveText('Pay €280.00');
 });
 
 test('a lookalike asking for new bank details is checked with a 1-cent code', async ({ app, screen, browser }) => {

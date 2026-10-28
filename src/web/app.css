@@ -1,11 +1,11 @@
-/* Sayso. Light and calm: navy type on a soft page that slowly glows indigo and cyan, one indigo action.
+/* Sayso. Quiet and monochrome, after Apple and Linear: ink on white, one black action, colour only for a warning.
    Type: Figtree (SIL Open Font License), served from here because the CSP allows only 'self'. */
 @font-face { font-family: "Figtree"; src: url("/figtree-vf.woff2") format("woff2"); font-weight: 300 900; font-display: swap; }
 :root {
-  --bg: #f6f7fc; --surface: #ffffff; --surface-2: #f2f4fa; --surface-3: #e5e8f2; --ink: #00172e; --muted: #4b6483; --faint: #7a8ba8;
-  --accent: #5266eb; --accent-hover: #4255d8; --accent-ink: #ffffff; --tint: #e6e9fd; --tint-2: #d6dbfb;
-  --go: #0b7a55; --go-bg: #dcf5ea; --warn: #8a5a00; --warn-bg: #fff2d3; --stop: #b42318; --stop-bg: #fde8e5; --info: #3a4cc4; --info-bg: #e6e9fd;
-  --text: "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --bg: #f5f5f7; --surface: #ffffff; --surface-2: #f5f5f7; --surface-3: #e8e8ed; --ink: #1d1d1f; --muted: #6e6e73; --faint: #86868b;
+  --accent: #1d1d1f; --accent-hover: #000000; --accent-ink: #ffffff; --tint: #ededf0; --tint-2: #dcdce1;
+  --go: #1a7f4b; --go-bg: #e3f4ea; --warn: #8a5a00; --warn-bg: #fdf1d8; --stop: #c4281c; --stop-bg: #fdeceb; --info: #1d1d1f; --info-bg: #ededf0;
+  --text: -apple-system, BlinkMacSystemFont, "Figtree", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --margin: clamp(16px, 4vw, 48px);
   --r: 20px; --r-sm: 12px;
   --ease-out: cubic-bezier(.22, 1, .36, 1); --ease-expo: cubic-bezier(.16, 1, .3, 1);
@@ -526,3 +526,79 @@ pre { background: var(--surface-2); border-radius: var(--r-sm); padding: 12px 14
 .stage-head .skip { margin-left: auto; }
 .lbl { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); }
 .row .why-btn { justify-self: start; padding-left: 0; }
+
+/* ---------- home: balance, one card, the orb ---------- */
+.glow { display: none; }
+.say-home { height: 100dvh; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--surface); max-width: 560px; margin: 0 auto; padding: 0 20px; }
+@media (min-width: 700px) { body:has(.say-home) { background: var(--bg); } .say-home { box-shadow: 0 0 0 1px rgba(0,0,0,.04), 0 30px 80px rgba(0,0,0,.06); } }
+.sh-top { display: flex; align-items: center; justify-content: space-between; padding: 18px 0 0; }
+.sh-mark { font-weight: 650; letter-spacing: -.02em; font-size: 17px; }
+.sh-icons { display: flex; align-items: center; gap: 6px; }
+.sh-mode { font-size: 12px; color: var(--faint); border: 1px solid var(--surface-3); border-radius: 999px; padding: 2px 9px; margin-right: 4px; }
+.sh-icon { border: 0; background: none; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; color: var(--ink); cursor: pointer; }
+.sh-icon:hover { background: var(--surface-2); }
+.sh-main { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 22px; padding: 4vh 0 24px; min-width: 0; overflow-y: auto; scrollbar-width: none; }
+.sh-main::-webkit-scrollbar { display: none; }
+.sh-balance { text-align: center; transition: transform .5s var(--ease-expo); }
+.sh-amount { font-size: clamp(48px, 13vw, 64px); font-weight: 600; letter-spacing: -.045em; line-height: 1; font-variant-numeric: tabular-nums; }
+.sh-balance.up .sh-amount { font-size: 28px; letter-spacing: -.03em; }
+.sh-sub { color: var(--faint); font-size: 14px; margin-top: 6px; }
+.sh-balance.up .sh-sub { margin-top: 2px; font-size: 13px; }
+.sh-card { width: 100%; }
+.sh-card.rise { animation: rise .45s var(--ease-expo) both; }
+@keyframes rise { from { opacity: 0; transform: translateY(16px) scale(.98); } }
+.sh-more { border: 0; background: none; color: var(--faint); font-size: 14px; cursor: pointer; }
+.sh-more:hover { color: var(--ink); }
+.sh-foot { display: grid; justify-items: center; gap: 10px; padding: 8px 0 22px; text-align: center; }
+.sh-heard { margin: 0; font-size: clamp(20px, 5vw, 24px); line-height: 1.3; letter-spacing: -.02em; font-weight: 550; max-width: 30ch; min-height: 1.3em; overflow-wrap: anywhere; }
+.sh-heard .tail { color: #b0b0b6; font-weight: 500; }
+.sh-reply { margin: 0; font-size: 15px; line-height: 1.45; color: var(--muted); max-width: 40ch; }
+.sh-reply .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #777, #000 70%); margin-right: 8px; vertical-align: 1px; }
+.soft-link { color: var(--faint); font-size: 14px; }
+.sh-type { width: 100%; max-width: 420px; }
+.sh-type .field { width: 100%; text-align: center; border-radius: 999px; }
+.sh-hint { font-size: 13px; color: var(--faint); }
+.sh-hint .linkish { color: var(--faint); }
+.orb { width: 64px; height: 64px; border-radius: 50%; border: 0; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none;
+  background: radial-gradient(circle at 32% 26%, rgba(255,255,255,.95) 0 6%, rgba(255,255,255,.35) 12%, transparent 30%), radial-gradient(circle at 70% 80%, #3a3a3e, transparent 55%), radial-gradient(circle at 50% 50%, #1b1b1d 0, #000 70%);
+  box-shadow: 0 10px 24px rgba(0,0,0,.28), inset 0 -6px 14px rgba(255,255,255,.08); transition: transform .2s var(--ease-out); }
+.orb:active, .orb.on { transform: scale(1.12); }
+.orb:disabled { opacity: .35; cursor: default; }
+@media (prefers-reduced-motion: no-preference) { .orb.on { animation: breathe 1.4s ease-in-out infinite; } .orb.busy { animation: breathe .9s ease-in-out infinite; } }
+@keyframes breathe { 50% { box-shadow: 0 10px 24px rgba(0,0,0,.28), 0 0 0 14px rgba(0,0,0,.06); } }
+/* the card */
+.pcard { background: var(--surface-2); border-radius: 24px; padding: 20px; display: grid; gap: 14px; text-align: left; }
+.pcard.held { background: #fff; box-shadow: inset 0 0 0 1px var(--surface-3); }
+.pc-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
+.pc-from { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { flex: none; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--ink); color: #fff; }
+.badge.stop { background: var(--stop-bg); color: var(--stop); }
+.badge.warn { background: var(--warn-bg); color: var(--warn); }
+.pc-amt { font-size: 40px; font-weight: 600; letter-spacing: -.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+.pc-amt.small-amt { font-size: 22px; letter-spacing: -.02em; }
+.kvs { display: grid; gap: 10px; border-top: 1px solid var(--surface-3); padding-top: 14px; }
+.kv { display: flex; justify-content: space-between; gap: 16px; font-size: 14px; }
+.kv .k { color: var(--muted); flex: none; }
+.kv .v { text-align: right; font-weight: 550; overflow-wrap: anywhere; min-width: 0; }
+.kv .v small { display: block; font-weight: 400; font-size: 12px; color: var(--faint); margin-top: 1px; }
+.pcard .actions { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+.pcard .actions .btn.pay, .btn.pay.wide { flex: 1 1 100%; justify-content: center; padding: 14px 20px; font-size: 16px; display: inline-flex; gap: 8px; align-items: center; }
+.pcard .actions .btn.quiet { margin: 0 auto; }
+.pcard .alert { margin: 0; font-size: 14px; }
+.pcard > p.small { font-size: 13px; }
+.pcard.paid { justify-items: center; text-align: center; padding: 34px 20px; gap: 8px; }
+.paid-mark { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); color: var(--ink); }
+.paid-mark.ok { background: var(--ink); color: #fff; }
+.paid-mark.bad { background: var(--stop-bg); color: var(--stop); }
+.paid-mark .spin { width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid var(--faint); border-top-color: transparent; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.paid-title { font-size: 22px; font-weight: 600; letter-spacing: -.02em; }
+.paid-actions { display: flex; gap: 12px; margin-top: 6px; }
+.card-x .row { background: var(--surface-2); }
+.say-home .faceid { margin: 0; width: 38px; height: 38px; padding: 0; border-radius: 50%; justify-content: center; color: var(--ink); }
+.pc-why { margin: 0; display: flex; gap: 8px; align-items: flex-start; font-size: 14px; color: var(--stop); font-weight: 550; }
+.pc-why .icon { flex: none; margin-top: 2px; }
+.sh-foot { box-shadow: 0 -18px 24px -12px var(--surface); position: relative; z-index: 1; background: var(--surface); }
+.sh-main.empty { justify-content: center; padding-top: 0; }
+.sh-main.empty .sh-amount { font-size: clamp(56px, 16vw, 76px); }
+.pcard .actions .btn.quiet { padding: 4px 12px; font-size: 15px; }

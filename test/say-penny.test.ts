@@ -29,6 +29,7 @@ describe("reading a spoken payment", () => {
     ["send £200 to the plumber", { payee: "plumber", amount: "200.00", currency: "GBP", reference: null }],
     ["pay Holloway Print 72 pounds", { payee: "Holloway Print", amount: "72.00", currency: "GBP", reference: null }],
     ["pay Kreuzberg Studio", { payee: "Kreuzberg Studio", amount: null, currency: null, reference: null }],
+    ["Pay Cruzeburg Studio €280 for Invoice €130.", { payee: "Cruzeburg Studio", amount: "280.00", currency: "EUR", reference: "130" }],
   ])("%s", (said, want) => {
     expect(parseSpoken(said)).toEqual({ action: "pay", ...want });
   });
