@@ -449,8 +449,23 @@ export function publicView(p: Payout) {
     id: p.id, status: p.status, reasons: p.reasons, amount: toMajor(p.amountMinor).toFixed(2), currency: p.currency, method: p.method,
     payee: p.payeeName, reference: p.reference,
     price_usdz: toMajor(p.totalMinor).toFixed(2), fee_usdz: toMajor(p.feeMinor).toFixed(2), rate_used: p.rateUsed,
-    decision: p.decision ? { verdict: p.decision.verdict, decided_by: p.decision.decidedBy, reason: p.decision.reason, tranches: p.decision.tranches, until: p.decision.until, proposed_cap_usdz: p.decision.proposedCapUsdzMinor === undefined ? undefined : toMajor(p.decision.proposedCapUsdzMinor).toFixed(2) } : null,
+    decision: p.decision ? decisionView(p.decision) : null,
     created_at: p.createdAt, source: p.buyer?.startsWith("internal:") ? "inbox" : p.buyer ? "agent" : null,
     expires_at: p.expiresAt, funding_tx: p.fundingTx, airwallex_transfer_id: p.transferId, refund_tx: p.refundTx, failure: p.failure,
+  };
+}
+
+/** A decision as the API shows it: major units, and no sentinel for "no limit given". */
+export function decisionView(d: Decision) {
+  const usdzOrNull = (m: number) => (m >= Number.MAX_SAFE_INTEGER ? null : toMajor(m).toFixed(2));
+  return {
+    verdict: d.verdict, decided_by: d.decidedBy, reason: d.reason,
+    inputs: {
+      price_usdz: toMajor(d.inputs.costUsdzMinor).toFixed(2), cap_usdz: usdzOrNull(d.inputs.capUsdzMinor), rate_drift_pct: Number((d.inputs.rateDrift * 100).toFixed(2)),
+      spendable_usdz: usdzOrNull(d.inputs.spendableUsdzMinor), risk: d.inputs.risk, due_in_days: Math.round(d.inputs.dueInDays), part_payment: d.inputs.partPaymentAllowed,
+    },
+    tranches: d.tranches?.map((t) => ({ amount: toMajor(t.amountMinor).toFixed(2), price_usdz: toMajor(t.costUsdzMinor).toFixed(2), when: t.when })),
+    until: d.until && { rate_within_pct: d.until.rateWithinPct === undefined ? undefined : d.until.rateWithinPct * 100, funds_usdz: d.until.fundsUsdzMinor === undefined ? undefined : toMajor(d.until.fundsUsdzMinor).toFixed(2), by: d.until.by },
+    proposed_cap_usdz: d.proposedCapUsdzMinor === undefined ? undefined : toMajor(d.proposedCapUsdzMinor).toFixed(2),
   };
 }

@@ -772,6 +772,7 @@ function itemCard(item, r) {
       line("Reference", f.reference, src("reference")),
       p && item.status === "awaiting_approval" ? line("From", `Airwallex, about ${money(p.price_usdz, "USD")}`) : null,
     ),
+    p ? decisionCard(p) : null,
     item.status === "awaiting_approval" ? approveBlock(item)
       : held ? verifyBlock(item, true)
       : item.status === "needs_details" ? h("div", { class: "actions" }, h("button", { class: "btn pay wide", onclick: () => { state.open[item.id] = true; state.tab = "inbox"; render(); } }, "Add the missing details"), ignoreButton(item))
@@ -1156,14 +1157,55 @@ function ignoreButton(item) {
 }
 
 // ---------- payouts ----------
+// ---------- the decision: what the agent chose from price, balance and risk, and why ----------
+const VERDICT = { pay: "Pay", wait: "Wait", split: "Split", hold: "Hold", reject: "Refuse" };
+function decisionCard(p) {
+  const real = p.decision;
+  if (!real) return null;
+  const sim = state.whatIf?.[p.id];
+  const d = sim ?? real, i = d.inputs;
+  const gauge = (key, label, value, ok) => h("div", { class: `dg${ok ? "" : " off"}${d.decided_by === key || (key === "price" && d.decided_by === "deadline") ? " decider" : ""}` },
+    h("span", { class: "dg-k" }, label), h("b", {}, value));
+  const price = `${i.price_usdz} USDZ${i.cap_usdz ? ` of ${i.cap_usdz}` : ""}${i.rate_drift_pct > 0 ? ` · rate ${i.rate_drift_pct}% dear` : ""}`;
+  const priceOk = !(i.cap_usdz && Number(i.price_usdz) > Number(i.cap_usdz)) && i.rate_drift_pct <= 1.5;
+  const bal = i.spendable_usdz ? `${i.spendable_usdz} USDZ` : "No limit given";
+  const balOk = !i.spendable_usdz || Number(i.spendable_usdz) >= Number(i.price_usdz);
+  const proofs = sim ? null : [proof(p.funding_tx), proof(p.airwallex_transfer_id), proof(p.refund_tx)].filter(Boolean);
+  return h("section", { class: `decision v-${d.verdict}`, "aria-label": `Decision: ${VERDICT[d.verdict]}` },
+    h("div", { class: "dc-head" }, h("span", { class: "dc-verdict" }, VERDICT[d.verdict]), sim ? h("span", { class: "dc-sim" }, "What if (nothing moves)") : h("span", { class: "dc-by" }, `decided by ${d.decided_by}`)),
+    h("div", { class: "dc-gauges" }, gauge("price", "Price", price, priceOk), gauge("balance", "Balance", bal, balOk), gauge("risk", "Risk", i.risk === "allow" ? "Clear" : i.risk === "hold" ? "Held" : "Refused", i.risk === "allow")),
+    h("p", { class: "dc-reason" }, d.reason),
+    d.tranches ? h("div", { class: "small" }, d.tranches.map((t) => `${money(t.amount, p.currency)} ${t.when === "now" ? "now" : "after the next sweep"}`).join(" · ")) : null,
+    proofs?.length ? h("div", { class: "dc-proof small" }, "Proof: ", ...proofs) : null,
+    state.summary?.offline || state.summary?.sandbox ? whatIfPanel(p) : null,
+  );
+}
+function whatIfPanel(p) {
+  const key = `whatif:${p.id}`, cur = state.whatIfInput?.[p.id] ?? {};
+  const run = (change) => {
+    state.whatIfInput = { ...state.whatIfInput, [p.id]: { ...cur, ...change } };
+    act(key, async () => { state.whatIf = { ...state.whatIf, [p.id]: (await api(`/v1/payouts/${encodeURIComponent(p.id)}/what-if`, state.whatIfInput[p.id])).decision }; });
+  };
+  const reset = () => { delete state.whatIf?.[p.id]; delete state.whatIfInput?.[p.id]; render(); };
+  const chip = (label, change, on) => h("button", { type: "button", class: `chip${on ? " on" : ""}`, disabled: state.busy[key], onclick: () => run(change) }, label);
+  return h("div", { class: "whatif" },
+    h("span", { class: "dg-k" }, "What if"),
+    chip("Rate 2% dearer", { rate_drift_pct: 2.1 }, cur.rate_drift_pct === 2.1),
+    chip("Budget 190 USDZ", { spendable_usdz: 190 }, cur.spendable_usdz === 190),
+    chip("New bank details", { risk: "hold" }, cur.risk === "hold"),
+    chip("Known bank details", { risk: "allow" }, cur.risk === "allow"),
+    state.whatIf?.[p.id] ? h("button", { type: "button", class: "chip", onclick: reset }, "Back to real") : null,
+  );
+}
+
 const PAYOUT_PILL = {
   quoted: ["Waiting for payment", "info"], needs_review: ["Needs review", "warn"], rejected: ["Blocked", "stop"], accepted: ["Payment settling", "info"],
-  funded: ["Paid, sending", "info"], submitted: ["On its way", "info"], paid: ["Delivered", "go"], failed: ["Bounced", "stop"],
+  funded: ["Paid, sending", "info"], waiting: ["Waiting in escrow", "warn"], submitted: ["On its way", "info"], paid: ["Delivered", "go"], failed: ["Bounced", "stop"],
   refunded: ["Bounced, refunded", "warn"], refund_failed: ["Refund failed", "stop"], expired: ["Expired", ""],
 };
 
 function timeline(p, inbox) {
-  const done = { accepted: 0, funded: 1, submitted: 2, paid: 3, failed: 2, refunded: 2, refund_failed: 2 }[p.status];
+  const done = { accepted: 0, funded: 1, waiting: 1, submitted: 2, paid: 3, failed: 2, refunded: 2, refund_failed: 2 }[p.status];
   if (done === undefined) return null; // not paid for yet
   const bounced = ["failed", "refunded", "refund_failed"].includes(p.status);
   const steps = [inbox ? "Approved" : "Paid in USDZ", "Sent by Airwallex", bounced ? "Bounced" : "Delivered"].map((label, i) => ({
@@ -1191,6 +1233,7 @@ function payoutRow(p) {
   return h("article", { class: `row${m.cls}`, style: m.style, "data-status": p.status },
     h("div", { class: "line" }, h("b", {}, p.payee), h("span", { class: "amt" }, money(p.amount, p.currency))),
     h("div", { class: "line small" }, h("span", { class: "muted spaced" }, [from, p.reference, p.created_at && ago(p.created_at)].filter(Boolean).map((x) => h("span", {}, x))), h("span", { class: `pill ${tone}` }, label)),
+    decisionCard(p),
     ["paid", "refunded", "expired", "rejected"].includes(p.status) ? null : timeline(p, from === "Inbox"),
     failure(p),
     p.status === "needs_review" && !linkedPayouts().has(p.id) ? reviewBlock(p) : null,

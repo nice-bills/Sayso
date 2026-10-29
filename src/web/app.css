@@ -749,3 +749,29 @@ body:has(.say-home) { background: var(--bg); }
 .osheet.ink .kvs { background: #2a2f36; color: #ffffff; } .osheet.ink .kvs .muted, .osheet.ink .kvs dt { color: #b9bec5; }
 .osheet.ink .kv .k, .osheet.ink .kv small { color: #b9bec5; } .osheet.ink .kv + .kv { border-top-color: rgba(255, 255, 255, .1); }
 .osheet.ink .pc-head { color: #d4d8dd; }
+
+/* The decision: what the agent chose from price, balance and risk. Tinted, never a white box. */
+.decision { display: grid; gap: 10px; padding: 14px 16px; border-radius: var(--r-sm); background: rgba(21,25,30,.07); margin: 10px 0; }
+.decision .dc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.decision .dc-verdict { font-size: 28px; font-weight: 650; letter-spacing: -.03em; line-height: 1; }
+.decision.v-pay .dc-verdict { color: var(--paid); } .decision.v-hold .dc-verdict, .decision.v-reject .dc-verdict { color: var(--held); } .decision.v-wait .dc-verdict, .decision.v-split .dc-verdict { color: var(--warn); }
+.decision .dc-by, .decision .dc-sim, .decision .dg-k { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; opacity: .7; }
+.decision .dc-sim { opacity: 1; color: var(--warn); }
+.decision .dc-gauges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.decision .dg { display: grid; gap: 4px; padding: 10px; border-radius: 10px; background: rgba(21,25,30,.06); border-left: 4px solid var(--paid); min-width: 0; }
+.decision .dg b { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.decision .dg.off { border-left-color: var(--held); }
+.decision .dg.decider { background: rgba(21,25,30,.13); }
+.decision .dc-reason { margin: 0; font-size: 16px; line-height: 1.4; }
+.decision .dc-proof { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.decision .whatif { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-top: 4px; border-top: 1px solid rgba(21,25,30,.12); }
+.decision .whatif .chip { padding: 6px 12px; border-radius: 999px; border: 0; font: inherit; font-size: 13px; font-weight: 600; background: rgba(21,25,30,.1); color: inherit; cursor: pointer; }
+.decision .whatif .chip.on { background: var(--ink); color: var(--lime); }
+.osheet.ink .decision, .osheet.ink .decision .dg { background: #2a2f36; }
+.osheet.ink .decision .dg.decider { background: #3a4048; }
+.osheet.ink .decision.v-pay .dc-verdict { color: var(--lime); }
+.osheet.ink .decision.v-hold .dc-verdict { color: #ff8a80; }
+.osheet.ink .decision .whatif { border-top-color: rgba(255,255,255,.15); }
+.osheet.ink .decision .whatif .chip { background: rgba(255,255,255,.12); }
+.osheet.ink .decision .whatif .chip.on { background: var(--lime); color: var(--ink); }
+@media (max-width: 340px) { .decision .dc-gauges { grid-template-columns: 1fr; } }

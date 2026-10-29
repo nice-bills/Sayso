@@ -57,7 +57,7 @@ export interface Decision {
   decidedBy: "price" | "balance" | "risk" | "deadline";
   /** One sentence, shown on the decision card. */
   reason: string;
-  inputs: { costUsdzMinor: number; capUsdzMinor: number; rateDrift: number; spendableUsdzMinor: number; risk: RiskVerdict["verdict"]; dueInDays: number };
+  inputs: { costUsdzMinor: number; capUsdzMinor: number; rateDrift: number; spendableUsdzMinor: number; risk: RiskVerdict["verdict"]; dueInDays: number; partPaymentAllowed: boolean };
   /** Split only: what is paid now and what follows the next earnings sweep. */
   tranches?: Tranche[];
   /** Wait only: what releases the payout. */
@@ -73,7 +73,7 @@ const days = (n: number) => (n <= 0 ? "today" : n < 1.5 ? "tomorrow" : `in ${Mat
 
 export function decide(i: DecideInput, now: Date, cfg: DecideConfig = DEFAULT_DECIDE): Decision {
   const dueInDays = (i.dueAt.getTime() - now.getTime()) / DAY_MS;
-  const inputs = { costUsdzMinor: i.costUsdzMinor, capUsdzMinor: i.capUsdzMinor, rateDrift: i.rateDrift, spendableUsdzMinor: i.spendableUsdzMinor, risk: i.risk.verdict, dueInDays };
+  const inputs = { costUsdzMinor: i.costUsdzMinor, capUsdzMinor: i.capUsdzMinor, rateDrift: i.rateDrift, spendableUsdzMinor: i.spendableUsdzMinor, risk: i.risk.verdict, dueInDays, partPaymentAllowed: i.partPaymentAllowed };
   const amount = fmt(i.amountMinor, i.currency);
 
   if (i.risk.verdict === "reject") return { verdict: "reject", decidedBy: "risk", reason: `Refused: ${i.risk.reasons.join("; ")}.`, inputs };
@@ -110,4 +110,18 @@ export function decide(i: DecideInput, now: Date, cfg: DecideConfig = DEFAULT_DE
 
   if (rateOff) return { verdict: "pay", decidedBy: "deadline", reason: `Paying ${amount} now: it's due ${days(dueInDays)}, so paying at today's rate even though ${i.currency} is ${pct(i.rateDrift)} dearer than this week's median.`, inputs };
   return { verdict: "pay", decidedBy: "price", reason: `Paying ${amount}: ${usdz(i.costUsdzMinor)} is within the ${usdz(i.capUsdzMinor)} cap, ${usdz(i.spendableUsdzMinor)} can be spent, and the payee checks out.`, inputs };
+}
+
+/**
+ * The same decision with some inputs changed: the app's what-if panel. Nothing moves; it only
+ * answers "what would the agent do if the rate, the budget or the risk were different?".
+ */
+export function whatIf(d: Decision, amountMinor: number, currency: Currency, decidedAt: Date, riskReasons: string[], change: { rateDrift?: number; spendableUsdzMinor?: number; risk?: RiskVerdict }, cfg: DecideConfig = DEFAULT_DECIDE): Decision {
+  const i = d.inputs;
+  const risk: RiskVerdict = change.risk ?? (i.risk === "allow" ? { verdict: "allow" } : { verdict: i.risk, reasons: riskReasons.length ? riskReasons : ["held by the risk rules"] });
+  return decide({
+    amountMinor, currency, costUsdzMinor: i.costUsdzMinor, capUsdzMinor: i.capUsdzMinor,
+    rateDrift: change.rateDrift ?? i.rateDrift, spendableUsdzMinor: change.spendableUsdzMinor ?? i.spendableUsdzMinor,
+    risk, dueAt: new Date(decidedAt.getTime() + i.dueInDays * DAY_MS), partPaymentAllowed: i.partPaymentAllowed,
+  }, decidedAt, cfg);
 }

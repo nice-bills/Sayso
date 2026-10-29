@@ -94,3 +94,19 @@ test('a lookalike asking for new bank details is checked with a 1-cent code', as
   await screen.getByRole('button', "These aren't our bank details").tap();
   await expect(browser.locator('h1')).toContainText("We won't pay those details");
 });
+
+test('the held invoice shows its decision, and one input flips it from hold to pay', async ({ app, screen, browser }) => {
+  await signIn(app, screen);
+  await screen.getByRole('button', 'Held: €340.00 to Kreuzberg Studio GmbH. Opens it.').tap();
+  const decision = browser.locator('.sh-card .decision');
+  const verdict = browser.locator('.sh-card .decision .dc-verdict');
+  await expect(verdict).toHaveText('Hold');
+  await expect(decision).toContainText('Holding EUR 340.00');
+  await screen.getByRole('button', 'Known bank details').tap();
+  await expect(verdict).toHaveText('Pay');
+  await expect(decision).toContainText('payee checks out');
+  await screen.getByRole('button', 'Rate 2% dearer').tap();
+  await expect(verdict).toHaveText('Wait');
+  await screen.getByRole('button', 'Back to real').tap();
+  await expect(verdict).toHaveText('Hold');
+});

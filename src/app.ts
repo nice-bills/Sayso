@@ -38,7 +38,8 @@ import { requireSignedOffer } from "@metalntwx/metal-pay/mandates";
 import { Trail } from "./trail.js";
 import { payoutApi, type PaymentMode } from "./payouts/http.js";
 import { BatchBook } from "./payouts/batch.js";
-import { PayoutError, PayoutService, publicView, type PayoutAirwallex, type Refunder } from "./payouts/service.js";
+import { whatIf } from "./payouts/decide.js";
+import { decisionView, PayoutError, PayoutService, publicView, type PayoutAirwallex, type Refunder } from "./payouts/service.js";
 import { RateMedian } from "./payouts/rates.js";
 import type { PayoutBook } from "./payouts/book.js";
 import { flowsFromBooks, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
@@ -379,6 +380,20 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     const p = svc.book.get(String(req.params.id));
     if (!p) return void res.status(404).json({ error: "no such payout" });
     res.json({ payout: publicView(p), steps: trail.for(p.id), receipts: receipts.get(p.id) });
+  });
+  // What the agent would decide with one input changed. Sandbox and offline only; nothing moves.
+  app.post("/v1/payouts/:id/what-if", auth.requireOwner, express.json(), (req, res) => {
+    if (!sandbox && !opts.offline) return void res.status(404).json({ error: "what-if is only on the sandbox" });
+    const p = svc.book.get(String(req.params.id));
+    if (!p?.decision) return void res.status(404).json({ error: "no decision for this payout" });
+    const b = req.body ?? {};
+    const risk = b.risk === "hold" ? { verdict: "hold" as const, reasons: ["this IBAN has never been paid and the invoice asks to switch bank details"] } : b.risk === "allow" ? { verdict: "allow" as const } : undefined;
+    const d = whatIf(p.decision, p.amountMinor, p.currency, new Date(p.createdAt), p.reasons, {
+      rateDrift: typeof b.rate_drift_pct === "number" ? b.rate_drift_pct / 100 : undefined,
+      spendableUsdzMinor: typeof b.spendable_usdz === "number" ? toMinor(b.spendable_usdz) : undefined,
+      risk,
+    });
+    res.json({ simulated: true, decision: decisionView(d) });
   });
   app.post("/v1/payouts/:id/review", auth.requireOwner, express.json(), async (req, res) => {
     if (req.body?.decision !== "reject" && !(await auth.confirmed(req, req.body?.confirmation, "review", String(req.params.id)))) return void res.status(401).json({ error: "Confirm with your passkey to allow it.", need: "passkey" });
