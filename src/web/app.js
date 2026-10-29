@@ -1176,6 +1176,7 @@ function decisionCard(p) {
     h("div", { class: "dc-gauges" }, gauge("price", "Price", price, priceOk), gauge("balance", "Balance", bal, balOk), gauge("risk", "Risk", i.risk === "allow" ? "Clear" : i.risk === "hold" ? "Held" : "Refused", i.risk === "allow")),
     h("p", { class: "dc-reason" }, d.reason),
     d.tranches ? h("div", { class: "small" }, d.tranches.map((t) => `${money(t.amount, p.currency)} ${t.when === "now" ? "now" : "after the next sweep"}`).join(" · ")) : null,
+    d.proposed_cap_usdz ? h("div", { class: "small" }, `To pay it, raise the agent's cap to ${d.proposed_cap_usdz} USDZ on Metal. On the owner's machine: `, h("code", {}, `npm run setup:agent-budget -- --cap ${d.proposed_cap_usdz} --replaces .metal/agent-budget.json`)) : null,
     proofs?.length ? h("div", { class: "dc-proof small" }, "Proof: ", ...proofs) : null,
     state.summary?.offline || state.summary?.sandbox ? whatIfPanel(p) : null,
   );

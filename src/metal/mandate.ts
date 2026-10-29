@@ -96,7 +96,7 @@ export class MetalMandate {
    * One-time: write a credential and bind it on the owner's account. By default it may pay ONLY
    * the ramp; `anyPayee` (the refund mandate) drops the payee list and relies on cap and budget.
    */
-  async setup(limits: { capCents: number; budgetCents: number; expiresInSeconds?: number; anyPayee?: boolean; description?: string; payeeName?: string }): Promise<{ principal: Address; reference: string; gasKeyAddress: string }> {
+  async setup(limits: { capCents: number; budgetCents: number; expiresInSeconds?: number; anyPayee?: boolean; description?: string; payeeName?: string; replaces?: string; mandateKeyFile?: string }): Promise<{ principal: Address; reference: string; gasKeyAddress: string }> {
     const payeeName = limits.payeeName ?? "SaysoRamp";
     const principal = await this.account();
     const create = await this.cli([
@@ -107,10 +107,18 @@ export class MetalMandate {
       ...(limits.anyPayee ? [] : ["--payee", `${this.cfg.rampAddress},${payeeName}`]),
       "--description", limits.description ?? "Sayso earnings sweep to the Airwallex off-ramp",
       ...(limits.expiresInSeconds ? ["--expires-in", String(limits.expiresInSeconds)] : []),
+      // A replacement keeps the agent's key, so the agent only restarts on the new credential.
+      ...(limits.mandateKeyFile ? ["--mandate-key-file", limits.mandateKeyFile] : []),
       "--key", this.cfg.ownerKey,
       "--out", this.cfg.credential,
     ]);
     const kv = parseCliOutput(create.stdout);
+    // Replacing revokes the old mandate in the same transaction, and what it spent carries over.
+    if (limits.replaces) {
+      await this.cli(["mandate", "replace", "--credential", this.cfg.credential, "--replaces", limits.replaces, "--key", this.cfg.ownerKey]);
+      emit("act", `Replaced the mandate: now up to ${centsToUsdz(limits.capCents)} USDZ a payment, ${centsToUsdz(limits.budgetCents)} USDZ in total`, { principal }, kv.reference);
+      return { principal, reference: kv.reference ?? "", gasKeyAddress: kv["gas-key-address"] ?? "" };
+    }
     await this.cli(["mandate", "bind", "--credential", this.cfg.credential, "--key", this.cfg.ownerKey]);
     emit("act", limits.anyPayee ? "Bound refund mandate: any payee, capped per refund and in total" : payeeName === "SaysoRamp" ? "Bound sweep mandate: payee is the ramp only" : `Bound mandate: payee is ${payeeName} only`, { principal, cap: centsToUsdz(limits.capCents), budget: centsToUsdz(limits.budgetCents) }, kv.reference);
     return { principal, reference: kv.reference ?? "", gasKeyAddress: kv["gas-key-address"] ?? "" };
