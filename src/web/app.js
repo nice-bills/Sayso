@@ -9,7 +9,7 @@ const state = {
   home: { top: 0, open: null, from: null, shifted: false },
   connect: location.pathname.match(/^\/connect\/([\w-]+)$/)?.[1] ?? null, connectInfo: null,
   focus: decodeURIComponent(location.pathname.match(/^\/approve\/(.+)$/)?.[1] ?? "") || null,
-  tab: sessionGet("tab") || "home", filter: "all", events: [], recent: new Set(),
+  tab: sessionGet("tab") || "home", filter: "all", rows: new Set(), events: [], recent: new Set(),
   pick: null, showAdd: false, drafts: {}, verified: {}, open: {}, busy: {}, toast: null,
   say: { listening: false, text: "", result: null }, why: {},
 };
@@ -615,7 +615,7 @@ function homeView() {
   const live = h("p", { class: `sh-heard${s.listening || s.text ? " on" : ""}`, id: "say-live", "aria-live": "polite" }, heardLine());
   const sheet = done && !r ? paidSheet(done)
     : r ? cardSheet("said", said ?? null, h("div", {}, live, replyLine(r)), said ? itemCard(said, r) : null)
-    : open ? cardSheet(open.key, open.item ?? null, null, open.item ? itemCard(open.item) : h("div", { class: "card-x" }, payoutRow(open.payout)))
+    : open ? cardSheet(open.key, open.item ?? null, null, open.item ? itemCard(open.item) : h("div", { class: "card-x" }, payoutRow(open.payout, { open: true })))
     : null;
   return h("div", { class: `say-home${listening ? " listening" : ""}${firstShow("home") ? " enter" : ""}` },
     h("header", { class: "sh-top" },
@@ -928,13 +928,14 @@ function whyPanel(id) {
   const w = state.why[id];
   if (!w) return null;
   return h("ol", { class: "why" }, w.steps.map((s) => h("li", { class: `why-step ${TONE[s.kind] ?? ""}` },
-    h("span", { class: "why-k" }, WHY[s.kind] ?? s.kind),
-    h("div", { class: "grow" },
-      h("div", {}, sentence(s.title.replace(/ \(sim\)$/, ""))),
-      s.kind === "mandate" && s.detail?.limits ? h("div", { class: "small muted" }, `Owner's limits: ${s.detail.limits.cap_usdz} USDZ a payment, ${s.detail.limits.budget_usdz} USDZ in total${s.detail.limits.expires_at ? `, until ${new Date(s.detail.limits.expires_at).toLocaleDateString()}` : ""}. Mandate `, h("code", {}, `${String(s.detail.ref).slice(0, 10)}…`)) : null,
-      s.detail?.citations?.length ? h("div", { class: "small muted" }, s.detail.citations.map((c) => `“${c}”`).join("  ")) : null,
-      s.detail?.hash ? h("div", { class: "small muted" }, "Receipt hash ", h("code", {}, `${String(s.detail.hash).slice(0, 14)}…`)) : null,
-      h("div", { class: "small soft" }, ago(s.at), " ", proof(s.proof) ?? (s.proof?.startsWith("sim:") ? "(simulated)" : "")),
+    h("span", { class: "why-dot", "aria-hidden": "true" }),
+    h("div", { class: "why-body" },
+      h("div", { class: "why-k" }, WHY[s.kind] ?? s.kind, h("span", { class: "why-when" }, ago(s.at))),
+      h("div", { class: "why-t" }, sentence(s.title.replace(/ \(sim\)$/, ""))),
+      s.kind === "mandate" && s.detail?.limits ? h("div", { class: "why-d" }, `Owner's limits: ${s.detail.limits.cap_usdz} USDZ a payment, ${s.detail.limits.budget_usdz} USDZ in total${s.detail.limits.expires_at ? `, until ${new Date(s.detail.limits.expires_at).toLocaleDateString()}` : ""}. Mandate `, h("code", {}, `${String(s.detail.ref).slice(0, 10)}…`)) : null,
+      s.detail?.citations?.length ? h("div", { class: "why-d" }, s.detail.citations.map((c) => `“${c}”`).join("  ")) : null,
+      s.detail?.hash ? h("div", { class: "why-d" }, "Receipt hash ", h("code", {}, `${String(s.detail.hash).slice(0, 14)}…`)) : null,
+      proof(s.proof) ? h("div", { class: "why-d" }, proof(s.proof)) : s.proof?.startsWith("sim:") ? h("div", { class: "why-d" }, "Simulated") : null,
     ))));
 }
 
@@ -1159,25 +1160,39 @@ function ignoreButton(item) {
 // ---------- payouts ----------
 // ---------- the decision: what the agent chose from price, balance and risk, and why ----------
 const VERDICT = { pay: "Pay", wait: "Wait", split: "Split", hold: "Hold", reject: "Refuse" };
+const DECIDED = { price: "price", deadline: "the due date", balance: "balance", risk: "risk" };
+// One sentence first (the verdict and its reason), then the three things it weighed as a short
+// list, the one that decided it marked. Proof and the what-if row sit under a hairline.
 function decisionCard(p) {
   const real = p.decision;
   if (!real) return null;
   const sim = state.whatIf?.[p.id];
   const d = sim ?? real, i = d.inputs;
-  const gauge = (key, label, value, ok) => h("div", { class: `dg${ok ? "" : " off"}${d.decided_by === key || (key === "price" && d.decided_by === "deadline") ? " decider" : ""}` },
-    h("span", { class: "dg-k" }, label), h("b", {}, value));
-  const price = `${i.price_usdz} USDZ${i.cap_usdz ? ` of ${i.cap_usdz}` : ""}${i.rate_drift_pct > 0 ? ` · rate ${i.rate_drift_pct}% dear` : ""}`;
-  const priceOk = !(i.cap_usdz && Number(i.price_usdz) > Number(i.cap_usdz)) && i.rate_drift_pct <= 1.5;
-  const bal = i.spendable_usdz ? `${i.spendable_usdz} USDZ` : "No limit given";
-  const balOk = !i.spendable_usdz || Number(i.spendable_usdz) >= Number(i.price_usdz);
-  const proofs = sim ? null : [proof(p.funding_tx), proof(p.airwallex_transfer_id), proof(p.refund_tx)].filter(Boolean);
-  return h("section", { class: `decision v-${d.verdict}`, "aria-label": `Decision: ${VERDICT[d.verdict]}` },
-    h("div", { class: "dc-head" }, h("span", { class: "dc-verdict" }, VERDICT[d.verdict]), sim ? h("span", { class: "dc-sim" }, "What if (nothing moves)") : h("span", { class: "dc-by" }, `decided by ${d.decided_by}`)),
-    h("div", { class: "dc-gauges" }, gauge("price", "Price", price, priceOk), gauge("balance", "Balance", bal, balOk), gauge("risk", "Risk", i.risk === "allow" ? "Clear" : i.risk === "hold" ? "Held" : "Refused", i.risk === "allow")),
+  const decider = d.decided_by === "deadline" ? "price" : d.decided_by;
+  const factor = (key, label, value, ok, extra) => h("li", { class: `dc-f${ok ? "" : " off"}${decider === key ? " decider" : ""}` },
+    h("span", { class: "dc-dot", "aria-hidden": "true" }, icon(ok ? "check" : "hand", 12)),
+    h("span", { class: "dc-fk" }, label, decider === key ? h("span", { class: "dc-tag" }, "Decided it") : null),
+    h("span", { class: "dc-fv" }, value),
+    extra ?? null);
+  const cap = Number(i.cap_usdz), price = Number(i.price_usdz);
+  const priceOk = !(cap && price > cap) && i.rate_drift_pct <= 1.5;
+  const priceText = cap ? [h("b", {}, i.price_usdz), ` of ${i.cap_usdz} USDZ`] : [h("b", {}, i.price_usdz), " USDZ"];
+  const meter = cap ? h("span", { class: "dc-meter", "aria-hidden": "true" }, h("i", { style: `width:${Math.min(100, Math.max(2, (price / cap) * 100)).toFixed(1)}%` })) : null;
+  const drift = i.rate_drift_pct > 0 ? h("span", { class: "dc-note" }, `Rate ${i.rate_drift_pct}% dearer than usual`) : null;
+  const balOk = !i.spendable_usdz || Number(i.spendable_usdz) >= price;
+  const proofs = sim ? [] : [["Metal", p.funding_tx], ["Airwallex", p.airwallex_transfer_id], ["Refund", p.refund_tx]].map(([k, v]) => [k, proof(v)]).filter(([, v]) => v);
+  return h("section", { class: `decision v-${d.verdict}${sim ? " is-sim" : ""}`, "aria-label": `Decision: ${VERDICT[d.verdict]}` },
+    h("div", { class: "dc-head" },
+      h("span", { class: "dc-verdict" }, VERDICT[d.verdict]),
+      sim ? h("span", { class: "dc-sim" }, "What if · nothing moves") : h("span", { class: "dc-by" }, `Decided by ${DECIDED[d.decided_by] ?? d.decided_by}`)),
     h("p", { class: "dc-reason" }, d.reason),
-    d.tranches ? h("div", { class: "small" }, d.tranches.map((t) => `${money(t.amount, p.currency)} ${t.when === "now" ? "now" : "after the next sweep"}`).join(" · ")) : null,
-    d.proposed_cap_usdz ? h("div", { class: "small" }, `To pay it, raise the agent's cap to ${d.proposed_cap_usdz} USDZ on Metal. On the owner's machine: `, h("code", {}, `npm run setup:agent-budget -- --cap ${d.proposed_cap_usdz} --replaces .metal/agent-budget.json`)) : null,
-    proofs?.length ? h("div", { class: "dc-proof small" }, "Proof: ", ...proofs) : null,
+    h("ul", { class: "dc-factors" },
+      factor("price", "Price", priceText, priceOk, [meter, drift]),
+      factor("balance", "Balance", i.spendable_usdz ? [h("b", {}, i.spendable_usdz), " USDZ"] : "No budget set", balOk),
+      factor("risk", "Risk", i.risk === "allow" ? "Clear" : i.risk === "hold" ? "Held" : "Refused", i.risk === "allow")),
+    d.tranches ? h("p", { class: "dc-note" }, d.tranches.map((t) => `${money(t.amount, p.currency)} ${t.when === "now" ? "now" : "after the next sweep"}`).join(" · ")) : null,
+    d.proposed_cap_usdz ? h("p", { class: "dc-note" }, `To pay it, raise the agent's cap to ${d.proposed_cap_usdz} USDZ on Metal. On the owner's machine: `, h("code", {}, `npm run setup:agent-budget -- --cap ${d.proposed_cap_usdz} --replaces .metal/agent-budget.json`)) : null,
+    proofs.length ? h("div", { class: "dc-proof" }, h("span", { class: "dc-label" }, "Proof"), proofs.map(([k, v]) => h("span", { class: "dc-pf" }, h("span", {}, k), v))) : null,
     state.summary?.offline || state.summary?.sandbox ? whatIfPanel(p) : null,
   );
 }
@@ -1188,14 +1203,14 @@ function whatIfPanel(p) {
     act(key, async () => { state.whatIf = { ...state.whatIf, [p.id]: (await api(`/v1/payouts/${encodeURIComponent(p.id)}/what-if`, state.whatIfInput[p.id])).decision }; });
   };
   const reset = () => { delete state.whatIf?.[p.id]; delete state.whatIfInput?.[p.id]; render(); };
-  const chip = (label, change, on) => h("button", { type: "button", class: `chip${on ? " on" : ""}`, disabled: state.busy[key], onclick: () => run(change) }, label);
+  const chip = (label, change, on) => h("button", { type: "button", class: `chip${on ? " on" : ""}`, "aria-pressed": String(Boolean(on)), disabled: state.busy[key], onclick: () => run(change) }, label);
   return h("div", { class: "whatif" },
-    h("span", { class: "dg-k" }, "What if"),
-    chip("Rate 2% dearer", { rate_drift_pct: 2.1 }, cur.rate_drift_pct === 2.1),
-    chip("Budget 190 USDZ", { spendable_usdz: 190 }, cur.spendable_usdz === 190),
-    chip("New bank details", { risk: "hold" }, cur.risk === "hold"),
-    chip("Known bank details", { risk: "allow" }, cur.risk === "allow"),
-    state.whatIf?.[p.id] ? h("button", { type: "button", class: "chip", onclick: reset }, "Back to real") : null,
+    h("div", { class: "wi-head" }, h("span", { class: "dc-label" }, "What if"), state.whatIf?.[p.id] ? h("button", { type: "button", class: "linkish wi-reset", onclick: reset }, "Back to real") : h("span", { class: "wi-hint" }, "Try one. Nothing moves.")),
+    h("div", { class: "wi-chips" },
+      chip("Rate 2% dearer", { rate_drift_pct: 2.1 }, cur.rate_drift_pct === 2.1),
+      chip("Budget 190 USDZ", { spendable_usdz: 190 }, cur.spendable_usdz === 190),
+      chip("New bank details", { risk: "hold" }, cur.risk === "hold"),
+      chip("Known bank details", { risk: "allow" }, cur.risk === "allow")),
   );
 }
 
@@ -1215,7 +1230,7 @@ function timeline(p, inbox) {
   if (p.status === "refunded") steps.push({ label: "Refunded in full", cls: "done" });
   if (p.status === "refund_failed") steps.push({ label: "Refund failed", cls: "bad" });
   if (p.status === "failed" && p.source === "agent") steps.push({ label: "Refunding", cls: "now" });
-  return h("div", { class: "steps", style: `grid-template-columns:repeat(${steps.length},minmax(0,1fr))`, "aria-label": "progress" }, steps.map((s) => h("div", { class: `step ${s.cls}` }, s.label)));
+  return h("ol", { class: "steps", style: `grid-template-columns:repeat(${steps.length},minmax(0,1fr))`, "aria-label": "progress" }, steps.map((s) => h("li", { class: `step ${s.cls}` }, h("span", { class: "step-label" }, s.label))));
 }
 
 function failure(p) {
@@ -1227,26 +1242,43 @@ function failure(p) {
 const linkedPayouts = () => new Set(state.inbox.map((i) => i.payoutId).filter(Boolean));
 const reviewable = () => state.payouts.filter((p) => p.status === "needs_review" && !linkedPayouts().has(p.id));
 
-function payoutRow(p) {
+// Collapsed, a payout is one line: who, how much, what Sayso decided, where it is. Tap it for the
+// decision, the progress and the proof. One that needs you is open from the start.
+function payoutRow(p, opts = {}) {
   const tapPending = linkedPayouts().has(p.id) && ["quoted", "needs_review"].includes(p.status);
   const [label, tone] = tapPending ? (p.status === "quoted" ? ["Waiting for your tap", "coin"] : ["Check before paying", "stop"]) : PAYOUT_PILL[p.status] ?? [p.status, ""];
   const from = p.source === "agent" ? "Agent" : p.source === "inbox" || linkedPayouts().has(p.id) ? "Inbox" : "Quote";
+  const needsYou = p.status === "needs_review" && !linkedPayouts().has(p.id);
+  const open = opts.open || needsYou || state.rows.has(p.id);
   const m = motion(`pay:${p.id}`, p.status);
-  return h("article", { class: `row${m.cls}`, style: m.style, "data-status": p.status },
-    h("div", { class: "line" }, h("b", {}, p.payee), h("span", { class: "amt" }, money(p.amount, p.currency))),
-    h("div", { class: "line small" }, h("span", { class: "muted spaced" }, [from, p.reference, p.created_at && ago(p.created_at)].filter(Boolean).map((x) => h("span", {}, x))), h("span", { class: `pill ${tone}` }, label)),
-    decisionCard(p),
-    ["paid", "refunded", "expired", "rejected"].includes(p.status) ? null : timeline(p, from === "Inbox"),
-    failure(p),
-    p.status === "needs_review" && !linkedPayouts().has(p.id) ? reviewBlock(p) : null,
-    p.status === "quoted" ? null : whyButton(p.id),
-    whyPanel(p.id),
-    state.why[p.id] ? h("div", { class: "proofs" },
-      row("Payout id", p.id), row("Method", p.method),
-      from === "Agent" ? row("Agent paid", `${usdz(p.price_usdz)} (fee ${usdz(p.fee_usdz)})`) : null,
-      row("Metal payment", p.funding_tx), row("Airwallex transfer", p.airwallex_transfer_id), row("Refund", p.refund_tx),
-      p.reasons?.length ? row("Why", p.reasons.join("; ")) : null,
-      p.status === "paid" && from === "Agent" ? disputeButton(p) : null,
+  const v = p.decision?.verdict;
+  const toggle = () => { state.rows.has(p.id) ? state.rows.delete(p.id) : state.rows.add(p.id); render(); };
+  const head = [
+    h("span", { class: "rh-top" }, h("b", { class: "rh-who" }, p.payee), h("span", { class: "amt" }, money(p.amount, p.currency))),
+    h("span", { class: "rh-sub" },
+      h("span", { class: "rh-meta" },
+        v ? h("span", { class: `rh-v v-${v}` }, VERDICT[v]) : null,
+        [from, p.created_at && ago(p.created_at)].filter(Boolean).map((x) => h("span", {}, x))),
+      h("span", { class: `pill ${tone}` }, label)),
+  ];
+  return h("article", { class: `row${open ? " open" : ""}${m.cls}`, style: m.style, "data-status": p.status },
+    opts.open || needsYou ? h("div", { class: "row-head" }, head)
+      : h("button", { type: "button", class: "row-head", "aria-expanded": String(open), onclick: toggle }, head, h("span", { class: "rh-chev", "aria-hidden": "true" })),
+    open ? h("div", { class: "row-body" },
+      p.reference ? h("div", { class: "rb-ref" }, "Reference ", h("b", {}, p.reference)) : null,
+      decisionCard(p),
+      ["paid", "refunded", "expired", "rejected"].includes(p.status) ? null : timeline(p, from === "Inbox"),
+      failure(p),
+      needsYou ? reviewBlock(p) : null,
+      p.status === "quoted" ? null : whyButton(p.id),
+      whyPanel(p.id),
+      state.why[p.id] ? h("dl", { class: "proofs" },
+        prow("Payout id", p.id), prow("Method", p.method),
+        from === "Agent" ? prow("Agent paid", `${usdz(p.price_usdz)} (fee ${usdz(p.fee_usdz)})`) : null,
+        prow("Metal payment", p.funding_tx), prow("Airwallex transfer", p.airwallex_transfer_id), prow("Refund", p.refund_tx),
+        p.reasons?.length ? prow("Why", p.reasons.join("; ")) : null,
+      ) : null,
+      state.why[p.id] && p.status === "paid" && from === "Agent" ? disputeButton(p) : null,
     ) : null,
   );
 }
@@ -1258,7 +1290,7 @@ function disputeButton(p) {
     if (reason?.trim()) act(key, async () => api(`/v1/payouts/${encodeURIComponent(p.id)}/dispute`, { reason: reason.trim(), confirmation: await confirmWith("dispute", p.id) }), "Refunded to the agent.");
   } }, `Refund the agent ${usdz(p.price_usdz)}`);
 }
-function row(k, v) { return v ? h("div", {}, k, ": ", h("code", {}, String(v))) : null; }
+function prow(k, v) { return v ? h("div", { class: "kv" }, h("dt", { class: "k" }, k), h("dd", { class: "v" }, h("code", {}, String(v)))) : null; }
 
 function reviewBlock(p) {
   const key = `review:${p.id}`;
@@ -1283,14 +1315,17 @@ function paymentsView() {
     : ["failed", "refunded", "refund_failed"].includes(p.status));
   const delivered = all.filter((p) => p.status === "paid");
   const moving = all.filter((p) => ["accepted", "funded", "submitted"].includes(p.status));
+  const bounced = all.filter((p) => ["failed", "refunded", "refund_failed"].includes(p.status));
   const rec = state.summary?.reconcile;
-  return h("div", {},
-    h("div", { class: "head" }, h("div", {}, h("h2", {}, "Payments"), h("div", { class: "muted small" }, rec ? (rec.ok ? "Books reconcile to the cent." : "Books don't reconcile. Check the back office.") : "Every payout, from agents and from your inbox.")),
-    ),
-    h("p", { class: "summary" }, `${delivered.length} delivered, ${moving.length} on the way, ${all.filter((p) => p.status === "refunded").length} bounced and refunded.`, delivered.length ? ` ${byCcy(delivered)} so far.` : ""),
+  const stat = (n, label, tone) => h("div", { class: `stat ${tone}` }, h("b", {}, n), h("span", {}, label));
+  return h("div", { class: "pay-page" },
+    h("div", { class: "head" }, h("div", {}, h("h2", {}, "Payments"),
+      h("div", { class: "muted small" }, rec ? (rec.ok ? "Books reconcile to the cent." : "Books don't reconcile. Check the back office.") : "Every payout, from agents and from your inbox."))),
+    h("div", { class: "stats" }, stat(delivered.length, "Delivered", "go"), stat(moving.length, "On the way", ""), stat(bounced.length, "Bounced", bounced.length ? "stop" : "")),
+    delivered.length ? h("p", { class: "stats-note" }, `${byCcy(delivered)} delivered so far.`) : null,
+    h("div", { class: "filters", role: "group", "aria-label": "Show" }, filters.map(([id, label]) => h("button", { class: "chip", "aria-pressed": String(state.filter === id), onclick: () => { state.filter = id; render(); } }, label))),
+    h("div", { class: "list rows" }, shown.length ? shown.map((p) => payoutRow(p)) : h("div", { class: "empty" }, icon("payments", 22), h("div", {}, "Nothing here yet."))),
     h("details", { class: "happening" }, h("summary", {}, "What's happening, step by step"), activityFeed()),
-    h("div", { class: "filters", style: "margin-bottom:12px" }, filters.map(([id, label]) => h("button", { class: "chip", "aria-pressed": String(state.filter === id), onclick: () => { state.filter = id; render(); } }, label))),
-    h("div", { class: "list" }, shown.length ? shown.map(payoutRow) : h("div", { class: "empty" }, icon("payments", 22), h("div", {}, "Nothing here yet."))),
   );
 }
 function byCcy(ps) {
@@ -1309,7 +1344,7 @@ function agentsView() {
     h("div", { class: "head" }, h("h2", {}, "Agents")),
     mailboxBox(),
     escrowBox(),
-    agentPays.length ? [h("h3", { class: "section" }, "Recent agent payouts"), h("div", { class: "list" }, agentPays.slice(0, 10).map(payoutRow))] : null,
+    agentPays.length ? [h("h3", { class: "section" }, "Recent agent payouts"), h("div", { class: "list" }, agentPays.slice(0, 10).map((p) => payoutRow(p)))] : null,
     connectAgents(origin),
     h("details", { class: "dev" },
       h("summary", {}, "Developer setup"),

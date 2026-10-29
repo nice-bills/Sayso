@@ -110,3 +110,15 @@ test('the held invoice shows its decision, and one input flips it from hold to p
   await screen.getByRole('button', 'Back to real').tap();
   await expect(verdict).toHaveText('Hold');
 });
+
+test('a payout is one line until you open it, then shows its decision', async ({ app, screen, browser }) => {
+  await openEverything(app, screen);
+  await screen.getByRole('tab', 'Payments').tap();
+  const row = 'article.row:has-text("Lingua Freelance")';
+  await expect(browser.locator(`${row} .decision`)).not.toBeVisible();
+  await browser.locator(`${row} button.row-head`).click();
+  await expect(browser.locator(`${row} .decision .dc-verdict`)).toHaveText('Pay');
+  await expect(browser.locator(`${row} .decision`)).toContainText('Decided it');
+  await browser.locator(`${row} button.row-head`).click();
+  await expect(browser.locator(`${row} .decision`)).not.toBeVisible();
+});
