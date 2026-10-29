@@ -125,10 +125,11 @@ export class MetalMandate {
   }
 
   /** `paymentId` names the payout, so running the same pull again pays at most once (a refund's id, a dispute's id). */
-  async pull(to: Address, amountCents: number, recordRefusal = false, paymentId?: string): Promise<PullResult> {
+  async pull(to: Address, amountCents: number, recordRefusal = false, paymentId?: string, submitKey?: string): Promise<PullResult> {
     const { stdout } = await this.cli([
       "mandate", "pull", "--credential", this.cfg.credential, "--to", to, "--amount", centsToUsdz(amountCents),
-      ...(recordRefusal ? ["--record-refusal"] : []),
+      // Recording a refusal sends the refused pull, so a funded key has to submit it and pay its gas.
+      ...(recordRefusal ? ["--record-refusal", ...(submitKey ? ["--key", submitKey] : [])] : []),
       ...(paymentId ? ["--payment-id", paymentId] : []),
     ]);
     return parsePull(stdout);
@@ -136,7 +137,7 @@ export class MetalMandate {
 
   /** The heist beat: try to pay an address the mandate never allowed, and record Metal's refusal on chain. */
   async attemptAndRecordRefusal(attacker: Address, amountCents: number): Promise<PullResult> {
-    const r = await this.pull(attacker, amountCents, true);
+    const r = await this.pull(attacker, amountCents, true, undefined, process.env.METAL_GAS_KEY_FILE ?? ".metal/receipts.json");
     if (r.outcome === "paid") {
       emit("escalate", `Mandate PAID a non-ramp address ${attacker}: the mandate is misconfigured`, {}, r.tx);
     } else {

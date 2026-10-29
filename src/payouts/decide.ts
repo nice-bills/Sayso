@@ -109,7 +109,13 @@ export function decide(i: DecideInput, now: Date, cfg: DecideConfig = DEFAULT_DE
   }
 
   if (rateOff) return { verdict: "pay", decidedBy: "deadline", reason: `Paying ${amount} now: it's due ${days(dueInDays)}, so paying at today's rate even though ${i.currency} is ${pct(i.rateDrift)} dearer than this week's median.`, inputs };
-  return { verdict: "pay", decidedBy: "price", reason: `Paying ${amount}: ${usdz(i.costUsdzMinor)} is within the ${usdz(i.capUsdzMinor)} cap, ${usdz(i.spendableUsdzMinor)} can be spent, and the payee checks out.`, inputs };
+  const unlimited = (m: number) => m >= Number.MAX_SAFE_INTEGER;
+  const why = [
+    unlimited(i.capUsdzMinor) ? `it costs ${usdz(i.costUsdzMinor)}` : `${usdz(i.costUsdzMinor)} is within the ${usdz(i.capUsdzMinor)} cap`,
+    unlimited(i.spendableUsdzMinor) ? undefined : `${usdz(i.spendableUsdzMinor)} can be spent`,
+    "the payee checks out",
+  ].filter(Boolean);
+  return { verdict: "pay", decidedBy: "price", reason: `Paying ${amount}: ${why.slice(0, -1).join(", ")}${why.length > 2 ? "," : ""} and ${why.at(-1)}.`, inputs };
 }
 
 /**
