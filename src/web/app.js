@@ -6,6 +6,7 @@ const $root = document.getElementById("root");
 const state = {
   signedIn: null, me: null, inbox: [], payouts: [], summary: null, agents: [], newKey: null,
   claim: location.pathname === "/claim" ? new URLSearchParams(location.search).get("claim_attempt_token") : location.pathname.match(/^\/c\/([\w-]+)$/)?.[1] ?? null, claimInfo: null, laterPasskey: sessionGet("laterPasskey") === "1",
+  home: { top: 0, open: null, from: null, shifted: false },
   connect: location.pathname.match(/^\/connect\/([\w-]+)$/)?.[1] ?? null, connectInfo: null,
   focus: decodeURIComponent(location.pathname.match(/^\/approve\/(.+)$/)?.[1] ?? "") || null,
   tab: sessionGet("tab") || "home", filter: "all", events: [], recent: new Set(),
@@ -491,16 +492,16 @@ function claimView() {
       info.lastError ? h("div", { class: "error", role: "alert" }, info.lastError) : err,
       h("button", { class: "btn quiet", type: "button", onclick: leaveClaim }, "Not now"),
     ];
-  return h("div", { class: "gate" }, h("header", { class: "l-top" }, brand()), h("div", { class: "gate-body" }, h("div", { class: "dialog claim", "data-ui": "" }, body)));
+  return h("div", { class: "gate ink" }, h("header", { class: "l-top" }, brand()), h("div", { class: "gate-body" }, h("div", { class: "dialog claim", "data-ui": "" }, body)));
 }
 
 // ---------- a chat app signing in with Sayso (Claude, ChatGPT: the connector's sign-in) ----------
 function connectView() {
   const info = state.connectInfo;
-  const gate = (...body) => h("div", { class: "gate" }, h("header", { class: "l-top" }, brand()), h("div", { class: "gate-body" }, h("div", { class: "dialog claim", "data-ui": "" }, body)));
+  const gate = (...body) => h("div", { class: "gate ink" }, h("header", { class: "l-top" }, brand()), h("div", { class: "gate-body" }, h("div", { class: "dialog claim", "data-ui": "" }, body)));
   if (!info) {
     api(`/oauth2/requests/${encodeURIComponent(state.connect)}`).then((i) => { state.connectInfo = i; render(); }).catch((e) => { state.connectInfo = { error: e.message }; render(); });
-    return h("div", { class: "gate" }, h("header", { class: "l-top" }, brand()));
+    return h("div", { class: "gate ink" }, h("header", { class: "l-top" }, brand()));
   }
   if (info.error) return gate(h("h2", {}, "This link has expired"), h("p", { class: "muted" }, info.error), h("button", { class: "btn", onclick: () => { state.connect = null; history.replaceState(null, "", "/"); render(); } }, "Open Sayso"));
   if (info.done) return gate(h("span", { class: "tick big-tick", "aria-hidden": "true" }, icon("check", 26)), h("h2", {}, `Going back to ${info.client_name}…`));
@@ -594,22 +595,29 @@ function appView() {
 // No buttons to learn. Hold the orb and say it; the words appear as they're heard, and one card
 // shows how Sayso read them, where each detail came from, and the single thing to approve.
 // Whatever already needs you (a held invoice, one ready to pay) sits in that same card.
+// Home, after the mockup: the balance, the things that need you as a deck of colour cards (swipe for
+// the next, tap to open one full screen), and a lime mic. Solid colours only: mint ground, lime while
+// it listens, the card's own colour when open, green once paid.
+const CARD_TONE = { needs_verification: "ink", awaiting_approval: "lime", needs_details: "sky", paying: "green" };
 function homeView() {
   const order = ["needs_verification", "awaiting_approval", "needs_details"];
-  const s = state.say, r = s.result;
+  const s = state.say, r = s.result, hs = state.home;
   const needs = state.inbox.filter(NEEDS).sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
   const queue = [...reviewable().map((p) => ({ key: p.id, payout: p })), ...needs.map((i) => ({ key: i.id, item: i }))];
-  const at = Math.max(0, queue.findIndex((q) => q.key === state.pick));
-  const cur = queue[at];
   const sum = state.summary;
   const bal = sum?.balances?.USD;
   // What you just approved stays in view until it's paid, like a receipt.
   const done = state.inbox.find((i) => i.id === state.lastPaid && i.payout);
   const said = r?.item ? state.inbox.find((i) => i.id === r.item.id) ?? r.item : null;
-  const card = done && !r ? paidCard(done)
-    : r ? (said ? itemCard(said, r) : null)
-    : cur ? (cur.item ? itemCard(cur.item) : h("div", { class: "card-x" }, payoutRow(cur.payout))) : null;
-  return h("div", { class: "say-home" },
+  const open = queue.find((q) => q.key === hs.open);
+  if (hs.open && !open) hs.open = null;
+  const listening = s.listening || (state.busy.say && !r);
+  const live = h("p", { class: `sh-heard${s.listening || s.text ? " on" : ""}`, id: "say-live", "aria-live": "polite" }, heardLine());
+  const sheet = done && !r ? paidSheet(done)
+    : r ? cardSheet("said", said ?? null, h("div", {}, live, replyLine(r)), said ? itemCard(said, r) : null)
+    : open ? cardSheet(open.key, open.item ?? null, null, open.item ? itemCard(open.item) : h("div", { class: "card-x" }, payoutRow(open.payout)))
+    : null;
+  return h("div", { class: `say-home${listening ? " listening" : ""}${firstShow("home") ? " enter" : ""}` },
     h("header", { class: "sh-top" },
       h("span", { class: "sh-mark" }, "sayso"),
       h("div", { class: "sh-icons" },
@@ -617,29 +625,102 @@ function homeView() {
         passkeyButton(true),
         h("button", { class: "sh-icon", title: "Everything: inbox, payments, agents", "aria-label": "Everything", onclick: () => { state.tab = "inbox"; sessionSet("tab", "inbox"); render(); window.scrollTo(0, 0); } }, icon("ledger", 20)),
       )),
-    h("main", { class: `sh-main${card ? "" : " empty"}` },
-      h("div", { class: `sh-balance${card ? " up" : ""}` },
+    listening
+      ? h("main", { class: "sh-main sh-listen" }, r ? null : live, h("div", { class: "wave", "aria-hidden": "true" }, Array.from({ length: 18 }, (_, i) => h("i", { style: `animation-delay:-${(i * 0.137) % 1}s` }))), replyLine(null))
+      : h("main", { class: "sh-main" },
+        h("div", { class: "sh-label" }, "Available"),
         h("div", { class: "sh-amount" }, bal != null ? money(bal / 100, "USD") : "…"),
-        h("div", { class: "sh-sub" }, "available")),
-      card ? h("div", { class: `sh-card${firstShow(`card:${r ? "said" : done ? `paid:${done.id}` : cur?.key}:${r?.heard ?? ""}`) ? " rise" : ""}` }, card) : null,
-      !r && !done && queue.length > 1 ? h("button", { class: "sh-more", type: "button", onclick: () => { state.pick = queue[(at + 1) % queue.length].key; render(); } }, `${queue.length - 1} more waiting · next`) : null,
-    ),
+        queue.length ? [h("div", { class: "sh-row" }, h("span", { class: "sh-label" }, queue.length === 1 ? "Needs you" : `${queue.length} need you`), queue.length > 1 ? h("span", { class: "sh-label" }, "Swipe for the next") : null), deck(queue)]
+          : h("div", { class: "sh-clear" }, h("span", { class: "tick big-tick", "aria-hidden": "true" }, icon("check", 26)), h("b", {}, "Nothing needs you"), h("span", {}, "Say a payment, or forward an invoice to Sayso.")),
+      ),
     h("footer", { class: "sh-foot" },
-      h("p", { class: `sh-heard${s.listening || s.text ? " on" : ""}`, id: "say-live", "aria-live": "polite" }, heardLine()),
-      replyLine(r),
+      !listening && !r ? live : null,
       s.typing ? h("form", { class: "sh-type", onsubmit: (e) => { e.preventDefault(); const t = e.target.elements.say.value.trim(); if (t) understand(t); } },
         h("input", { class: "field say-field", name: "say", autocomplete: "off", "aria-label": "Type a payment", placeholder: "Pay Kreuzberg Studio 280 euros", value: "", autofocus: true })) : null,
-      h("button", { class: `orb${s.listening ? " on" : ""}${state.busy.say ? " busy" : ""}`, type: "button", "aria-label": s.listening ? "Stop listening" : "Hold to talk", "aria-pressed": String(s.listening), disabled: !s.engine,
+      h("button", { class: `mic${s.listening ? " on" : ""}${state.busy.say ? " busy" : ""}`, type: "button", "aria-label": s.listening ? "Stop listening" : "Hold to talk", "aria-pressed": String(s.listening), disabled: !s.engine,
         onpointerdown: (e) => { if (!s.listening) { e.preventDefault(); orbDown = performance.now(); startListening(); } },
         onpointerup: () => { if (s.listening && orbDown && performance.now() - orbDown > 400) stopListening(); orbDown = 0; },
         onclick: () => { if (s.listening && !orbDown) stopListening(); },
-        onkeydown: (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); s.listening ? stopListening() : startListening(); } } }),
+        onkeydown: (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); s.listening ? stopListening() : startListening(); } } }, icon(s.listening ? "hand" : "mic", 28)),
       h("div", { class: "sh-hint" },
         s.listening ? (s.engine === "whisper" ? "Whisper, on this device" : "Listening") : s.engine ? "Hold to talk" : "Type what to pay",
         " · ",
         h("button", { class: "linkish", type: "button", onclick: () => { s.typing = !s.typing; render(); if (s.typing) setTimeout(() => document.querySelector(".say-field")?.focus(), 0); } }, s.typing ? "hide keyboard" : "type instead")),
     ),
+    sheet,
   );
+}
+
+/** The deck: the top card follows your finger; let go far enough and it flies off to the next one. */
+function deck(queue) {
+  const hs = state.home, len = queue.length, top = ((hs.top % len) + len) % len;
+  const shift = hs.shifted && firstShow(`deck:${hs.top}`);
+  const el = h("div", { class: `deck${shift ? " shift" : ""}` });
+  const cards = queue.map((q, i) => {
+    const rank = (i - top + len) % len, it = q.item, p = q.payout;
+    const tone = it ? CARD_TONE[it.status] ?? "sky" : "ink";
+    const tag = it ? (it.status === "needs_verification" ? "Held" : it.status === "awaiting_approval" ? "Ready" : "Missing details") : "Review";
+    const amt = it ? (it.fields.amount && it.fields.currency ? money(it.fields.amount, it.fields.currency) : "A question") : money(p.amount, p.currency);
+    const who = it ? it.fields.payeeName || sender(it.from) : p.payee;
+    const sub = it ? (it.status === "needs_verification" ? (it.payout?.reasons?.[0] ?? "Asks to pay new bank details") : it.status === "needs_details" ? `Missing ${it.missing.slice(0, 3).join(", ")}` : agentOf(it) ? `${agentOf(it)} forwarded it` : `From ${sender(it.from)}`) : "An agent's payout, waiting for review";
+    const c = h("button", { type: "button", class: `hc ${tone} k${Math.min(rank, 3)}`, "aria-label": `${tag}: ${amt} to ${who}. Opens it.`, tabindex: rank === 0 ? "0" : "-1" },
+      h("span", { class: "hc-row" }, h("span", { class: "hc-who" }, who), h("span", { class: "hc-tag" }, tag)),
+      h("span", { class: "hc-row end" }, h("span", {}, h("b", { class: "hc-amt" }, amt), h("span", { class: "hc-sub" }, sub)), h("span", { class: "hc-go", "aria-hidden": "true" }, icon("ext", 16))));
+    c._rank = rank;
+    let d = null, moved = false;
+    c.addEventListener("pointerdown", (e) => { if (rank !== 0) return; d = { x: e.clientX, y: e.clientY, dx: 0, live: false }; try { c.setPointerCapture(e.pointerId); } catch {} });
+    c.addEventListener("pointermove", (e) => {
+      if (!d) return;
+      d.dx = e.clientX - d.x;
+      if (!d.live && Math.abs(d.dx) > 6 && Math.abs(d.dx) > Math.abs(e.clientY - d.y)) d.live = true;
+      if (!d.live) return;
+      const pr = Math.min(Math.abs(d.dx) / 140, 1);
+      c.classList.add("drag"); c.style.transform = `translate(${d.dx}px, 32px) rotate(${(d.dx / 16).toFixed(2)}deg)`;
+      for (const o of el.children) {
+        if (o._rank === 1) { o.classList.add("drag"); o.style.transform = `translateY(${16 + 16 * pr}px) scale(${0.94 + 0.06 * pr})`; }
+        if (o._rank === 2) { o.classList.add("drag"); o.style.transform = `translateY(${16 * pr}px) scale(${0.88 + 0.06 * pr})`; }
+      }
+    });
+    const end = () => {
+      if (!d) return;
+      const was = d; d = null; moved = was.live;
+      for (const o of el.children) { o.classList.remove("drag"); o.style.transform = ""; }
+      if (was.live && Math.abs(was.dx) > 90 && len > 1) {
+        c.classList.add(was.dx > 0 ? "outR" : "out");
+        setTimeout(() => { hs.top += 1; hs.shifted = true; render(); }, 340);
+      }
+    };
+    c.addEventListener("pointerup", end);
+    c.addEventListener("pointercancel", end);
+    c.addEventListener("click", () => {
+      if (moved) { moved = false; return; }
+      if (rank > 0) { hs.top += rank; hs.shifted = true; render(); return; }
+      const rr = c.getBoundingClientRect();
+      hs.from = { t: rr.top, b: innerHeight - rr.bottom, x: rr.left, r: innerWidth - rr.right };
+      hs.open = q.key; render();
+    });
+    return c;
+  });
+  el.append(...cards.sort((a, b) => b._rank - a._rank));
+  return el;
+}
+
+/** An open card: its colour fills the screen (it grows out of the card you tapped). */
+function cardSheet(key, item, lead, body) {
+  const hs = state.home, tone = item ? CARD_TONE[item.status] ?? "sky" : "ink";
+  const grow = firstShow(`sheet:${key}:${item?.status ?? ""}`) && hs.from;
+  const close = () => { if (key === "said") Object.assign(state.say, { result: null, text: "", interim: "" }); hs.open = null; hs.from = null; render(); };
+  return h("div", { class: `osheet ${tone}${grow ? " grow" : ""}`, role: "dialog", "aria-label": item?.fields.payeeName ?? "Payment", style: grow ? `--t:${hs.from.t}px;--b:${hs.from.b}px;--x:${hs.from.x}px;--r:${hs.from.r}px` : "" },
+    h("header", { class: "sh-top" }, h("button", { class: "sh-icon", "aria-label": "Back", onclick: close }, icon("back", 22)), h("span", { class: "sh-mark" }, "sayso"), h("span", { style: "width:38px" })),
+    h("div", { class: "sheet-body sh-card" }, lead, body),
+  );
+}
+
+/** After the tap: green floods in, then "Paid." */
+function paidSheet(item) {
+  return h("div", { class: `osheet green${firstShow(`paid:${item.id}`) ? " flood" : ""}` },
+    h("header", { class: "sh-top" }, h("span", { class: "sh-mark" }, "sayso")),
+    h("div", { class: "sheet-body sh-card" }, paidCard(item)));
 }
 let orbDown = 0;
 const seenCards = new Set();
@@ -702,10 +783,10 @@ function itemCard(item, r) {
 function paidCard(item) {
   const p = item.payout, paid = p.status === "paid", failed = ["failed", "refunded", "refund_failed"].includes(p.status);
   return h("article", { class: "pcard paid" },
-    h("div", { class: `paid-mark${paid ? " ok" : failed ? " bad" : ""}` }, paid ? icon("check", 28) : failed ? icon("hand", 26) : h("i", { class: "spin" })),
-    h("b", { class: "paid-title" }, paid ? "Paid" : failed ? PAYOUT_PILL[p.status]?.[0] ?? "Bounced" : "Sending"),
-    h("div", { class: "muted" }, `${money(p.amount, p.currency)} to ${p.payee}`),
-    h("div", { class: "paid-actions" }, whyButton(p.id), h("button", { class: "btn quiet small", onclick: () => { state.lastPaid = null; render(); } }, "Done")),
+    h("div", { class: `paid-mark${paid ? " ok" : failed ? " bad" : ""}` }, paid ? icon("check", 34) : failed ? icon("hand", 30) : h("i", { class: "spin" })),
+    h("b", { class: "paid-title" }, paid ? "Paid." : failed ? PAYOUT_PILL[p.status]?.[0] ?? "Bounced" : "Sending…"),
+    h("div", { class: "paid-what" }, `${money(p.amount, p.currency)} ${paid ? "is on its way to" : "to"} ${p.payee}.`),
+    h("div", { class: "paid-actions" }, whyButton(p.id), h("button", { class: "btn pay wide", onclick: () => { state.lastPaid = null; render(); } }, "Done")),
     whyPanel(p.id),
   );
 }
@@ -992,7 +1073,7 @@ function bankLine(f, masked) {
 /** Approving keeps the payment on Home as a receipt that turns into "Paid". */
 function paidFrom(id) {
   state.recent.add(id);
-  if (state.tab === "home") { state.lastPaid = id; Object.assign(state.say, { result: null, text: "", interim: "" }); }
+  if (state.tab === "home") { state.lastPaid = id; state.home.open = null; Object.assign(state.say, { result: null, text: "", interim: "" }); }
 }
 
 function approveBlock(item) {

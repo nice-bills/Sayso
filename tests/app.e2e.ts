@@ -84,6 +84,8 @@ test('saying a payment shows what was heard and what was understood', async ({ a
 
 test('a lookalike asking for new bank details is checked with a 1-cent code', async ({ app, screen, browser }) => {
   await signIn(app, screen);
+  // Home's top card is the held one: tapping it opens it.
+  await screen.getByRole('button', 'Held: €340.00 to Kreuzberg Studio GmbH. Opens it.').tap();
   await screen.getByRole('button', 'Check with a 1-cent code').tap();
   const note = browser.locator('.alert.note').first();
   await expect(note).toContainText('billing@kreuzberg-studio.example');
