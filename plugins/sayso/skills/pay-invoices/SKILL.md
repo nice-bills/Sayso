@@ -20,4 +20,6 @@ You can't approve payments, and you shouldn't try another route to do it. If an 
 
 `list_invoices` shows what's waiting; in chat apps that support MCP Apps it shows as cards the owner swipes through.
 
-**Email goes through Sayso.** Sayso has its own address. Use `email_inbox`, `read_email`, `reply_email` and `send_email` for anything about an invoice instead of the owner's own email, so the thread stays in Sayso. You can only email people who already emailed Sayso or sent it an invoice. If sending says a code is needed, tell the owner to enter AgentMail's 6-digit code in Sayso under Agents. `quote_payout` prices a payout for free; its `pay_url` is for agents that pay from their own Metal wallet over x402.
+**Email goes through Sayso.** Sayso has its own address. Use `email_inbox`, `read_email`, `reply_email` and `send_email` for anything about an invoice instead of the owner's own email, so the thread stays in Sayso. You can only email people who already emailed Sayso or sent it an invoice. If sending says a code is needed, tell the owner to enter AgentMail's 6-digit code in Sayso under Agents.
+
+`quote_payout` prices a payout for free; its `pay_url` is for agents that pay from their own Metal wallet over x402.
