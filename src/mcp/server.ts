@@ -51,8 +51,17 @@ async function quote(i: Invoice, limits: { max_usdz?: string; spendable_usdz?: s
 }
 
 async function pay(id: string) {
-  const res = await payingFetch()(`${base}/v1/payouts/${id}/pay`, { method: "POST" });
-  return { http_status: res.status, ...((await res.json().catch(() => ({}))) as object) };
+  try {
+    const res = await payingFetch()(`${base}/v1/payouts/${id}/pay`, { method: "POST", signal: AbortSignal.timeout(90_000) });
+    return { http_status: res.status, ...((await res.json().catch(() => ({}))) as object) };
+  } catch (err) {
+    // A timeout is unconfirmed, not failed: the payment may have settled. Look it up before anyone pays again.
+    const status = await fetch(`${base}/v1/payouts/${id}`).then((r) => (r.ok ? (r.json() as Promise<{ status: string; funding_tx: string | null }>) : undefined)).catch(() => undefined);
+    const settled = status && !["quoted", "expired", "rejected", "needs_review"].includes(status.status);
+    return settled
+      ? { http_status: 200, unconfirmed_then_found: true, status: status.status, funding_tx: status.funding_tx }
+      : { http_status: 504, unconfirmed: true, error: `No answer from Sayso (${String(err).slice(0, 120)}). Check payout_status for ${id} before paying again; the same quote can't be paid twice.` };
+  }
 }
 
 const server = new McpServer({ name: "sayso", version: "0.1.0" });
