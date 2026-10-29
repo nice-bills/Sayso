@@ -989,17 +989,16 @@ const ACTIVE = ["needs_verification", "awaiting_approval", "needs_details"];
 function inboxView() {
   const active = state.inbox.filter((i) => ACTIVE.includes(i.status)).sort((a, b) => ACTIVE.indexOf(a.status) - ACTIVE.indexOf(b.status));
   const done = state.inbox.filter((i) => !ACTIVE.includes(i.status));
-  return h("div", {},
+  return h("div", { class: "page" },
     h("div", { class: "head" },
-      h("div", {}, h("h2", {}, "Inbox"), h("div", { class: "muted small" }, "Everything forwarded to Sayso, by email or by your agents. Nothing is paid until you tap.")),
-      h("button", { class: "btn", onclick: () => { state.showAdd = !state.showAdd; render(); } }, state.showAdd ? "Close" : [icon("plus", 16), "Add invoice"]),
+      h("div", {}, h("h2", {}, "Inbox"), h("div", { class: "muted small" }, "Forwarded by email or by your agents. Nothing is paid until you tap.")),
+      h("button", { class: "btn small add-btn", onclick: () => { state.showAdd = !state.showAdd; render(); } }, state.showAdd ? "Close" : [icon("plus", 16), "Add"]),
     ),
     state.showAdd ? addSheet() : null,
     h("div", { class: "list" },
       active.length ? active.map(invoiceCard) : h("div", { class: "empty" }, icon("check", 22), h("div", {}, "You're all caught up. Forward an invoice, or add one here.")),
-      done.length ? h("h3", { class: "section sub-section" }, "Done") : null,
-      done.map(invoiceCard),
     ),
+    done.length ? [h("h3", { class: "group" }, "Done", h("span", {}, done.length)), h("div", { class: "list rows" }, done.map(invoiceCard))] : null,
   );
 }
 
@@ -1041,26 +1040,42 @@ const INBOX_PILL = {
   rejected: ["Won't pay", "stop"], ignored: ["Ignored", ""], duplicate: ["Duplicate", ""],
 };
 
+// An invoice that needs you is a full card in its state's colour: who sent it, the amount, the
+// one thing to do. One that's finished folds to a line, like a payment; one still moving stays open.
 function invoiceCard(item) {
   const f = item.fields, p = item.payout;
   const known = f.amount && f.currency;
   const [label, tone] = item.status === "paying" && p ? PAYOUT_PILL[p.status] ?? [p.status, ""] : INBOX_PILL[item.status] ?? [item.status, ""];
   const done = !ACTIVE.includes(item.status);
+  const moving = item.status === "paying" && p && ["quoted", "accepted", "funded", "waiting", "submitted"].includes(p.status);
   const m = motion(`inv:${item.id}`, `${item.status}:${p?.status ?? ""}`);
-  return h("article", { class: `inv${done && item.status !== "paying" ? " done" : ""}${m.cls}`, style: m.style, "data-status": item.status },
-    h("div", { class: "meta" }, h("span", {}, agentOf(item) ? h("span", { class: "via" }, icon("bot", 14), `Forwarded by ${agentOf(item)}`) : sender(item.from)), h("span", {}, ago(item.receivedAt))),
-    h("div", { class: "line" },
-      h("div", { class: "what" }, known ? [h("span", { class: "amt" }, money(f.amount, f.currency)), " to ", f.payeeName ?? "someone"] : item.subject),
-      h("span", { class: `pill ${tone}` }, label),
-    ),
-    h("div", { class: "sub" }, [f.reference && `Ref ${f.reference}`, f.dueDate && `Due ${f.dueDate}`, bankLine(f, item.status !== "needs_verification")].filter(Boolean).map((x) => h("span", {}, x))),
+  const who = agentOf(item) ? h("span", { class: "via" }, icon("bot", 14), `Forwarded by ${agentOf(item)}`) : h("span", {}, sender(item.from));
+  const facts = [f.reference && `Ref ${f.reference}`, f.dueDate && `Due ${f.dueDate}`, bankLine(f, item.status !== "needs_verification")].filter(Boolean);
+  const sub = facts.length ? h("div", { class: "sub" }, facts.map((x) => h("span", {}, x))) : null;
+  if (done) {
+    const open = moving || state.rows.has(item.id) || state.recent.has(item.id);
+    const toggle = () => { state.rows.has(item.id) ? state.rows.delete(item.id) : state.rows.add(item.id); render(); };
+    return h("article", { class: `inv done row${open ? " open" : ""}${m.cls}`, style: m.style, "data-status": item.status },
+      h("button", { type: "button", class: "row-head", "aria-expanded": String(open), onclick: toggle },
+        h("span", { class: `rh-mark v-${p?.decision?.verdict ?? "none"}`, "aria-hidden": "true" }, agentOf(item) ? icon("bot", 18) : (f.payeeName ?? sender(item.from) ?? "?").trim().charAt(0).toUpperCase()),
+        h("span", { class: "rh-main" }, h("b", { class: "rh-who" }, known ? f.payeeName ?? "someone" : item.subject), h("span", { class: "rh-meta" }, [agentOf(item) ? `From ${agentOf(item)}` : null, f.reference, ago(item.receivedAt)].filter(Boolean).map((x) => h("span", {}, x)))),
+        h("span", { class: "rh-end" }, known ? h("span", { class: "amt" }, money(f.amount, f.currency)) : null, h("span", { class: `pill ${tone}` }, label))),
+      open ? h("div", { class: "row-body" },
+        sub,
+        item.status === "paying" && p ? [p.status === "paid" ? null : timeline(p, true), failure(p), whyButton(p.id), whyPanel(p.id)] : null,
+        item.status === "rejected" && p?.reasons?.length ? h("div", { class: "alert" }, h("b", {}, "Sayso won't pay this: "), p.reasons.join("; ")) : null,
+        item.status === "duplicate" ? h("div", { class: "note-line" }, "This matches an invoice already in your inbox, so it wasn't queued again.") : null,
+      ) : null,
+    );
+  }
+  return h("article", { class: `inv${m.cls}`, style: m.style, "data-status": item.status },
+    h("div", { class: "meta" }, h("span", { class: "meta-who" }, agentOf(item) || sender(item.from) !== f.payeeName ? who : null, h("span", { class: "meta-when" }, ago(item.receivedAt))), h("span", { class: `pill ${tone}` }, label)),
+    h("div", { class: "what" }, known ? [h("span", { class: "amt" }, money(f.amount, f.currency)), h("span", { class: "to" }, "to ", f.payeeName ?? "someone")] : item.subject),
+    sub,
     item.status === "awaiting_approval" ? approveBlock(item) : null,
     item.status === "needs_verification" ? verifyBlock(item) : null,
     item.status === "needs_details" ? (state.open[item.id] ? detailsBlock(item)
-      : [h("div", { class: "sub" }, `Sayso couldn't find the ${item.missing.join(", ")}.`), h("div", { class: "actions" }, h("button", { class: "btn", onclick: () => { state.open[item.id] = true; render(); } }, "Add missing details"), ignoreButton(item))]) : null,
-    item.status === "paying" && p ? [p.status === "paid" ? null : timeline(p, true), failure(p), whyButton(p.id), whyPanel(p.id)] : null,
-    item.status === "rejected" && p?.reasons?.length ? h("div", { class: "alert" }, h("b", {}, "Sayso won't pay this: "), p.reasons.join("; ")) : null,
-    item.status === "duplicate" ? h("div", { class: "sub" }, "This matches an invoice already in your inbox, so it wasn't queued again.") : null,
+      : [h("div", { class: "note-line" }, `Sayso couldn't find the ${item.missing.join(", ")}.`), h("div", { class: "actions" }, h("button", { class: "btn pay", onclick: () => { state.open[item.id] = true; render(); } }, "Add missing details"), ignoreButton(item))]) : null,
   );
 }
 
@@ -1254,16 +1269,19 @@ function payoutRow(p, opts = {}) {
   const v = p.decision?.verdict;
   const toggle = () => { state.rows.has(p.id) ? state.rows.delete(p.id) : state.rows.add(p.id); render(); };
   const head = [
-    h("span", { class: "rh-top" }, h("b", { class: "rh-who" }, p.payee), h("span", { class: "amt" }, money(p.amount, p.currency))),
-    h("span", { class: "rh-sub" },
+    h("span", { class: `rh-mark v-${v ?? "none"}`, "aria-hidden": "true" }, from === "Agent" ? icon("bot", 18) : (p.payee || "?").trim().charAt(0).toUpperCase()),
+    h("span", { class: "rh-main" },
+      h("b", { class: "rh-who" }, p.payee),
       h("span", { class: "rh-meta" },
         v ? h("span", { class: `rh-v v-${v}` }, VERDICT[v]) : null,
-        [from, p.created_at && ago(p.created_at)].filter(Boolean).map((x) => h("span", {}, x))),
+        [from, p.created_at && ago(p.created_at)].filter(Boolean).map((x) => h("span", {}, x)))),
+    h("span", { class: "rh-end" },
+      h("span", { class: "amt" }, money(p.amount, p.currency)),
       h("span", { class: `pill ${tone}` }, label)),
   ];
   return h("article", { class: `row${open ? " open" : ""}${m.cls}`, style: m.style, "data-status": p.status },
     opts.open || needsYou ? h("div", { class: "row-head" }, head)
-      : h("button", { type: "button", class: "row-head", "aria-expanded": String(open), onclick: toggle }, head, h("span", { class: "rh-chev", "aria-hidden": "true" })),
+      : h("button", { type: "button", class: "row-head", "aria-expanded": String(open), onclick: toggle }, head),
     open ? h("div", { class: "row-body" },
       p.reference ? h("div", { class: "rb-ref" }, "Reference ", h("b", {}, p.reference)) : null,
       decisionCard(p),
@@ -1317,14 +1335,19 @@ function paymentsView() {
   const moving = all.filter((p) => ["accepted", "funded", "submitted"].includes(p.status));
   const bounced = all.filter((p) => ["failed", "refunded", "refund_failed"].includes(p.status));
   const rec = state.summary?.reconcile;
+  const waitsForYou = (p) => ["quoted", "needs_review"].includes(p.status) && (linked.has(p.id) || p.status === "needs_review");
+  const needs = shown.filter(waitsForYou), rest = shown.filter((p) => !waitsForYou(p));
   const stat = (n, label, tone) => h("div", { class: `stat ${tone}` }, h("b", {}, n), h("span", {}, label));
-  return h("div", { class: "pay-page" },
+  return h("div", { class: "page" },
     h("div", { class: "head" }, h("div", {}, h("h2", {}, "Payments"),
       h("div", { class: "muted small" }, rec ? (rec.ok ? "Books reconcile to the cent." : "Books don't reconcile. Check the back office.") : "Every payout, from agents and from your inbox."))),
     h("div", { class: "stats" }, stat(delivered.length, "Delivered", "go"), stat(moving.length, "On the way", ""), stat(bounced.length, "Bounced", bounced.length ? "stop" : "")),
     delivered.length ? h("p", { class: "stats-note" }, `${byCcy(delivered)} delivered so far.`) : null,
     h("div", { class: "filters", role: "group", "aria-label": "Show" }, filters.map(([id, label]) => h("button", { class: "chip", "aria-pressed": String(state.filter === id), onclick: () => { state.filter = id; render(); } }, label))),
-    h("div", { class: "list rows" }, shown.length ? shown.map((p) => payoutRow(p)) : h("div", { class: "empty" }, icon("payments", 22), h("div", {}, "Nothing here yet."))),
+    shown.length ? [
+      needs.length ? [h("h3", { class: "group" }, "Needs you", h("span", {}, needs.length)), h("div", { class: "list rows" }, needs.map((p) => payoutRow(p)))] : null,
+      rest.length ? [needs.length ? h("h3", { class: "group" }, "Earlier") : null, h("div", { class: "list rows" }, rest.map((p) => payoutRow(p)))] : null,
+    ] : h("div", { class: "empty" }, icon("payments", 22), h("div", {}, "Nothing here yet.")),
     h("details", { class: "happening" }, h("summary", {}, "What's happening, step by step"), activityFeed()),
   );
 }
@@ -1340,7 +1363,7 @@ function agentsView() {
   const origin = location.origin;
   const mcp = `claude mcp add sayso \\\n  -e SAYSO_URL=${origin} \\\n  -e SAYSO_BUYER_KEY=0x… \\\n  -e SAYSO_MAX_USDZ=500 \\\n  -- npx tsx src/mcp/server.ts`;
   const curl = `curl -X POST ${origin}/v1/quotes \\\n  -H 'content-type: application/json' \\\n  -d '{"amount":"180.00","currency":"EUR","reference":"Oct",\n       "payee":{"name":"Lingua Freelance","bank":{"iban":"FR14…"},\n       "bank_country_code":"FR","address":{"country_code":"FR","city":"Paris"}}}'`;
-  return h("div", {},
+  return h("div", { class: "page agents-page" },
     h("div", { class: "head" }, h("h2", {}, "Agents")),
     mailboxBox(),
     escrowBox(),
