@@ -40,4 +40,11 @@ describe("sweepEpoch", () => {
     expect(dup.sweep.reason).toMatch(/UNIQUE/);
     expect(calls()).toBe(1);
   });
+
+  it("gives the Airwallex deposit the Metal transaction hash as its reference", async () => {
+    const refs: Array<string | undefined> = [];
+    const awx: AirwallexCredit = { credit: async (_op, _amt, _ccy, reference) => { refs.push(reference); return { depositId: "dep_1" }; } };
+    await sweepEpoch({ epoch: "e-ref", amountMinor: 100, currency: "USD" }, new RampLedger(":memory:"), verifier("63825:0xfeed:3"), awx);
+    expect(refs).toEqual(["0xfeed"]);
+  });
 });

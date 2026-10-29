@@ -19,7 +19,8 @@ export interface MetalSettlementVerifier {
 
 /** Credits the Airwallex side. Must be safe to call once per operation id. */
 export interface AirwallexCredit {
-  credit(operationId: string, amountMinor: number, currency: string): Promise<{ depositId: string }>;
+  /** `reference` is the Metal transaction hash of the sweep, so the deposit points at what funded it. */
+  credit(operationId: string, amountMinor: number, currency: string, reference?: string): Promise<{ depositId: string }>;
 }
 
 export type SweepOutcome =
@@ -43,7 +44,9 @@ export async function sweepEpoch(e: SettledEarnings, ledger: RampLedger, metal: 
     }
   }
 
-  const { depositId } = await awx.credit(op.operationId, op.amountMinor, op.currency);
+  const eventKey = ledger.get(op.operationId)?.eventKey ?? undefined;
+  // The event key is `${chainId}:${txHash}:${logIndex}`; the deposit carries the hash.
+  const { depositId } = await awx.credit(op.operationId, op.amountMinor, op.currency, eventKey?.split(":").at(1) ?? eventKey);
   ledger.markCredited(op.operationId, depositId);
   return { outcome: "credited", sweep: ledger.get(op.operationId)! };
 }

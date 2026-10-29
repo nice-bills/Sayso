@@ -179,8 +179,9 @@ export class Airwallex {
   issuingTransactions = (query: Record<string, string> = {}) => this.call<{ items: unknown[] }>("GET", "/issuing/transactions", undefined, query);
 
   // --- Sandbox simulation (kept behind this client so live paths replace them one by one) ---
-  simulateDeposit = (globalAccountId: string, amount: number, payerName: string) =>
-    this.call<{ id: string; status: string }>("POST", "/simulation/deposit/create", { global_account_id: globalAccountId, amount, payer_name: payerName });
+  /** `reference` carries the Metal hash of the sweep that funded it, as the builder guide's Kit 11 asks. */
+  simulateDeposit = (globalAccountId: string, amount: number, payerName: string, reference?: string) =>
+    this.call<{ id: string; status: string }>("POST", "/simulation/deposit/create", { global_account_id: globalAccountId, amount, payer_name: payerName, ...(reference ? { reference } : {}) });
   simulateTransfer = (transferId: string, body: { next_status: string; failure_type?: string }) =>
     this.call<Transfer>("POST", `/simulation/transfers/${transferId}/transition`, body);
   /** A merchant charges the card; Airwallex's authorization controls decide APPROVED or DECLINED. */
