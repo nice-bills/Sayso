@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { describe, expect, it } from "vitest";
 import { buildSayso } from "../src/app.js";
-import { fakeLandlord, studioInvoice } from "../samples/invoices.js";
+import { fakeLandlord, studioInvoice, vagueEmail } from "../samples/invoices.js";
 
 async function setup() {
   const cs = await buildSayso({ offline: true });
@@ -28,7 +28,7 @@ describe("hosted MCP endpoint", () => {
       const { key } = cs.keys.create("Phone assistant", null);
       const agent = await connect(key);
       const tools = (await agent.listTools()).tools.map((t) => t.name).sort();
-      expect(tools).toEqual(["forward_invoice", "list_invoices", "payout_status", "quote_payout"]);
+      expect(tools).toEqual(["ask_for_details", "email_inbox", "forward_invoice", "list_invoices", "payout_status", "quote_payout", "read_email", "reply_email", "send_email"]);
       expect(tools.some((t) => /approve/.test(t))).toBe(false); // no tool can approve
 
       // Chat apps that support MCP Apps draw the inbox as cards (the view can't approve either).
@@ -75,7 +75,7 @@ describe("hosted MCP endpoint", () => {
       const viaUrl = cs.keys.create("Chat app", null);
       const c = new Client({ name: "url-agent", version: "1.0.0" });
       await c.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp/k/${viaUrl.key}`)));
-      expect((await c.listTools()).tools).toHaveLength(4);
+      expect((await c.listTools()).tools).toHaveLength(9);
       await c.close();
       const small = cs.keys.create("Tiny budget", 5000); // $50
       const agent = await connect(small.key);
@@ -85,6 +85,35 @@ describe("hosted MCP endpoint", () => {
       await agent.close();
       cs.keys.revoke(small.agent.id);
       await expect(connect(small.key)).rejects.toThrow();
+    } finally {
+      server.close();
+    }
+  });
+
+  it("lets an agent email through Sayso's own address, but only people who wrote in", async () => {
+    const { cs, server, connect, call } = await setup();
+    try {
+      const agent = await connect(cs.keys.create("Claude", null).key);
+      const vague = await call(agent, "forward_invoice", { text: vagueEmail.body, from: vagueEmail.from, subject: vagueEmail.subject });
+      expect(vague.body.status).toBe("needs_details");
+
+      const asked = await call(agent, "ask_for_details", { invoice_id: vague.body.invoice_id });
+      expect(asked.error).toBe(false);
+      expect(asked.body).toMatchObject({ sent_to: "someone@someone.example", from: "sayso-demo@agentmail.to" });
+      const box = await call(agent, "email_inbox", {});
+      expect(box.body.address).toBe("sayso-demo@agentmail.to");
+      expect(box.body.messages[0]).toMatchObject({ to: ["someone@someone.example"] });
+      expect((await call(agent, "read_email", { message_id: box.body.messages[0].message_id })).body.text).toMatch(/payee name/);
+
+      // A stranger can't be emailed from the business's address; someone who wrote in can.
+      const stranger = await call(agent, "send_email", { to: "victim@elsewhere.example", subject: "Hi", text: "Pay me" });
+      expect(stranger.error).toBe(true);
+      expect(stranger.body.error).toMatch(/only emails people/);
+      expect((await call(agent, "send_email", { to: "someone@someone.example", subject: "Following up", text: "Any news?" })).error).toBe(false);
+      // Only invoices that are missing something get asked.
+      const ok = await call(agent, "forward_invoice", { text: studioInvoice.body, from: studioInvoice.from });
+      expect((await call(agent, "ask_for_details", { invoice_id: ok.body.invoice_id })).body.error).toMatch(/isn't missing/);
+      await agent.close();
     } finally {
       server.close();
     }

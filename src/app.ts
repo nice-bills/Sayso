@@ -27,7 +27,8 @@ import { Inbox } from "./inbox/inbox.js";
 import { say } from "./inbox/say.js";
 import { last4, PennyChecks } from "./inbox/penny.js";
 import { imapFromEnv, pollImap } from "./inbox/imap.js";
-import { AgentMailPoller, agentMailRouter, agentMailSenderFromEnv } from "./inbox/agentmail.js";
+import { AgentMailPoller, agentMailRouter } from "./inbox/agentmail.js";
+import { MailError, Mailbox } from "./inbox/mailbox.js";
 import { ChainEarnings, type EarningsSource } from "./metal/earnings.js";
 import { MandateRefunder, MandateSweepVerifier, MetalMandate, type PullResult } from "./metal/mandate.js";
 import { ChainMandateChecker, describeMandate, mandatePolicy, SimMandates } from "./metal/agent-mandate.js";
@@ -63,6 +64,8 @@ export const SIM_PAY_TO = "0x5a7505a7505a7505a7505a7505a7505a7505a75";
 
 export interface Sayso {
   offline: boolean;
+  /** Sayso's own email address. */
+  mailbox: Mailbox;
   app: express.Express;
   svc: PayoutService;
   inbox: Inbox;
@@ -190,13 +193,18 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   }
 
   const imap = imapFromEnv();
+  // Sayso's own email address: made on first start if there isn't one, so nobody sets one up.
+  const mailbox = new Mailbox(store, { offline: opts.offline, ownerEmail: process.env.OWNER_EMAIL?.trim().toLowerCase() || undefined });
+  if (!opts.offline) await mailbox.ensure().catch((e) => emit("escalate", `Couldn't make Sayso's email address: ${String(e).slice(0, 200)}`));
   // Without a public URL for the webhook, the AgentMail inbox is polled instead.
-  const agentMail = opts.offline || process.env.AGENTMAIL_WEBHOOK_SECRET ? undefined : AgentMailPoller.fromEnv();
+  let agentMail: AgentMailPoller | undefined;
   async function tick() {
     await sweep().catch((e) => emit("escalate", `Sweep failed: ${String(e).slice(0, 200)}`));
     await svc.follow().catch((e) => emit("escalate", `Following payouts failed: ${String(e).slice(0, 200)}`));
     await receipts.retry();
     if (imap) await pollImap(imap, inbox);
+    const mc = opts.offline || process.env.AGENTMAIL_WEBHOOK_SECRET ? undefined : mailbox.credentials();
+    if (mc) agentMail ??= new AgentMailPoller(mc.apiKey, mc.inboxId);
     if (agentMail) await agentMail.poll((e) => inbox.receive(e)).catch((e) => emit("escalate", `AgentMail poll failed: ${String(e).slice(0, 200)}`));
     lastBalances = await balances().catch(() => lastBalances);
   }
@@ -261,7 +269,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   // The one-cent code check: the payee's side, reached from the email sent to the contact on file.
   // Plain HTML forms, no script, so it works in any mail app's browser.
-  const penny = new PennyChecks({ store, svc, inbox, awx, send: opts.offline ? undefined : agentMailSenderFromEnv(), publicUrl: process.env.PUBLIC_URL, offline: opts.offline });
+  const penny = new PennyChecks({ store, svc, inbox, awx, send: mailbox.sender(), publicUrl: process.env.PUBLIC_URL, offline: opts.offline });
   const pennyPage = (res: express.Response, status: number, body: string) => {
     res.setHeader("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
     res.status(status).type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sayso: confirm your bank details</title>
@@ -284,7 +292,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   });
 
   // Everything below moves the business's money or shows its payees, so it needs the owner.
-  const auth = createAuth({ offline: opts.offline, log: (l) => emit("observe", l), store, send: opts.offline ? undefined : agentMailSenderFromEnv() });
+  const auth = createAuth({ offline: opts.offline, log: (l) => emit("observe", l), store, send: mailbox.sender() });
   app.use(auth.router);
 
   // Agents connect over the hosted MCP endpoint, with a key the owner makes here or by signing
@@ -292,7 +300,12 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const keys = new AgentKeys(store);
   app.use(authMdRouter({ store, keys, auth }));
   const notify = notifierFromEnv();
-  app.use(hostedMcpRouter({ svc, inbox, keys, notify }));
+  app.use(hostedMcpRouter({ svc, inbox, keys, notify, mailbox }));
+  // Sayso's email: its address, and the owner's one-time AgentMail code that lets it email people.
+  app.get("/v1/mailbox", auth.requireOwner, (_req, res) => res.json(mailbox.status()));
+  app.post("/v1/mailbox/verify", auth.requireOwner, express.json(), async (req, res) => {
+    try { res.json(await mailbox.verify(String(req.body?.code ?? ""))); } catch (err) { res.status(err instanceof MailError ? 400 : 502).json({ error: err instanceof Error ? err.message : "failed" }); }
+  });
   app.get("/v1/agents", auth.requireOwner, (_req, res) => res.json(keys.list()));
   app.post("/v1/agents", auth.requireOwner, express.json(), (req, res) => {
     const name = String(req.body?.name ?? "").trim();
@@ -411,5 +424,5 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     });
   };
 
-  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances, ownerToken: auth.ownerToken, keys, card, cardReady, treasury, trail, receipts, simMandates };
+  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances, ownerToken: auth.ownerToken, keys, mailbox, card, cardReady, treasury, trail, receipts, simMandates };
 }

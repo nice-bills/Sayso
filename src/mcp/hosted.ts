@@ -16,9 +16,10 @@ import type { Inbox, InboxItem } from "../inbox/inbox.js";
 import type { Notifier } from "../notify.js";
 import { PayoutError, publicView, type PayoutService } from "../payouts/service.js";
 import { toMinor } from "../treasury/money.js";
+import { MailError, type Mailbox } from "../inbox/mailbox.js";
 import { invoiceShape, toRequest, type Invoice } from "./tools.js";
 
-export interface HostedDeps { svc: PayoutService; inbox: Inbox; keys: AgentKeys; notify: Notifier }
+export interface HostedDeps { svc: PayoutService; inbox: Inbox; keys: AgentKeys; notify: Notifier; mailbox?: Mailbox }
 
 const text = (o: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(o, null, 2) }] });
 const fail = (message: string) => ({ ...text({ error: message }), isError: true });
@@ -69,6 +70,38 @@ export function cardOf(item: Listed, base: string) {
 }
 const cards = (d: HostedDeps, base: string, include_done?: boolean) =>
   d.inbox.list().filter((i) => include_done || pending.includes(i.status)).slice(0, 50).map((i) => cardOf(i, base));
+
+// Emails an agent may send through Sayso's address in a day, so a runaway agent can't spam from it.
+const EMAILS_PER_DAY = 20;
+const sentToday = new Map<string, { day: string; n: number }>();
+function spend(agent: AgentKey): boolean {
+  const day = new Date().toISOString().slice(0, 10), s = sentToday.get(agent.id);
+  if (!s || s.day !== day) { sentToday.set(agent.id, { day, n: 1 }); return true; }
+  return s.n < EMAILS_PER_DAY ? (s.n++, true) : false;
+}
+const emailOf = (from: string) => from.match(/<([^>]+)>/)?.[1]?.trim() ?? (/^[^\s@]+@[^\s@]+$/.test(from.trim()) ? from.trim() : null);
+
+/** Asks whoever sent an invoice for what it's missing, from Sayso's address, in the same thread when it came by email. */
+async function askForDetails(d: HostedDeps, agent: AgentKey, invoiceId: string, note?: string) {
+  const mb = d.mailbox;
+  if (!mb) return { error: "Sayso has no email set up." };
+  const item = d.inbox.list().find((i) => i.id === invoiceId);
+  if (!item) return { error: "No such invoice." };
+  if (item.status !== "needs_details") return { error: "That invoice isn't missing anything." };
+  const to = emailOf(item.from);
+  if (!to) return { error: `Sayso doesn't have an email address for ${item.from}.` };
+  if (!spend(agent)) return { error: `This agent has sent its ${EMAILS_PER_DAY} emails for today.` };
+  const about = item.subject && !/^Forwarded by/.test(item.subject) ? ` ("${item.subject}")` : "";
+  const text = `Hello,\n\nThanks for your invoice${about}. Before we can pay it, we need: ${item.missing.join(", ")}.${note ? `\n\n${note}` : ""}\n\nReply to this email with those details and we'll take it from there.\n\nThanks`;
+  try {
+    const original = await mb.get(item.id).catch(() => undefined);
+    const r = original ? await mb.reply(item.id, text) : await mb.send(to, about ? `Re: ${item.subject}` : "About your invoice", text);
+    emit("observe", `${agent.name} asked ${to} for the missing ${item.missing.join(", ")}`);
+    return { sent_to: to, from: mb.status().address, message_id: r.message_id, thread_id: r.thread_id, next: "Their reply comes back to Sayso's inbox and shows up as an invoice again." };
+  } catch (err) {
+    return { error: err instanceof MailError ? err.message : "Sending failed." };
+  }
+}
 
 const overCap = (agent: AgentKey, priceUsdz: string) => agent.capMinor !== null && toMinor(Number(priceUsdz)) > agent.capMinor;
 const pending = ["awaiting_approval", "needs_verification", "needs_details", "paying"];
@@ -121,6 +154,60 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
       _meta: { ui: { prefersBorder: false, csp: { resourceDomains: ["https://fonts.googleapis.com", "https://fonts.gstatic.com"] } } },
     }],
   }));
+
+  if (d.mailbox) {
+    const mb = d.mailbox;
+    const senders = () => d.inbox.list().map((i) => i.from);
+    const mailFail = (err: unknown) => fail(err instanceof MailError ? err.message : "email failed");
+
+    server.registerTool("ask_for_details", {
+      description: "Email whoever sent an invoice that's missing details (payee, amount, bank account) and ask for them, from Sayso's own address. Their reply comes back into Sayso. Use this rather than your own email.",
+      _meta: { ui: { resourceUri: VIEW_URI, visibility: ["model", "app"] } },
+      inputSchema: { invoice_id: z.string(), note: z.string().max(1000).optional().describe("Anything to add, in plain words") },
+    }, async ({ invoice_id, note }) => {
+      const r = await askForDetails(d, agent, invoice_id, note);
+      return "error" in r ? fail(r.error ?? "failed") : text(r);
+    });
+
+    server.registerTool("email_inbox", {
+      description: "Sayso's own email address and the newest emails in it: invoices, suppliers' replies, and what Sayso sent. Use it to see if a supplier answered.",
+      inputSchema: { limit: z.number().int().min(1).max(50).optional() },
+    }, async ({ limit }) => {
+      try { return text({ ...mb.status(), messages: await mb.list(limit ?? 20) }); } catch (err) { return mailFail(err); }
+    });
+
+    server.registerTool("read_email", {
+      description: "One email in Sayso's inbox, with its full text.",
+      inputSchema: { message_id: z.string() },
+    }, async ({ message_id }) => {
+      try { const m = await mb.get(message_id); return m ? text(m) : fail("no such email"); } catch (err) { return mailFail(err); }
+    });
+
+    server.registerTool("send_email", {
+      description: "Send an email from Sayso's own address, so you don't need another email account. Only to people who already emailed Sayso or sent it an invoice; to answer an email, use reply_email so it stays in the thread.",
+      inputSchema: { to: z.string().email(), subject: z.string().min(1).max(200), text: z.string().min(1).max(10_000) },
+    }, async ({ to, subject, text: body }) => {
+      try {
+        if (!(await mb.knows(to, senders()))) return fail(`Sayso only emails people who have emailed it or sent an invoice in, and ${to} hasn't.`);
+        if (!spend(agent)) return fail(`This agent has sent its ${EMAILS_PER_DAY} emails for today.`);
+        const r = await mb.send(to, subject, body);
+        emit("observe", `${agent.name} emailed ${to} from Sayso: "${subject}"`);
+        return text({ ...r, from: mb.status().address });
+      } catch (err) { return mailFail(err); }
+    });
+
+    server.registerTool("reply_email", {
+      description: "Reply to an email in Sayso's inbox, from Sayso's address, in the same thread.",
+      inputSchema: { message_id: z.string(), text: z.string().min(1).max(10_000) },
+    }, async ({ message_id, text: body }) => {
+      try {
+        if (!spend(agent)) return fail(`This agent has sent its ${EMAILS_PER_DAY} emails for today.`);
+        const r = await mb.reply(message_id, body);
+        emit("observe", `${agent.name} replied from Sayso to email ${message_id.slice(0, 40)}`);
+        return text({ ...r, from: mb.status().address });
+      } catch (err) { return mailFail(err); }
+    });
+  }
 
   server.registerTool("quote_payout", {
     description: "Price a payout in local currency, for free. Returns the USDZ price and a pay_url an x402-capable agent can pay from its own Metal wallet, or why Sayso won't pay it as asked.",

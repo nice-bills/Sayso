@@ -28,12 +28,14 @@ Sayso doesn't run a chat bot; you bring your own assistant (OpenClaw, Poke, or a
 
 If the invoice changes bank details or pushes urgency, the reply says so, and Pay stays locked until you confirm you phoned the payee.
 
-## An email address for invoices (AgentMail)
+## Sayso's own email address (AgentMail)
 
-1. Sign up at agentmail.to (the free plan is enough) and create an inbox, e.g. `pay-yourcompany@agentmail.to`.
-2. Add a webhook for `message.received` pointing at `https://YOUR-HOST/webhooks/agentmail`, limited to that inbox.
-3. Put the webhook's secret (`whsec_...`) in `AGENTMAIL_WEBHOOK_SECRET` and the inbox id in `AGENTMAIL_INBOX_ID`.
+Sayso makes its own email address the first time it starts, with no AgentMail account: something like `sayso-1a2b3c4d@agentmail.to`. You can see it in the app under **Agents**.
 
-No public URL yet? Skip the webhook: set `AGENTMAIL_API_KEY` and `AGENTMAIL_INBOX_ID` and Sayso polls the inbox on every tick. An agent can create a receive-only inbox without the console: `POST https://api.agentmail.to/v0/agent/sign-up` with `{"username": "..."}` returns the inbox and its key.
+- **Invoices:** suppliers, or you, forward invoices to that address. Each one shows up in the app within seconds, and your phone gets a push if `NTFY_TOPIC` is set.
+- **Agents send through it:** Claude, ChatGPT and other connected agents get `ask_for_details`, `send_email`, `reply_email`, `email_inbox` and `read_email`. They can chase a supplier for a missing bank account, or reply in a thread, without you connecting another email account. Replies come back into Sayso. An agent can only email people who have already emailed Sayso or sent it an invoice, and it can send at most 20 emails a day.
+- **One step to send:** AgentMail lets a new address receive straight away, but it can only email other people once a human confirms. With `OWNER_EMAIL` set, AgentMail emails you a 6-digit code. Enter it under **Agents, Sayso's email**. Until then Sayso still receives invoices, and sending says what's missing.
 
-Suppliers, or you, forward invoices to that address. Each one shows up in the app within seconds, and your phone gets a push if `NTFY_TOPIC` is set. Signatures are checked, and retries never queue an invoice twice. Gmail over IMAP (`INBOX_IMAP_*`) still works if you'd rather use it.
+Already have an AgentMail inbox? Set `AGENTMAIL_API_KEY` and `AGENTMAIL_INBOX_ID` and Sayso uses it instead. If you'd rather not have Sayso make an address, set `AGENTMAIL_AUTO=off`. Sayso polls the inbox on every tick. For instant delivery, add a `message.received` webhook pointing at `https://YOUR-HOST/webhooks/agentmail` and put its secret (`whsec_...`) in `AGENTMAIL_WEBHOOK_SECRET`.
+
+Webhook signatures are checked, and retries never queue an invoice twice. Gmail over IMAP (`INBOX_IMAP_*`) still works if you'd rather use it.

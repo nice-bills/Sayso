@@ -326,7 +326,10 @@ function renderCard(it, keep) {
   } else {
     root.append(h("p", { class: "sent blur d1" }, ["They sent this without ", it.missing.map(function (m, i) { return [chip(m, i + 1), i < it.missing.length - 2 ? ", " : i === it.missing.length - 2 ? " and " : ""]; }), ". Sayso can't pay it yet."].flat(2)));
     root.append(h("div", { class: "fill" }));
-    if (S.asked[it.id]) root.append(h("div", { class: "wait in" }, [h("b", {}, "Asked. "), "I'll bring it back when they reply."]));
+    var a = S.asked[it.id];
+    if (a && a.sending) root.append(h("div", { class: "wait in" }, ["Emailing them", h("span", { class: "pulse" }), h("span", { class: "pulse e2" }), h("span", { class: "pulse e3" })]));
+    else if (a && a.to) root.append(h("div", { class: "wait in" }, [h("b", {}, "Emailed " + a.to + ". "), "It went from Sayso's address" + (a.from ? " (" + a.from + ")" : "") + ", so their reply comes straight back here."]));
+    else if (a && a.error) root.append(h("div", {}, [h("div", { class: "wait in" }, a.error), h("button", { class: "btn in d1", style: "margin-top:12px;width:100%;background:#15191e;color:#ffffff", onclick: function () { askFor(it); } }, "Try again")]));
     else root.append(h("button", { class: "btn in d3", style: "background:#15191e;color:#ffffff", onclick: function () { askFor(it); } }, "Ask them for the details"));
   }
 }
@@ -393,8 +396,15 @@ function openLink(url) {
   request("ui/open-link", { url: url }).catch(function () { window.open(url, "_blank", "noopener"); });
 }
 function askFor(it) {
-  S.asked[it.id] = true; render();
-  request("ui/message", { role: "user", content: [{ type: "text", text: "Please ask " + it.from + " for the " + it.missing.join(", ") + " that their invoice (" + (it.subject || it.id) + ") is missing, then forward it to Sayso again." }] }).catch(function () {});
+  S.asked[it.id] = { sending: true }; render();
+  request("tools/call", { name: "ask_for_details", arguments: { invoice_id: it.id } }).then(function (r) {
+    var body = {};
+    try { body = JSON.parse(r.content[0].text); } catch (e) {}
+    if (r.isError) throw new Error(body.error || "Sending failed.");
+    S.asked[it.id] = { to: body.sent_to, from: body.from }; render();
+  }).catch(function (err) {
+    S.asked[it.id] = { error: err.message }; render();
+  });
 }
 
 // ---- Size and start-up ----

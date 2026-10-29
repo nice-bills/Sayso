@@ -119,9 +119,9 @@ async function confirmWith(purpose, subject) {
 const approveInvoice = async (id, extra = {}) => api(`/v1/inbox/${encodeURIComponent(id)}/approve`, { ...extra, confirmation: await confirmWith("approve", id) });
 
 async function load() {
-  const [inbox, payouts, summary, agents] = await Promise.all([api("/v1/inbox"), api("/v1/payouts"), api("/v1/summary"), api("/v1/agents")]);
-  const changed = JSON.stringify([inbox, payouts, summary, agents]) !== JSON.stringify([state.inbox, state.payouts, state.summary, state.agents]);
-  Object.assign(state, { inbox, payouts, summary, agents, signedIn: true });
+  const [inbox, payouts, summary, agents, mailbox] = await Promise.all([api("/v1/inbox"), api("/v1/payouts"), api("/v1/summary"), api("/v1/agents"), api("/v1/mailbox").catch(() => null)]);
+  const changed = JSON.stringify([inbox, payouts, summary, agents, mailbox]) !== JSON.stringify([state.inbox, state.payouts, state.summary, state.agents, state.mailbox]);
+  Object.assign(state, { inbox, payouts, summary, agents, mailbox, signedIn: true });
   if (changed) render();
 }
 
@@ -1135,6 +1135,7 @@ function agentsView() {
   const curl = `curl -X POST ${origin}/v1/quotes \\\n  -H 'content-type: application/json' \\\n  -d '{"amount":"180.00","currency":"EUR","reference":"Oct",\n       "payee":{"name":"Lingua Freelance","bank":{"iban":"FR14…"},\n       "bank_country_code":"FR","address":{"country_code":"FR","city":"Paris"}}}'`;
   return h("div", {},
     h("div", { class: "head" }, h("h2", {}, "Agents")),
+    mailboxBox(),
     escrowBox(),
     agentPays.length ? [h("h3", { class: "section" }, "Recent agent payouts"), h("div", { class: "list" }, agentPays.slice(0, 10).map(payoutRow))] : null,
     connectAgents(origin),
@@ -1146,6 +1147,24 @@ function agentsView() {
       snippet("The owner binds a budget, then the agent uses it", `SAYSO_PAY_TO=${state.summary?.pay_to ?? "<pay_to from /healthz>"} npm run setup:agent-budget -- --cap 250 --budget 1000 --days 30\n\nclaude mcp add sayso -e SAYSO_URL=${origin} \\\n  -e SAYSO_MANDATE=.metal/agent-budget.json -- npx tsx src/mcp/server.ts`),
       snippet("Or call the API", curl),
     ),
+  );
+}
+// Sayso's own email address: invoices go to it, and agents send from it, so nobody sets up email.
+function mailboxBox() {
+  const m = state.mailbox;
+  if (!m?.address) return null;
+  const verify = (e) => {
+    e.preventDefault();
+    act("mailcode", async () => { await api("/v1/mailbox/verify", { code: state.mailCode ?? "" }); state.mailCode = ""; }, "Sayso can email people now");
+  };
+  return h("div", { class: "card" },
+    h("div", { class: "lbl" }, "Sayso's email"),
+    h("b", {}, m.address),
+    h("p", { class: "small muted", style: "margin:6px 0 0" }, "Forward invoices here. Claude, ChatGPT and your other agents send and reply from this address through Sayso, so you don't connect another email."),
+    m.can_send ? null : h("form", { class: "mail-code", onsubmit: verify, style: "margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center" },
+      h("p", { class: "small", style: "margin:0;flex-basis:100%" }, m.needs),
+      h("input", { class: "field", inputmode: "numeric", autocomplete: "one-time-code", maxlength: "6", placeholder: "6-digit code", "aria-label": "Code from AgentMail", value: state.mailCode ?? "", oninput: (e) => { state.mailCode = e.target.value.replace(/\D/g, ""); }, style: "max-width:160px" }),
+      h("button", { class: "btn pay", type: "submit", disabled: state.busy.mailcode }, state.busy.mailcode ? "Checking…" : "Turn on sending")),
   );
 }
 function escrowBox() {
