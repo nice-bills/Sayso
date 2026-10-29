@@ -395,6 +395,13 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     });
     res.json({ simulated: true, decision: decisionView(d) });
   });
+  // A dispute the owner upholds: the agent gets its USDZ back under the refund mandate.
+  app.post("/v1/payouts/:id/dispute", auth.requireOwner, express.json(), async (req, res) => {
+    if (!(await auth.confirmed(req, req.body?.confirmation, "dispute", String(req.params.id)))) return void res.status(401).json({ error: "Confirm with your passkey to refund it.", need: "passkey" });
+    const reason = String(req.body?.reason ?? "").trim().slice(0, 200);
+    if (!reason) return void res.status(400).json({ error: "say why the payout was wrong" });
+    try { res.json(publicView(await svc.dispute(String(req.params.id), "owner", reason))); } catch (err) { fail(res, err); }
+  });
   app.post("/v1/payouts/:id/review", auth.requireOwner, express.json(), async (req, res) => {
     if (req.body?.decision !== "reject" && !(await auth.confirmed(req, req.body?.confirmation, "review", String(req.params.id)))) return void res.status(401).json({ error: "Confirm with your passkey to allow it.", need: "passkey" });
     try {

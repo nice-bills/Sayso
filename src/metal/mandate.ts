@@ -116,10 +116,12 @@ export class MetalMandate {
     return { principal, reference: kv.reference ?? "", gasKeyAddress: kv["gas-key-address"] ?? "" };
   }
 
-  async pull(to: Address, amountCents: number, recordRefusal = false): Promise<PullResult> {
+  /** `paymentId` names the payout, so running the same pull again pays at most once (a refund's id, a dispute's id). */
+  async pull(to: Address, amountCents: number, recordRefusal = false, paymentId?: string): Promise<PullResult> {
     const { stdout } = await this.cli([
       "mandate", "pull", "--credential", this.cfg.credential, "--to", to, "--amount", centsToUsdz(amountCents),
       ...(recordRefusal ? ["--record-refusal"] : []),
+      ...(paymentId ? ["--payment-id", paymentId] : []),
     ]);
     return parsePull(stdout);
   }
@@ -180,7 +182,8 @@ export class MandateRefunder {
   }
 
   async refund(to: string, amountMinor: number, payoutId: string): Promise<{ tx: string }> {
-    const r = await this.mandate.pull(to as Address, amountMinor);
+    // The payout id names the payment, so a retried refund pays at most once.
+    const r = await this.mandate.pull(to as Address, amountMinor, false, `refund-${payoutId}`);
     if (r.outcome !== "paid") throw new Error(`refund mandate refused ${payoutId}: ${r.reason}`);
     return { tx: r.explorer ?? r.tx };
   }

@@ -424,6 +424,21 @@ export class PayoutService {
     return this.book.get(p.id);
   }
 
+  /**
+   * The owner judged an agent's delivered payout wrong (the agent disputed it): refund the agent
+   * in full under the refund mandate, as Kit 11's support agent does. The fiat already left, so
+   * Sayso carries that loss; the refund's payment id makes a retry pay at most once.
+   */
+  async dispute(id: string, operator: string, reason: string): Promise<Payout> {
+    const p = this.book.get(id);
+    if (!p) throw new PayoutError(404, "no such payout");
+    if (p.status !== "paid") throw new PayoutError(409, `only a delivered payout can be disputed; this one is ${p.status}`);
+    if (!p.buyer || p.buyer.startsWith("internal:")) throw new PayoutError(409, "only an agent's payout can be refunded; your own invoices were paid from your balance");
+    emit("decide", `${operator} upheld a dispute on ${p.payeeName}'s payout: ${reason}`, { payout: id });
+    this.d.trail?.add(id, "decide", `Disputed, and upheld by ${operator}: ${reason}`);
+    return this.fail(p, `disputed: ${reason}`, ["paid"]);
+  }
+
   /** Poll in-flight payouts (webhooks do this in production). */
   async follow(now = new Date()): Promise<void> {
     for (const p of this.book.list(500).filter((x) => x.status === "submitted")) {

@@ -171,3 +171,26 @@ describe("decide() for the inbox, which pays from Sayso's own float", () => {
     expect(released?.status).toBe("submitted");
   });
 });
+
+describe("disputes", () => {
+  it("refunds an agent's delivered payout in full when the owner upholds a dispute, once", async () => {
+    const { FakeAirwallex, FakeRefunder } = await import("../src/sim/offline.js");
+    const { Store } = await import("../src/store.js");
+    const { PayoutService } = await import("../src/payouts/service.js");
+    const refunder = new FakeRefunder();
+    const awx = new FakeAirwallex({ USD: toMinor(5000) });
+    const svc = new PayoutService({ awx, store: new Store(":memory:"), refunder });
+    const p = await svc.quote({
+      amount: "180.00", currency: "EUR", reference: "OCT-TRANSL",
+      payee: { name: "Lingua Freelance", address: { country_code: "FR", city: "Lyon", street_address: "1 rue X", postcode: "69001" }, bank: { iban: "FR1420041010050500013M02606" }, bank_country_code: "FR" },
+    }, NOW);
+    svc.accept(p.id, NOW);
+    const sent = await svc.onFunded(p.id, "0xA9e0000000000000000000000000000000000001", "0xpay", NOW);
+    await svc.onTransfer({ id: sent.transferId!, request_id: p.id, status: "PAID" } as never, NOW);
+    expect(svc.book.get(p.id)?.status).toBe("paid");
+    const refunded = await svc.dispute(p.id, "owner", "the agent paid the wrong invoice");
+    expect(refunded.status).toBe("refunded");
+    expect(refunder.refunds).toEqual([{ to: "0xA9e0000000000000000000000000000000000001", amountMinor: p.totalMinor, payoutId: p.id }]);
+    await expect(svc.dispute(p.id, "owner", "again")).rejects.toThrow(/only a delivered payout/);
+  });
+});

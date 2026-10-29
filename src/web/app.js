@@ -1219,6 +1219,7 @@ function timeline(p, inbox) {
 
 function failure(p) {
   if (!p.failure) return null;
+  if (p.failure.startsWith("disputed: ")) return h("div", { class: "sub" }, `Disputed: ${p.failure.slice(10)}. The agent got all ${usdz(p.price_usdz)} back.`);
   return h("div", { class: "sub" }, p.status === "refunded" && p.source === "agent" ? `The bank returned it (${p.failure}). The agent got all ${usdz(p.price_usdz)} back.` : `The bank returned it: ${p.failure}.`);
 }
 
@@ -1244,8 +1245,17 @@ function payoutRow(p) {
       from === "Agent" ? row("Agent paid", `${usdz(p.price_usdz)} (fee ${usdz(p.fee_usdz)})`) : null,
       row("Metal payment", p.funding_tx), row("Airwallex transfer", p.airwallex_transfer_id), row("Refund", p.refund_tx),
       p.reasons?.length ? row("Why", p.reasons.join("; ")) : null,
+      p.status === "paid" && from === "Agent" ? disputeButton(p) : null,
     ) : null,
   );
+}
+/** The owner upholds an agent's dispute: the agent gets every cent back under the refund mandate. */
+function disputeButton(p) {
+  const key = `dispute:${p.id}`;
+  return h("button", { class: "btn quiet small", type: "button", disabled: state.busy[key], onclick: () => {
+    const reason = window.prompt("Why was this payout wrong? The agent gets its USDZ back.");
+    if (reason?.trim()) act(key, async () => api(`/v1/payouts/${encodeURIComponent(p.id)}/dispute`, { reason: reason.trim(), confirmation: await confirmWith("dispute", p.id) }), "Refunded to the agent.");
+  } }, `Refund the agent ${usdz(p.price_usdz)}`);
 }
 function row(k, v) { return v ? h("div", {}, k, ": ", h("code", {}, String(v))) : null; }
 
