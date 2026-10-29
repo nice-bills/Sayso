@@ -1221,7 +1221,7 @@ function timeline(p, inbox) {
 function failure(p) {
   if (!p.failure) return null;
   if (p.failure.startsWith("disputed: ")) return h("div", { class: "sub" }, `Disputed: ${p.failure.slice(10)}. The agent got all ${usdz(p.price_usdz)} back.`);
-  return h("div", { class: "sub" }, p.status === "refunded" && p.source === "agent" ? `The bank returned it (${p.failure}). The agent got all ${usdz(p.price_usdz)} back.` : `The bank returned it: ${p.failure}.`);
+  return h("div", { class: "sub" }, p.status === "refunded" && p.source === "agent" ? `The bank returned it (${p.failure.replace(/^bank returned it: /, "")}). The agent got all ${usdz(p.price_usdz)} back.` : `The bank returned it: ${p.failure.replace(/^bank returned it: /, "")}.`);
 }
 
 const linkedPayouts = () => new Set(state.inbox.map((i) => i.payoutId).filter(Boolean));
