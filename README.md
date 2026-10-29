@@ -140,7 +140,7 @@ Claude.ai, ChatGPT, approval links on a phone and Airwallex webhooks need Sayso 
 
 ## Notes
 
-- `@x402/*` is pinned to 2.21.0. `@metalntwx/metal-pay` 0.2.0's `ClearingDebitServerScheme` has no `paymentFlows`, which `@x402/core` 2.22+ requires at runtime.
+- Metal packages: `@metalntwx/metal-agent` 0.3.3 and `@metalntwx/metal-pay` 0.3.4, with `@x402/*` pinned to 2.28.0 (metal-pay 0.3.4 needs 2.28 or later). Mandates bound before metal-agent 0.3.3 could revert on testnet, so `.metal` accounts and mandates made with 0.2.x should be recreated (`npm run setup:metal`).
 - Payload fields marked `VERIFY` follow the Airwallex docs as we understand them. They get checked against the docs MCP on the first live run.
 - The x402 payment path (dynamic price per quote, settle hooks) has run end to end against Metal's facilitator on testnet (live demo run, 18 Oct 2026). Offline, the same routes run with simulated payments.
 - Not yet run live on testnet: agents paying under an owner's mandate (`setup:agent-budget`, `SAYSO_MANDATE`, the on-chain verification and `SAYSO_AGENT_MANDATES=required`), and receipt anchors (`METAL_RECEIPT_KEY`, which `setup:metal` now creates and funds). Both use Metal's own SDK calls and are covered offline by the simulators and tests. Without `METAL_RECEIPT_KEY`, receipts are kept and anchored by the simulator (`sim:`).

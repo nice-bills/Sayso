@@ -75,7 +75,7 @@ The live run found what offline tests couldn't: Airwallex quotes FX in market co
 
 - x402's Express middleware settles only after the handler answers. So the handler only locks the quote, and fiat moves in the after-settle hook.
 - Refunds can't come from the ramp-only mandate by design, so refunds needed their own capped mandate.
-- `@metalntwx/metal-pay` 0.2.0 needs `@x402/*` 2.21.0 exactly.
+- Metal's packages and `@x402/*` move together: metal-pay 0.3.4 needs `@x402/*` 2.28 or later, and mandates bound before metal-agent 0.3.3 could revert on testnet.
 
 ## What's next
 
