@@ -14,6 +14,7 @@ The rails decide what is allowed, not the prompt:
 - **Every final payout gets a receipt anchored on Metal.** Anyone can hash the receipt and compare it with the anchor transaction, without trusting Sayso.
 - **A changed bank account has to prove itself.** Sayso sends 0.01 with a 6-digit code to the new account and asks the payee for it at the address on file from an earlier paid invoice, not the address that sent the new one.
 - **You see what Sayso heard.** Say a payment and the app shows the exact words heard next to what Sayso understood, with where each field came from. Whisper can transcribe on the device itself (the default where the browser has no speech recognition, like Firefox), so the voice is never sent anywhere. A name speech-to-text misspells ("Cruzeburg") is matched by sound to a payee already paid, and both spellings are shown. Bank details never come from speech.
+- **Price, balance and risk decide what the agent does, in code.** Every quote comes back as pay, wait, split or hold, with the input that decided it and one sentence of reason (`src/payouts/decide.ts`). A rate more than 1.5% worse than the week's median waits, with the agent's USDZ in escrow, until it comes back or a day before the due date. A budget that covers part of an invoice that allows part payment splits it. A risk finding holds it. Each verdict ends in a real transaction: the x402 payment, the Airwallex transfer, the one-cent check, or the refund.
 - **Reconciliation is arithmetic, to the cent.**
 
 Built for the Airwallex Agentic Banking Hackathon (2026). Demo script: [docs/DEMO-SCRIPT.md](docs/DEMO-SCRIPT.md). Write-up: [docs/SUBMISSION.md](docs/SUBMISSION.md).
@@ -78,6 +79,8 @@ Metal refuses any payment above the cap, past the budget, after the expiry, or t
 | `POST /v1/inbox/:id/approve` | owner | The one tap. `verified_with_payee: true` is needed for held invoices. |
 | `POST /v1/inbox/:id/details` | owner | Fill in what the extractor couldn't find; the invoice is checked again. |
 | `GET /v1/payouts`, `POST /v1/payouts/:id/review` | owner | Every payout; allow or block a held agent payout. |
+| `POST /v1/payouts/:id/dispute` | owner | Uphold an agent's dispute: the agent is refunded in full under the refund mandate. |
+| `POST /v1/payouts/:id/what-if` | owner, sandbox only | Re-run the decision with one input changed (rate, budget, risk). Moves nothing. |
 | `GET /v1/payouts/:id/why` | owner | Every step behind a payout, with its proof: what was said or read, the rules, the bank, the mandate, Airwallex, the receipt. |
 | `POST /v1/say` | owner | `{ transcript }`: what you said becomes an invoice to approve, with what was heard, what was understood and where each field came from. |
 | `POST /v1/inbox/:id/penny` | owner | Starts the one-cent code check on an invoice held for new bank details. The payee answers at `/v/:token`. |
