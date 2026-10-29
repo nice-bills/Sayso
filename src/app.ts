@@ -251,7 +251,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   app.use("/vendor/transformers", express.static(nodeModules + "@huggingface/transformers/dist", { immutable: true, maxAge: "30d" }));
   app.use("/vendor/ort", express.static(nodeModules + "onnxruntime-web/dist", { immutable: true, maxAge: "30d" }));
   app.use("/", (req, res, next) => {
-    if (req.method === "GET" && /^\/(index\.html|app\.js|app\.css|claim|c\/[\w-]+|approve\/.+)?$/.test(req.path)) {
+    if (req.method === "GET" && /^\/(index\.html|app\.js|app\.css|claim|c\/[\w-]+|connect\/[\w-]+|approve\/.+)?$/.test(req.path)) {
       res.setHeader("content-security-policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
       res.setHeader("cache-control", "no-cache");
     }
@@ -259,6 +259,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   }, express.static(webDir, { index: "index.html" }));
   // A one-tap approval link opens the app on that invoice (the page asks for sign-in if needed).
   app.get("/approve/:id", (_req, res) => res.sendFile("index.html", { root: webDir }));
+  // A chat app's "Sign in with Sayso" lands here: the app shows Allow or Not now.
+  app.get("/connect/:id", (_req, res) => res.sendFile("index.html", { root: webDir }));
   // The short form agents send: /p/ and a hash of the invoice id.
   app.get("/p/:code", (req, res) => {
     const item = inbox.list().find((i) => shortCode(i.id) === req.params.code);

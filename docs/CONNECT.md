@@ -1,6 +1,6 @@
 # Connect any agent to Sayso
 
-Every agent gets its own key from the app (**Agents, Connect your agent**), optionally with a per-payout cap. A key can forward invoices, list them, quote and check status. **No key can approve a payment**: the owner gets a link (and a phone notification if `NTFY_TOPIC` is set) and taps Pay while signed in. Disconnecting an agent in the app revokes its key at once.
+Chat apps connect by signing in with Sayso: add the URL, tap Allow, done. Other agents get their own key from the app (**Agents, Connect your agent**), optionally with a per-payout cap. A key can forward invoices, list them, quote and check status. **No key can approve a payment**: the owner gets a link (and a phone notification if `NTFY_TOPIC` is set) and taps Pay while signed in. Disconnecting an agent in the app revokes its key at once.
 
 Sayso needs a public HTTPS address for chat apps to reach it. Set `PUBLIC_URL` to it so approval links point there.
 
@@ -8,7 +8,7 @@ Sayso needs a public HTTPS address for chat apps to reach it. Set `PUBLIC_URL` t
 | --- | --- | --- |
 | **Claude Code** | `claude mcp add --transport http sayso https://YOUR-HOST/mcp --header "Authorization: Bearer KEY"` | Yes |
 | **Claude Code, as a plugin** | `/plugin install sayso --marketplace OWNER/REPO`. It asks for the URL and key, and adds a skill that teaches Claude the approval flow. | Plugin validated |
-| **claude.ai, Claude Desktop, ChatGPT, other chat apps** | Add a custom connector with the URL `https://YOUR-HOST/mcp/k/KEY`. The key is in the URL because these apps can't set headers, so treat the URL like a password. | Not yet |
+| **claude.ai, Claude Desktop, ChatGPT, other chat apps** | Add a custom connector with the URL `https://YOUR-HOST/mcp`. The app opens Sayso: sign in, tap **Allow**, and you're back in the chat. No key to copy. (`https://YOUR-HOST/mcp/k/KEY` still works for apps without sign-in.) | Sign-in tested with the MCP SDK's client |
 | **Cursor, Windsurf, any MCP client** | Streamable HTTP server at `https://YOUR-HOST/mcp` with the `Authorization: Bearer KEY` header | Same endpoint as Claude Code |
 | **OpenClaw, Hermes, other skill-based agents** | Copy `integrations/agent-skill/sayso` into the agent's skills folder and set `SAYSO_URL` and `SAYSO_AGENT_KEY`. The skill uses the REST twin, `POST /v1/agent/invoices`. | REST endpoint tested |
 | **An agent with its own Metal wallet** | Run the local MCP server, which pays quotes over x402 with the agent's key: `claude mcp add sayso -e SAYSO_URL=... -e SAYSO_BUYER_KEY=0x... -- npx tsx src/mcp/server.ts` | Yes (offline) |

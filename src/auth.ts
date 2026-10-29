@@ -203,7 +203,7 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
   // A check bound to one action (approving this payment, connecting that agent), not a sign-in.
   router.post("/auth/passkey/confirm/options", requireOwner, express.json(), async (req, res) => {
     const purpose = String(req.body?.purpose ?? ""), subject = String(req.body?.subject ?? "");
-    if (!/^(approve|review|claim)$/.test(purpose) || !subject) return void res.status(400).json({ error: "purpose and subject are required" });
+    if (!/^(approve|review|claim|connect)$/.test(purpose) || !subject) return void res.status(400).json({ error: "purpose and subject are required" });
     const { rpID } = rp(req);
     const options = await generateAuthenticationOptions({ rpID, userVerification: "required", allowCredentials: passkeys().map((p) => ({ id: p.id, transports: p.transports ? (JSON.parse(p.transports) as AuthenticatorTransportFuture[]) : undefined })) });
     res.json({ challenge_id: keep({ challenge: options.challenge, purpose, subject }), options });

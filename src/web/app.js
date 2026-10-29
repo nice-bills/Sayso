@@ -6,6 +6,7 @@ const $root = document.getElementById("root");
 const state = {
   signedIn: null, me: null, inbox: [], payouts: [], summary: null, agents: [], newKey: null,
   claim: location.pathname === "/claim" ? new URLSearchParams(location.search).get("claim_attempt_token") : location.pathname.match(/^\/c\/([\w-]+)$/)?.[1] ?? null, claimInfo: null, laterPasskey: sessionGet("laterPasskey") === "1",
+  connect: location.pathname.match(/^\/connect\/([\w-]+)$/)?.[1] ?? null, connectInfo: null,
   focus: decodeURIComponent(location.pathname.match(/^\/approve\/(.+)$/)?.[1] ?? "") || null,
   tab: sessionGet("tab") || "home", filter: "all", events: [], recent: new Set(),
   pick: null, showAdd: false, drafts: {}, verified: {}, open: {}, busy: {}, toast: null,
@@ -173,7 +174,7 @@ function render() {
   dirty = false;
   staggered = 0;
   const y = window.scrollY;
-  $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn ? (state.claim ? claimView() : appView()) : state.claim ? claimGate() : landing(), state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].filter(Boolean));
+  $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn ? (state.claim ? claimView() : state.connect ? connectView() : appView()) : state.claim || state.connect ? claimGate() : landing(), state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].filter(Boolean));
   window.scrollTo(0, y);
   if (!state.signedIn) watchReveals();
 }
@@ -420,7 +421,7 @@ function signinDialog() {
   const tokenIn = run(async () => { await api("/auth/login", { token }); await signedIn(); });
   const or = (t) => h("div", { class: "or" }, h("span", {}, t));
   return h("div", { class: "dialog", "data-ui": "" },
-    h("h3", {}, state.claim ? "Sign in to connect your agent" : "Sign in to Sayso"),
+    h("h3", {}, state.claim || state.connect ? "Sign in to connect your agent" : "Sign in to Sayso"),
     m.passkey && canPasskey() ? h("button", { class: "btn pay wide", type: "button", onclick: passkey }, icon("face", 18), "Use Face ID or a passkey") : null,
     m.email ? h("form", { class: "row-form", onsubmit: mail },
       h("label", { class: "sr", for: "email" }, "Email"),
@@ -491,6 +492,42 @@ function claimView() {
       h("button", { class: "btn quiet", type: "button", onclick: leaveClaim }, "Not now"),
     ];
   return h("div", { class: "gate" }, h("header", { class: "l-top" }, brand()), h("div", { class: "gate-body" }, h("div", { class: "dialog claim", "data-ui": "" }, body)));
+}
+
+// ---------- a chat app signing in with Sayso (Claude, ChatGPT: the connector's sign-in) ----------
+function connectView() {
+  const info = state.connectInfo;
+  const gate = (...body) => h("div", { class: "gate" }, h("header", { class: "l-top" }, brand()), h("div", { class: "gate-body" }, h("div", { class: "dialog claim", "data-ui": "" }, body)));
+  if (!info) {
+    api(`/oauth2/requests/${encodeURIComponent(state.connect)}`).then((i) => { state.connectInfo = i; render(); }).catch((e) => { state.connectInfo = { error: e.message }; render(); });
+    return h("div", { class: "gate" }, h("header", { class: "l-top" }, brand()));
+  }
+  if (info.error) return gate(h("h2", {}, "This link has expired"), h("p", { class: "muted" }, info.error), h("button", { class: "btn", onclick: () => { state.connect = null; history.replaceState(null, "", "/"); render(); } }, "Open Sayso"));
+  if (info.done) return gate(h("span", { class: "tick big-tick", "aria-hidden": "true" }, icon("check", 26)), h("h2", {}, `Going back to ${info.client_name}…`));
+  const label = state.me?.passkeys ? "Allow with Face ID" : canPasskey() ? "Turn on Face ID and allow" : "Allow";
+  const go = (path, confirm) => async () => {
+    state.busy.connect = true; render();
+    try {
+      let confirmation;
+      if (confirm) {
+        if (!state.me?.passkeys && canPasskey()) await addPasskey();
+        confirmation = await confirmWith("connect", info.subject);
+      }
+      const r = await api(`/oauth2/requests/${encodeURIComponent(state.connect)}/${path}`, confirm ? { confirmation } : {});
+      state.connectInfo = { ...info, done: true }; render();
+      location.assign(r.redirect);
+    } catch (x) { state.connectInfo = { ...info, lastError: x.message }; }
+    finally { delete state.busy.connect; render(); }
+  };
+  return gate(
+    h("span", { class: "agent-mark", "aria-hidden": "true" }, icon("bot", 24)),
+    h("h2", {}, `Connect ${info.client_name} to Sayso?`),
+    h("p", { class: "muted" }, `${info.client_name} will see your Sayso inbox, forward invoices to it, and email suppliers from Sayso's address. It can't pay anyone: you approve every payment yourself.`),
+    h("button", { class: "btn pay wide", type: "button", disabled: state.busy.connect, onclick: go("allow", true) }, icon("face", 18), state.busy.connect ? "Connecting…" : label),
+    info.lastError ? h("div", { class: "error", role: "alert" }, info.lastError) : null,
+    h("button", { class: "btn quiet", type: "button", disabled: state.busy.connect, onclick: go("deny", false) }, "Not now"),
+    h("p", { class: "small muted" }, `You'll go back to ${info.returns_to}. Disconnect it any time under Agents.`),
+  );
 }
 
 /** Offered once signed in, until there's a passkey: Face ID becomes the way in and the way to pay. */

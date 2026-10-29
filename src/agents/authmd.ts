@@ -14,6 +14,7 @@ import type { Auth } from "../auth.js";
 import type { Store } from "../store.js";
 import { emit } from "../events.js";
 import type { AgentKeys } from "./keys.js";
+import { OAUTH_SCOPES, oauthMetadata, oauthRouter } from "./oauth.js";
 
 const CLAIM_WINDOW_MS = 24 * 3_600_000;
 const CODE_SECONDS = 600;
@@ -74,18 +75,21 @@ export function authMdRouter(d: { store: Store; keys: AgentKeys; auth: Auth }): 
   const err = (res: Response, status: number, error: string, description: string) => res.status(status).json({ error, error_description: description });
 
   const r = express.Router();
+  // Chat apps (Claude, ChatGPT) sign in with the standard authorization code flow instead.
+  const oauth = oauthRouter(d);
+  r.use(oauth.router);
 
   // ---------- discovery ----------
   const prm = (base: string) => ({
-    resource: `${base}/`, resource_name: "Sayso", resource_logo_uri: `${base}/logo.svg`, authorization_servers: [`${base}/`],
-    scopes_supported: SCOPES, bearer_methods_supported: ["header"],
+    resource: `${base}/`, resource_name: "Sayso", resource_logo_uri: `${base}/logo.svg`, authorization_servers: [base],
+    scopes_supported: [...new Set([...SCOPES, ...OAUTH_SCOPES])], bearer_methods_supported: ["header"],
   });
   r.get("/.well-known/oauth-protected-resource", (req, res) => res.json(prm(d.auth.base(req))));
   r.get("/.well-known/oauth-authorization-server", (req, res) => {
     const base = d.auth.base(req);
     res.json({
-      ...prm(base), issuer: base, token_endpoint: `${base}/oauth2/token`, revocation_endpoint: `${base}/oauth2/revoke`,
-      grant_types_supported: [JWT_BEARER, CLAIM_GRANT],
+      ...prm(base), issuer: base, token_endpoint: `${base}/oauth2/token`, revocation_endpoint: `${base}/oauth2/revoke`, ...oauthMetadata(base),
+      grant_types_supported: ["authorization_code", "refresh_token", JWT_BEARER, CLAIM_GRANT],
       agent_auth: {
         skill: `${base}/auth.md`, identity_endpoint: `${base}/agent/identity`, claim_endpoint: `${base}/agent/identity/claim`,
         identity_types_supported: ["service_auth"], identity_assertion: { assertion_types_supported: [] }, events_supported: [],
@@ -157,6 +161,7 @@ export function authMdRouter(d: { store: Store; keys: AgentKeys; auth: Auth }): 
   r.post("/oauth2/token", express.urlencoded({ extended: false }), express.json(), (req, res) => {
     const base = d.auth.base(req);
     const grant = req.body?.grant_type;
+    if (oauth.token((req.body ?? {}) as Record<string, unknown>, res)) return;
     if (grant === CLAIM_GRANT) {
       const reg = byClaim(req.body?.claim_token);
       if (!reg) return void err(res, 400, "invalid_grant", "Unknown claim_token.");
@@ -173,7 +178,7 @@ export function authMdRouter(d: { store: Store; keys: AgentKeys; auth: Auth }): 
       if (!c || !d.keys.get(c.sub!) || d.keys.get(c.sub!)!.revokedAt) return void err(res, 400, "invalid_grant", "The assertion is expired or revoked. Restart at Step 3.");
       return void res.json(tokenResponse(base, c.sub!, false));
     }
-    err(res, 400, "unsupported_grant_type", `grant_type must be ${JWT_BEARER} or ${CLAIM_GRANT}`);
+    err(res, 400, "unsupported_grant_type", `grant_type must be authorization_code, refresh_token, ${JWT_BEARER} or ${CLAIM_GRANT}`);
   });
   r.post("/oauth2/revoke", express.urlencoded({ extended: false }), express.json(), (req, res) => {
     if (typeof req.body?.token === "string") d.keys.revokeToken(req.body.token);
