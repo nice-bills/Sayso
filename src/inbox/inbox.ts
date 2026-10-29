@@ -81,7 +81,7 @@ export class Inbox {
     let payoutId: string | null = null;
     if (status === "awaiting_approval") {
       try {
-        const p = await this.svc.quote(toPayoutRequest(fields, e), e.receivedAt, { ttlMs: APPROVAL_TTL_MS });
+        const p = await this.svc.quote(toPayoutRequest(fields, e), e.receivedAt, { ttlMs: APPROVAL_TTL_MS, fromFloat: true });
         payoutId = p.id;
         status = p.status === "needs_review" ? "needs_verification" : p.status === "rejected" ? "rejected" : "awaiting_approval";
       } catch (err) {

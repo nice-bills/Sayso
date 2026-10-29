@@ -149,3 +149,25 @@ describe("decide() in the payout service", () => {
     expect(held.decision?.decidedBy).toBe("risk");
   });
 });
+
+describe("decide() for the inbox, which pays from Sayso's own float", () => {
+  it("waits for funds when the float is short, then pays once earnings land", async () => {
+    const { FakeAirwallex, FakeRefunder } = await import("../src/sim/offline.js");
+    const { Store } = await import("../src/store.js");
+    const { PayoutService } = await import("../src/payouts/service.js");
+    const awx = new FakeAirwallex({ USD: toMinor(120) });
+    const svc = new PayoutService({ awx, store: new Store(":memory:"), refunder: new FakeRefunder(), floatReserveMinor: toMinor(50) });
+    const p = await svc.quote({
+      amount: "280.00", currency: "EUR", reference: "INV-130", due_date: "2026-11-13",
+      payee: { name: "Kreuzberg Studio GmbH", address: { country_code: "DE", city: "Berlin", street_address: "Oranienstr. 1", postcode: "10999" }, bank: { iban: "DE89370400440532013000" }, bank_country_code: "DE" },
+    }, NOW, { fromFloat: true });
+    expect(p.decision?.verdict).toBe("wait");
+    expect(p.decision?.decidedBy).toBe("balance");
+    const approved = await svc.payInternally(p.id, "owner", NOW);
+    expect(approved.status).toBe("waiting");
+    expect(await svc.releaseWaiting(NOW)).toEqual([]);
+    await awx.simulateDeposit("ga", 400);
+    const [released] = await svc.releaseWaiting(NOW);
+    expect(released?.status).toBe("submitted");
+  });
+});

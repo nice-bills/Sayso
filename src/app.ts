@@ -165,7 +165,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const receipts = new Receipts(store, anchorer, anchorAddress);
   // Offline, the week's median comes from the ECB history; live, from the rates Airwallex has quoted.
   const rates = opts.offline ? RateMedian.fromCsv() : new RateMedian();
-  const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, rates, onFinal: (p) => void receipts.issue(p) });
+  const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, rates, floatReserveMinor: policyConfig.reserveFloorMinor, onFinal: (p) => void receipts.issue(p) });
   const inbox = new Inbox(store, svc);
   const credit = new SimulatedDepositCredit(awx, process.env.AWX_GLOBAL_ACCOUNT_ID ?? "sim:ga_usd");
   const earnings = earningsFor(svc);

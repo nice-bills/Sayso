@@ -81,6 +81,8 @@ export interface PayoutDeps {
   /** This week's median rate for a currency, in units per 1 USD, so decide() can tell a bad rate from a normal one. */
   rates?: { median(currency: string, now?: Date): number | undefined; record(currency: string, rate: number, at?: Date): void };
   decideConfig?: DecideConfig;
+  /** The inbox pays from Sayso's own Airwallex float; this much USD always stays in it. */
+  floatReserveMinor?: number;
 }
 
 const HOUR = 3_600_000;
@@ -104,7 +106,7 @@ export class PayoutService {
 
   // ---------- 1. quote ----------
 
-  async quote(input: unknown, now = new Date(), opts: { ttlMs?: number } = {}): Promise<Payout> {
+  async quote(input: unknown, now = new Date(), opts: { ttlMs?: number; fromFloat?: boolean } = {}): Promise<Payout> {
     const parsed = PayoutRequest.safeParse(input);
     if (!parsed.success) throw new PayoutError(400, parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
     const r = parsed.data;
@@ -167,11 +169,12 @@ export class PayoutService {
     const median = r.currency === "USD" ? undefined : this.d.rates?.median(r.currency, now);
     if (r.currency !== "USD") this.d.rates?.record(r.currency, rate, now);
     const decision = decide({
-      amountMinor, currency: r.currency, costUsdzMinor: pr.totalMinor,
+      amountMinor, currency: r.currency, costUsdzMinor: opts.fromFloat ? pr.costMinor : pr.totalMinor,
       capUsdzMinor: r.max_usdz ? toMinor(Number(r.max_usdz)) : Number.MAX_SAFE_INTEGER,
       // Units per USD: fewer of them than the median means the currency got dearer.
       rateDrift: median ? (median - rate) / median : 0,
-      spendableUsdzMinor: r.spendable_usdz ? toMinor(Number(r.spendable_usdz)) : Number.MAX_SAFE_INTEGER,
+      // The inbox spends Sayso's own float, so its balance is what Airwallex holds above the reserve.
+      spendableUsdzMinor: r.spendable_usdz ? toMinor(Number(r.spendable_usdz)) : opts.fromFloat ? await this.floatSpendable(r.currency, rate) : Number.MAX_SAFE_INTEGER,
       risk, dueAt: r.due_date ? new Date(`${r.due_date}T23:59:59Z`) : new Date(now.getTime() + 30 * DAY), partPaymentAllowed: r.part_payment,
     }, now, this.d.decideConfig ?? DEFAULT_DECIDE);
     if (decision.verdict === "hold" && status === "quoted") { status = "needs_review"; reasons.push(decision.reason); }
@@ -274,8 +277,10 @@ export class PayoutService {
     if (limits.verdict === "reject") return this.fail(p, limits.reasons.join("; "));
 
     // A wait keeps the agent's USDZ in escrow at the price it was quoted; the transfer runs once the rate is back in band or the wait ends.
-    if (p.decision?.verdict === "wait" && p.decision.decidedBy === "price" && this.book.transition(id, ["funded"], "waiting")) {
-      emit("decide", `Holding ${toMajor(p.totalMinor).toFixed(2)} USDZ in escrow for ${p.payeeName}: ${p.decision.reason}`, { payout: id }, fundingTx);
+    const internal = payer.startsWith("internal:");
+    const waits = p.decision?.verdict === "wait" && (p.decision.decidedBy === "price" || (internal && p.decision.until?.fundsUsdzMinor !== undefined && (await this.floatSpendable(p.currency, p.rateUsed)) < p.costMinor));
+    if (waits && this.book.transition(id, ["funded"], "waiting")) {
+      emit("decide", internal ? `Approved, and waiting: ${p.decision!.reason}` : `Holding ${toMajor(p.totalMinor).toFixed(2)} USDZ in escrow for ${p.payeeName}: ${p.decision!.reason}`, { payout: id }, internal ? undefined : fundingTx);
       return this.book.get(id)!;
     }
     return this.execute(p);
@@ -292,6 +297,15 @@ export class PayoutService {
       const drift = median && rate ? (median - rate) / median : 0;
       const inBand = until?.rateWithinPct === undefined || drift <= until.rateWithinPct;
       const timeUp = until?.by !== undefined && now.toISOString().slice(0, 10) >= until.by;
+      if (until?.fundsUsdzMinor !== undefined) {
+        // Waiting for the float: an earnings sweep on this tick may have just topped it up.
+        if ((await this.floatSpendable(p.currency, rate ?? p.rateUsed)) < p.costMinor) continue;
+        if (!this.book.transition(p.id, ["waiting"], "funded")) continue;
+        emit("decide", `Releasing ${p.payeeName}'s payout: the float now covers it`, { payout: p.id });
+        this.d.trail?.add(p.id, "decide", "Earnings landed in the float, so it pays now", undefined, undefined, now);
+        released.push(await this.execute(this.book.get(p.id)!));
+        continue;
+      }
       if (!inBand && !timeUp) continue;
       if (!this.book.transition(p.id, ["waiting"], "funded")) continue;
       emit("decide", `Releasing ${p.payeeName}'s payout: ${inBand ? `${p.currency} is back within ${(until?.rateWithinPct ?? 0) * 100}% of its median` : "the wait ended before the due date"}`, { payout: p.id });
@@ -299,6 +313,14 @@ export class PayoutService {
       released.push(await this.execute(this.book.get(p.id)!));
     }
     return released;
+  }
+
+  /** USD-equivalent cents the float can spend on a payout in `currency`: USD above the reserve, plus that currency already held. */
+  private async floatSpendable(currency: string, rate: number): Promise<number> {
+    const balances = await this.d.awx.currentBalances();
+    const held = (ccy: string) => toMinor(balances.find((b) => b.currency === ccy)?.available_amount ?? 0);
+    const usd = Math.max(0, held("USD") - (this.d.floatReserveMinor ?? 0));
+    return currency === "USD" ? usd : usd + Math.floor(held(currency) / (rate || 1));
   }
 
   private async execute(p: Payout): Promise<Payout> {

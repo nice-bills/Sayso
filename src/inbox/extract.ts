@@ -117,6 +117,8 @@ export function toPayoutRequest(f: InvoiceFields, e: InboundEmail) {
   return {
     amount: f.amount!, currency: f.currency!.toUpperCase(),
     reference: (f.reference ?? e.subject).slice(0, 35),
+    // Only an ISO date is trusted; anything else is treated as due in 30 days.
+    due_date: f.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(f.dueDate) ? f.dueDate : undefined,
     invoice_text: `From: ${e.from}\nSubject: ${e.subject}\n\n${e.body}`,
     payee: {
       name: f.payeeName!, bank, bank_country_code: f.bankCountry!.toUpperCase(),
