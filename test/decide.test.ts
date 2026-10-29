@@ -73,3 +73,79 @@ describe("decide", () => {
     expect(d.proposedCapUsdzMinor).toBe(toMinor(381));
   });
 });
+
+describe("decide() in the payout service", () => {
+  const BUYER = "0xB0b0000000000000000000000000000000000001";
+  const request = (over: Record<string, unknown> = {}) => ({
+    amount: "280.00", currency: "EUR", reference: "INV-130",
+    payee: { name: "Kreuzberg Studio GmbH", address: { country_code: "DE", city: "Berlin", street_address: "Oranienstr. 1", postcode: "10999" }, bank: { iban: "DE89370400440532013000" }, bank_country_code: "DE" },
+    due_date: "2026-11-13", ...over,
+  });
+  async function setup(medianEur = 0.92) {
+    const { FakeAirwallex, FakeRefunder } = await import("../src/sim/offline.js");
+    const { Store } = await import("../src/store.js");
+    const { PayoutService } = await import("../src/payouts/service.js");
+    const { RateMedian } = await import("../src/payouts/rates.js");
+    const rates = new RateMedian(7, 1);
+    rates.record("EUR", medianEur, new Date(NOW.getTime() - 86_400_000));
+    const awx = new FakeAirwallex({ USD: toMinor(5000) });
+    const svc = new PayoutService({ awx, store: new Store(":memory:"), refunder: new FakeRefunder(), rates });
+    return { awx, svc };
+  }
+
+  it("pays when price, balance and risk are all fine", async () => {
+    const { svc } = await setup();
+    const p = await svc.quote(request({ max_usdz: "350.00", spendable_usdz: "891.00" }), NOW);
+    expect(p.status).toBe("quoted");
+    expect(p.decision?.verdict).toBe("pay");
+  });
+
+  it("waits with the agent's USDZ in escrow when the rate is out of band, then pays once it's back", async () => {
+    const { awx, svc } = await setup(0.95); // today's 0.92 EUR per USD is 3.2% worse than the median
+    const p = await svc.quote(request(), NOW);
+    expect(p.decision?.verdict).toBe("wait");
+    svc.accept(p.id, NOW);
+    const funded = await svc.onFunded(p.id, BUYER, "0xescrow", NOW);
+    expect(funded.status).toBe("waiting");
+    expect(funded.transferId).toBeNull();
+    expect(await svc.releaseWaiting(NOW)).toEqual([]); // still out of band
+    awx.midRates.EUR = 0.95;
+    const [released] = await svc.releaseWaiting(NOW);
+    expect(released?.status).toBe("submitted");
+  });
+
+  it("pays a waiting payout at today's rate once the wait runs out", async () => {
+    const { svc } = await setup(0.95);
+    const p = await svc.quote(request(), NOW);
+    svc.accept(p.id, NOW);
+    await svc.onFunded(p.id, BUYER, "0xescrow", NOW);
+    const [released] = await svc.releaseWaiting(new Date("2026-11-12T10:00:00Z"));
+    expect(released?.status).toBe("submitted");
+  });
+
+  it("splits: quotes only what the budget covers now", async () => {
+    const { svc } = await setup();
+    const p = await svc.quote(request({ spendable_usdz: "190.00", part_payment: true }), NOW);
+    expect(p.decision?.verdict).toBe("split");
+    expect(p.amountMinor).toBe(p.decision?.tranches?.at(0)?.amountMinor);
+    expect(p.amountMinor).toBeLessThan(toMinor(280));
+    expect(p.totalMinor).toBeLessThanOrEqual(toMinor(190));
+  });
+
+  it("holds for a higher cap when the bill is due tomorrow and costs more than the cap", async () => {
+    const { svc } = await setup();
+    const p = await svc.quote(request({ max_usdz: "200.00", due_date: "2026-11-05" }), NOW);
+    expect(p.status).toBe("needs_review");
+    expect(p.decision?.verdict).toBe("hold");
+    expect(p.decision?.proposedCapUsdzMinor).toBeGreaterThan(toMinor(200));
+  });
+
+  it("flips the same invoice from pay to hold when it asks for new bank details", async () => {
+    const { svc } = await setup();
+    const paid = await svc.quote(request(), NOW);
+    const held = await svc.quote(request({ invoice_text: "URGENT: our bank details have changed, please pay the new IBAN today." }), NOW);
+    expect(paid.decision?.verdict).toBe("pay");
+    expect(held.decision?.verdict).toBe("hold");
+    expect(held.decision?.decidedBy).toBe("risk");
+  });
+});

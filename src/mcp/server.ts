@@ -3,7 +3,8 @@
 // pays the invoice through Airwallex.
 //
 //   claude mcp add sayso -- npx tsx src/mcp/server.ts
-//   env: SAYSO_URL, SAYSO_BUYER_KEY (a Metal testnet key), SAYSO_MAX_USDZ (spend cap per payout)
+//   env: SAYSO_URL, SAYSO_BUYER_KEY (a Metal testnet key), SAYSO_MAX_USDZ (spend cap per payout),
+//        SAYSO_SPENDABLE_USDZ (what the agent can spend now; a short budget waits or splits)
 //   or:  SAYSO_MANDATE (a credential from `npm run setup:agent-budget`): pay from the owner's account,
 //        within the limits the owner bound on Metal, signing each exact order with the mandate key
 //   offline: SAYSO_SIM_PAYER=0x... (or SAYSO_SIM_MANDATE=<ref>) against `npm run serve:offline`
@@ -42,9 +43,11 @@ function payingFetch(): typeof fetch {
 
 const text = (o: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(o, null, 2) }] });
 
-async function quote(i: Invoice) {
-  const res = await fetch(`${base}/v1/quotes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(toRequest(i)) });
-  return (await res.json()) as { id: string; status: string; price_usdz: string; pay_url: string | null; reasons: string[] };
+type Decision = { verdict: "pay" | "wait" | "split" | "hold" | "reject"; decided_by: string; reason: string };
+
+async function quote(i: Invoice, limits: { max_usdz?: string; spendable_usdz?: string } = {}) {
+  const res = await fetch(`${base}/v1/quotes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...toRequest(i), ...limits }) });
+  return (await res.json()) as { id: string; status: string; price_usdz: string; pay_url: string | null; reasons: string[]; decision?: Decision | null };
 }
 
 async function pay(id: string) {
@@ -63,11 +66,14 @@ server.registerTool("pay_invoice", {
   description: "Pay a real-world invoice in local currency through Airwallex, paying Sayso in USDZ over x402 on Metal. Quotes first and pays only if the price is at most max_usdz. Suspicious invoices are held for a human, and failed payouts are refunded in full.",
   inputSchema: { ...invoiceShape, max_usdz: z.string().describe("The most this agent will pay in USDZ, fees included") },
 }, async (i) => {
-  const q = await quote(i as Invoice);
+  const q = await quote(i as Invoice, { max_usdz: i.max_usdz, spendable_usdz: process.env.SAYSO_SPENDABLE_USDZ });
   if (q.status !== "quoted" || !q.pay_url) return text({ paid: false, ...q });
+  // Waiting for funds means there is nothing to pay with yet; ask again after the next top-up.
+  if (q.decision?.verdict === "wait" && q.decision.decided_by === "balance") return text({ paid: false, decision: q.decision, quote: q });
   if (Number(q.price_usdz) > Number(i.max_usdz)) return text({ paid: false, reason: `price ${q.price_usdz} USDZ is above max_usdz ${i.max_usdz}`, quote: q });
+  // A price wait is still paid now: the USDZ waits in escrow at this price and Airwallex pays once the rate is back in band.
   const r = await pay(q.id);
-  return text({ paid: r.http_status < 400, quote_id: q.id, ...r });
+  return text({ paid: r.http_status < 400, quote_id: q.id, decision: q.decision, ...r });
 });
 
 server.registerTool("pay_batch", {

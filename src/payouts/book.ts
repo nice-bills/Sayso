@@ -6,12 +6,13 @@
 //      │                  │                             │                        └──> failed ──> refunded
 //      ├─> needs_review ──(operator)──> quoted          └──> failed (rejected by Airwallex) ──> refunded
 //      ├─> rejected
-//      └─> expired
+//      └─> expired                                    funded ──decision was wait──> waiting ──rate back in band, or the wait ends──> funded
 
 import { createHash } from "node:crypto";
 import type { Store } from "../store.js";
+import type { Decision } from "./decide.js";
 
-export type PayoutStatus = "quoted" | "needs_review" | "rejected" | "accepted" | "funded" | "submitted" | "paid" | "failed" | "refunded" | "refund_failed" | "expired";
+export type PayoutStatus = "quoted" | "needs_review" | "rejected" | "accepted" | "funded" | "waiting" | "submitted" | "paid" | "failed" | "refunded" | "refund_failed" | "expired";
 
 export interface Payout {
   id: string;
@@ -36,6 +37,8 @@ export interface Payout {
   transferId: string | null;
   refundTx: string | null;
   failure: string | null;
+  /** What decide() chose at quote time, and why. Null for payouts made before it existed. */
+  decision: Decision | null;
 }
 
 /** Identity of the receiving account, so "have we paid this account before?" survives renames. */
@@ -50,7 +53,9 @@ const COLUMNS: Record<keyof Payout, string> = {
   payeeName: "payee_name", payeeHash: "payee_hash", beneficiary: "beneficiary", reference: "reference", costMinor: "cost_minor",
   feeMinor: "fee_minor", totalMinor: "total_minor", rateUsed: "rate_used", status: "status", reasons: "reasons",
   createdAt: "created_at", expiresAt: "expires_at", fundingTx: "funding_tx", transferId: "transfer_id", refundTx: "refund_tx", failure: "failure",
+  decision: "decision",
 };
+const JSON_COLUMNS = new Set<keyof Payout>(["beneficiary", "reasons", "decision"]);
 
 export class PayoutBook {
   constructor(private readonly store: Store) {
@@ -65,6 +70,9 @@ export class PayoutBook {
       CREATE TABLE IF NOT EXISTS payees (
         payee_hash TEXT PRIMARY KEY, beneficiary_id TEXT NOT NULL, first_paid_at TEXT
       );`);
+    // Books made before decide() existed get the column added.
+    const cols = store.db.prepare("PRAGMA table_info(payouts)").all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === "decision")) store.db.exec("ALTER TABLE payouts ADD COLUMN decision TEXT");
   }
 
   insert(p: Payout): void {
@@ -80,12 +88,16 @@ export class PayoutBook {
     return this.decode(this.store.db.prepare("SELECT * FROM payouts WHERE transfer_id = ?").get(transferId));
   }
 
+  waiting(): Payout[] {
+    return this.store.db.prepare("SELECT * FROM payouts WHERE status = 'waiting' ORDER BY created_at").all().map((r) => this.decode(r)!);
+  }
+
   list(limit = 100): Payout[] {
     return this.store.db.prepare("SELECT * FROM payouts ORDER BY created_at DESC LIMIT ?").all(limit).map((r) => this.decode(r)!);
   }
 
   /** Compare-and-set: moves the payout only if it is in one of `from`. Returns whether it moved. */
-  transition(id: string, from: PayoutStatus[], to: PayoutStatus, fields: Partial<Pick<Payout, "buyer" | "fundingTx" | "transferId" | "refundTx" | "failure" | "reasons" | "expiresAt">> = {}): boolean {
+  transition(id: string, from: PayoutStatus[], to: PayoutStatus, fields: Partial<Pick<Payout, "buyer" | "fundingTx" | "transferId" | "refundTx" | "failure" | "reasons" | "expiresAt" | "decision">> = {}): boolean {
     const sets = ["status = ?", ...Object.keys(fields).map((k) => `${COLUMNS[k as keyof Payout]} = ?`)];
     const r = this.store.db.prepare(`UPDATE payouts SET ${sets.join(", ")} WHERE id = ? AND status IN (${from.map(() => "?").join(",")})`)
       .run(to, ...Object.entries(fields).map(([k, v]) => this.encode(k as keyof Payout, v)), id, ...from);
@@ -94,7 +106,7 @@ export class PayoutBook {
 
   /** USD value a buyer has had paid out (or in flight) since `since`. */
   buyerSpentSince(buyer: string, since: Date): number {
-    const r = this.store.db.prepare("SELECT COALESCE(SUM(cost_minor),0) AS s FROM payouts WHERE buyer = ? AND created_at >= ? AND status IN ('accepted','funded','submitted','paid')").get(buyer, since.toISOString()) as { s: number };
+    const r = this.store.db.prepare("SELECT COALESCE(SUM(cost_minor),0) AS s FROM payouts WHERE buyer = ? AND created_at >= ? AND status IN ('accepted','funded','waiting','submitted','paid')").get(buyer, since.toISOString()) as { s: number };
     return Number(r.s);
   }
 
@@ -117,7 +129,8 @@ export class PayoutBook {
   }
 
   private encode(k: keyof Payout, v: unknown): string | number | null {
-    if (k === "beneficiary" || k === "reasons") return JSON.stringify(v ?? (k === "reasons" ? [] : {}));
+    if (k === "decision") return v ? JSON.stringify(v) : null;
+    if (JSON_COLUMNS.has(k)) return JSON.stringify(v ?? (k === "reasons" ? [] : {}));
     return (v ?? null) as string | number | null;
   }
 
@@ -125,7 +138,7 @@ export class PayoutBook {
     if (!r) return undefined;
     const x = r as Record<string, unknown>;
     const out = {} as Record<string, unknown>;
-    for (const [k, col] of Object.entries(COLUMNS)) out[k] = k === "beneficiary" || k === "reasons" ? JSON.parse(String(x[col])) : x[col] ?? null;
+    for (const [k, col] of Object.entries(COLUMNS)) out[k] = JSON_COLUMNS.has(k as keyof Payout) && x[col] != null ? JSON.parse(String(x[col])) : x[col] ?? null;
     return out as unknown as Payout;
   }
 }

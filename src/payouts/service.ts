@@ -19,7 +19,8 @@ import type { Trail } from "../trail.js";
 import { fmt, toMajor, toMinor } from "../treasury/money.js";
 import { PayoutBook, payeeHash, type Payout } from "./book.js";
 import { DEFAULT_PRICING, price, transferFee, type PricingConfig } from "./pricing.js";
-import { assess, DEFAULT_RISK, type RiskConfig } from "./risk.js";
+import { decide, DEFAULT_DECIDE, type DecideConfig, type Decision } from "./decide.js";
+import { assess, DEFAULT_RISK, type RiskConfig, type RiskVerdict } from "./risk.js";
 
 export type PayoutAirwallex = Pick<Airwallex, "fxRate" | "fxConvert" | "createTransfer" | "transferByRequestId" | "validateBeneficiary" | "createBeneficiary" | "currentBalances">
   & Partial<Pick<Airwallex, "verifyAccount">>;
@@ -46,6 +47,14 @@ export const PayoutRequest = z.object({
   invoice_text: z.string().max(20_000).optional(),
   /** The buyer's Metal address, if it wants limits checked at quote time. The settled payer is what counts. */
   buyer: z.string().optional(),
+  /** The most the agent will pay for this payout, in USDZ. Above it, the agent waits (or asks for a higher cap). */
+  max_usdz: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+  /** What the agent can spend now, in USDZ: the lower of its mandate's remaining budget and what it holds. */
+  spendable_usdz: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
+  /** When the invoice is due (YYYY-MM-DD). Without one, the bill is treated as due in 30 days. */
+  due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  /** The payee accepts part payments, so a short budget can split the invoice. */
+  part_payment: z.boolean().default(false),
 });
 export type PayoutRequest = z.input<typeof PayoutRequest>;
 
@@ -69,9 +78,13 @@ export interface PayoutDeps {
   trail?: Trail;
   /** Called once a payout is final (paid, or refunded): Sayso anchors its receipt on Metal. */
   onFinal?: (p: Payout) => void;
+  /** This week's median rate for a currency, in units per 1 USD, so decide() can tell a bad rate from a normal one. */
+  rates?: { median(currency: string, now?: Date): number | undefined; record(currency: string, rate: number, at?: Date): void };
+  decideConfig?: DecideConfig;
 }
 
 const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
 const isAmbiguous = (err: unknown) => !(err instanceof AirwallexError) || err.status >= 500 || err.status === 408 || err.status === 429;
 
 export class PayoutService {
@@ -149,17 +162,49 @@ export class PayoutService {
       else if (check?.verdict === "hold") { if (status === "quoted") status = "needs_review"; reasons.push(check.reason); }
     }
 
+    // Price, balance and risk decide what happens: pay, wait, split or hold. Code, not the model.
+    const risk: RiskVerdict = status === "rejected" ? { verdict: "reject", reasons } : status === "needs_review" ? { verdict: "hold", reasons } : { verdict: "allow" };
+    const median = r.currency === "USD" ? undefined : this.d.rates?.median(r.currency, now);
+    if (r.currency !== "USD") this.d.rates?.record(r.currency, rate, now);
+    const decision = decide({
+      amountMinor, currency: r.currency, costUsdzMinor: pr.totalMinor,
+      capUsdzMinor: r.max_usdz ? toMinor(Number(r.max_usdz)) : Number.MAX_SAFE_INTEGER,
+      // Units per USD: fewer of them than the median means the currency got dearer.
+      rateDrift: median ? (median - rate) / median : 0,
+      spendableUsdzMinor: r.spendable_usdz ? toMinor(Number(r.spendable_usdz)) : Number.MAX_SAFE_INTEGER,
+      risk, dueAt: r.due_date ? new Date(`${r.due_date}T23:59:59Z`) : new Date(now.getTime() + 30 * DAY), partPaymentAllowed: r.part_payment,
+    }, now, this.d.decideConfig ?? DEFAULT_DECIDE);
+    if (decision.verdict === "hold" && status === "quoted") { status = "needs_review"; reasons.push(decision.reason); }
+    // A split quotes the part that can be paid now; the rest is quoted again after the next sweep.
+    let quoted = { amountMinor, ...pr };
+    const first = decision.verdict === "split" ? decision.tranches?.at(0) : undefined;
+    if (first) {
+      // Fees don't shrink with the amount, so trim the first tranche until its full price fits what the agent can spend.
+      const spendable = toMinor(Number(r.spendable_usdz));
+      let part = first.amountMinor;
+      let pp = price(part, r.currency, r.method, rate, this.pricing);
+      while (pp.totalMinor > spendable && part > 0) {
+        part -= Math.max(1, Math.ceil((pp.totalMinor - spendable) * pp.rateUsed));
+        pp = price(part, r.currency, r.method, rate, this.pricing);
+      }
+      quoted = { amountMinor: part, ...pp };
+      decision.tranches = [{ amountMinor: part, costUsdzMinor: pp.totalMinor, when: "now" }, { amountMinor: amountMinor - part, costUsdzMinor: Math.max(0, pr.totalMinor - pp.totalMinor), when: "on_sweep" }];
+      decision.reason = `Splitting: ${toMajor(spendable).toFixed(2)} USDZ can be spent and this costs ${toMajor(pr.totalMinor).toFixed(2)} USDZ, so paying ${fmt(part, r.currency)} now and ${fmt(amountMinor - part, r.currency)} after the next earnings sweep.`;
+    }
+
+    this.d.trail?.add(id, "decide", decision.reason, { verdict: decision.verdict, decided_by: decision.decidedBy }, undefined, now);
+
     const p: Payout = {
-      id, buyer: r.buyer ?? null, currency: r.currency, amountMinor, method: r.method,
+      id, buyer: r.buyer ?? null, currency: r.currency, amountMinor: quoted.amountMinor, method: r.method,
       bankCountry: r.payee.bank_country_code, payeeName: r.payee.name, payeeHash: hash, beneficiary, reference: r.reference,
-      costMinor: pr.costMinor, feeMinor: pr.feeMinor, totalMinor: pr.totalMinor, rateUsed: pr.rateUsed,
+      costMinor: quoted.costMinor, feeMinor: quoted.feeMinor, totalMinor: quoted.totalMinor, rateUsed: quoted.rateUsed,
       status, reasons, createdAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + (status === "needs_review" ? 24 * HOUR : opts.ttlMs ?? this.ttl)).toISOString(),
-      fundingTx: null, transferId: null, refundTx: null, failure: null,
+      fundingTx: null, transferId: null, refundTx: null, failure: null, decision,
     };
     this.book.insert(p);
-    const label = `${fmt(amountMinor, r.currency)} to ${r.payee.name}`;
-    if (status === "quoted") emit("decide", `Quoted ${label}: ${toMajor(pr.totalMinor).toFixed(2)} USDZ (fee ${toMajor(pr.feeMinor).toFixed(2)})`, { payout: p.id });
+    const label = `${fmt(quoted.amountMinor, r.currency)} to ${r.payee.name}`;
+    if (status === "quoted") emit("decide", `Quoted ${label}: ${toMajor(quoted.totalMinor).toFixed(2)} USDZ (fee ${toMajor(quoted.feeMinor).toFixed(2)}). ${decision.reason}`, { payout: p.id, verdict: decision.verdict });
     else if (status === "needs_review") emit("escalate", `Held ${label} for review: ${reasons.join("; ")}`, { payout: p.id, citations: findings?.citations });
     else emit("refuse", `Refused ${label}: ${reasons.join("; ")}`, { payout: p.id });
     return p;
@@ -228,6 +273,35 @@ export class PayoutService {
     }, this.risk);
     if (limits.verdict === "reject") return this.fail(p, limits.reasons.join("; "));
 
+    // A wait keeps the agent's USDZ in escrow at the price it was quoted; the transfer runs once the rate is back in band or the wait ends.
+    if (p.decision?.verdict === "wait" && p.decision.decidedBy === "price" && this.book.transition(id, ["funded"], "waiting")) {
+      emit("decide", `Holding ${toMajor(p.totalMinor).toFixed(2)} USDZ in escrow for ${p.payeeName}: ${p.decision.reason}`, { payout: id }, fundingTx);
+      return this.book.get(id)!;
+    }
+    return this.execute(p);
+  }
+
+  /** Waiting payouts whose rate is back in band, or whose wait has run out, are paid. Runs on every tick. */
+  async releaseWaiting(now = new Date()): Promise<Payout[]> {
+    const released: Payout[] = [];
+    for (const p of this.book.waiting()) {
+      const until = p.decision?.until;
+      const median = this.d.rates?.median(p.currency, now);
+      const rate = (await this.d.awx.fxRate("USD", p.currency).catch(() => undefined))?.rate;
+      if (rate) this.d.rates?.record(p.currency, rate, now);
+      const drift = median && rate ? (median - rate) / median : 0;
+      const inBand = until?.rateWithinPct === undefined || drift <= until.rateWithinPct;
+      const timeUp = until?.by !== undefined && now.toISOString().slice(0, 10) >= until.by;
+      if (!inBand && !timeUp) continue;
+      if (!this.book.transition(p.id, ["waiting"], "funded")) continue;
+      emit("decide", `Releasing ${p.payeeName}'s payout: ${inBand ? `${p.currency} is back within ${(until?.rateWithinPct ?? 0) * 100}% of its median` : "the wait ended before the due date"}`, { payout: p.id });
+      this.d.trail?.add(p.id, "decide", inBand ? "The rate came back into band, so it pays now" : "The wait ended a day before the due date, so it pays at today's rate", undefined, undefined, now);
+      released.push(await this.execute(this.book.get(p.id)!));
+    }
+    return released;
+  }
+
+  private async execute(p: Payout): Promise<Payout> {
     try {
       await this.ensureFloat(p);
     } catch (err) {
@@ -375,6 +449,7 @@ export function publicView(p: Payout) {
     id: p.id, status: p.status, reasons: p.reasons, amount: toMajor(p.amountMinor).toFixed(2), currency: p.currency, method: p.method,
     payee: p.payeeName, reference: p.reference,
     price_usdz: toMajor(p.totalMinor).toFixed(2), fee_usdz: toMajor(p.feeMinor).toFixed(2), rate_used: p.rateUsed,
+    decision: p.decision ? { verdict: p.decision.verdict, decided_by: p.decision.decidedBy, reason: p.decision.reason, tranches: p.decision.tranches, until: p.decision.until, proposed_cap_usdz: p.decision.proposedCapUsdzMinor === undefined ? undefined : toMajor(p.decision.proposedCapUsdzMinor).toFixed(2) } : null,
     created_at: p.createdAt, source: p.buyer?.startsWith("internal:") ? "inbox" : p.buyer ? "agent" : null,
     expires_at: p.expiresAt, funding_tx: p.fundingTx, airwallex_transfer_id: p.transferId, refund_tx: p.refundTx, failure: p.failure,
   };

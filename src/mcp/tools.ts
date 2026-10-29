@@ -16,12 +16,15 @@ export const invoiceShape = {
   bank: z.record(z.string(), z.string()).describe("Bank details as Airwallex bank_details fields, e.g. {\"iban\": \"DE89...\"} or {\"account_number\": \"...\", \"account_routing_type1\": \"sort_code\", \"account_routing_value1\": \"...\"}; US ACH also needs bank_account_category (Checking or Savings)"),
   reference: z.string().describe("Payment reference shown to the payee, max 35 characters"),
   invoice_text: z.string().optional().describe("The invoice or email text that asked for this payment. Sayso reads it and holds anything suspicious."),
+  due_date: z.string().optional().describe("When the invoice is due, YYYY-MM-DD. Sayso may wait for a better rate until a day before it"),
+  part_payment: z.boolean().optional().describe("The payee accepts part payments, so a short budget can pay part now and the rest later"),
 };
 
 export type Invoice = { [K in keyof typeof invoiceShape]: z.infer<(typeof invoiceShape)[K]> };
 
 export const toRequest = (i: Invoice) => ({
   amount: i.amount, currency: i.currency.toUpperCase(), method: i.method, reference: i.reference, invoice_text: i.invoice_text,
+  due_date: i.due_date, part_payment: i.part_payment,
   payee: { name: i.payee_name, entity_type: i.payee_type, bank: i.bank, bank_country_code: i.bank_country.toUpperCase(), address: { country_code: i.payee_country.toUpperCase(), city: i.payee_city, street_address: i.payee_street, postcode: i.payee_postcode, ...(i.payee_state ? { state: i.payee_state } : {}) } },
 });
 

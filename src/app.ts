@@ -39,6 +39,7 @@ import { Trail } from "./trail.js";
 import { payoutApi, type PaymentMode } from "./payouts/http.js";
 import { BatchBook } from "./payouts/batch.js";
 import { PayoutError, PayoutService, publicView, type PayoutAirwallex, type Refunder } from "./payouts/service.js";
+import { RateMedian } from "./payouts/rates.js";
 import type { PayoutBook } from "./payouts/book.js";
 import { flowsFromBooks, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
 import { FakeAirwallex, FakeMandate, FakeRefunder } from "./sim/offline.js";
@@ -161,7 +162,9 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const trail = new Trail(store);
   trail.follow();
   const receipts = new Receipts(store, anchorer, anchorAddress);
-  const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, onFinal: (p) => void receipts.issue(p) });
+  // Offline, the week's median comes from the ECB history; live, from the rates Airwallex has quoted.
+  const rates = opts.offline ? RateMedian.fromCsv() : new RateMedian();
+  const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, rates, onFinal: (p) => void receipts.issue(p) });
   const inbox = new Inbox(store, svc);
   const credit = new SimulatedDepositCredit(awx, process.env.AWX_GLOBAL_ACCOUNT_ID ?? "sim:ga_usd");
   const earnings = earningsFor(svc);
@@ -201,6 +204,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   async function tick() {
     await sweep().catch((e) => emit("escalate", `Sweep failed: ${String(e).slice(0, 200)}`));
     await svc.follow().catch((e) => emit("escalate", `Following payouts failed: ${String(e).slice(0, 200)}`));
+    await svc.releaseWaiting().catch((e) => emit("escalate", `Releasing waiting payouts failed: ${String(e).slice(0, 200)}`));
     await receipts.retry();
     if (imap) await pollImap(imap, inbox);
     const mc = opts.offline || process.env.AGENTMAIL_WEBHOOK_SECRET ? undefined : mailbox.credentials();
