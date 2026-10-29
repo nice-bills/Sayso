@@ -54,11 +54,13 @@ export type BookFlows = Omit<CurrencyFlows, "openingMinor" | "closingMinor">;
  * Builds the recorded flows from our own books (settled ops and credited sweeps).
  * Opening/closing balances and observed deposits come from Airwallex.
  */
-export function flowsFromBooks(store: Store, ledger: RampLedger, rampCurrency: string): Record<string, BookFlows> {
+export function flowsFromBooks(store: Store, ledger: RampLedger, rampCurrency: string, before?: BooksBefore): Record<string, BookFlows> {
   const out: Record<string, BookFlows> = {};
   const f = (ccy: string) => (out[ccy] ??= { depositsMinor: 0, boughtMinor: 0, soldMinor: 0, payoutsMinor: 0, feesMinor: 0, cardSpendMinor: 0 });
-  f(rampCurrency).depositsMinor += ledger.creditedMinor(rampCurrency);
+  f(rampCurrency).depositsMinor += rampSince(ledger, rampCurrency, before).creditedMinor;
   for (const op of store.ops()) {
+    // Operations from before the opening balance was read are already inside it.
+    if (before?.ops.has(op.requestId)) continue;
     if (op.kind === "pay") {
       // Airwallex debits a transfer and its fee when it is created, not when it is paid; a bounce
       // returns the transfer amount but not the fee.
@@ -79,6 +81,21 @@ export function flowsFromBooks(store: Store, ledger: RampLedger, rampCurrency: s
     }
   }
   return out;
+}
+
+/** What the books held when the opening balances were read: the window starts after these. */
+export interface BooksBefore { ops: ReadonlySet<string>; sweeps: ReadonlySet<string> }
+
+export const booksBefore = (store: Store, ledger: RampLedger): BooksBefore =>
+  ({ ops: new Set(store.ops().map((o) => o.requestId)), sweeps: new Set(ledger.all().map((s) => s.operationId)) });
+
+/** Sweeps verified on Metal and credited to Airwallex since the window opened. */
+export function rampSince(ledger: RampLedger, currency: string, before?: BooksBefore): { verifiedMinor: number; creditedMinor: number } {
+  const sweeps = ledger.all().filter((s) => s.currency === currency && !before?.sweeps.has(s.operationId));
+  return {
+    verifiedMinor: sweeps.filter((s) => s.eventKey !== null && (s.status === "verified" || s.status === "credited")).reduce((t, s) => t + s.amountMinor, 0),
+    creditedMinor: sweeps.filter((s) => s.status === "credited").reduce((t, s) => t + s.amountMinor, 0),
+  };
 }
 
 export function reportReconcile(r: { ok: boolean; checks: Check[] }): void {

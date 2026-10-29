@@ -42,7 +42,7 @@ import { whatIf } from "./payouts/decide.js";
 import { decisionView, PayoutError, PayoutService, publicView, type PayoutAirwallex, type Refunder } from "./payouts/service.js";
 import { RateMedian } from "./payouts/rates.js";
 import type { PayoutBook } from "./payouts/book.js";
-import { flowsFromBooks, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
+import { booksBefore, flowsFromBooks, rampSince, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
 import { FakeAirwallex, FakeMandate, FakeRefunder } from "./sim/offline.js";
 import { Store } from "./store.js";
 import { fmt, toMinor } from "./treasury/money.js";
@@ -172,6 +172,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   const balances = async () => Object.fromEntries((await awx.currentBalances()).map((b) => [b.currency, toMinor(b.available_amount)]));
   const opening = await balances();
+  // The books are reconciled from this moment: what an earlier run did is already in the opening balances.
+  const before = booksBefore(store, ledger);
   let lastReconcile: ReturnType<typeof reconcile> | undefined;
   let lastBalances = opening;
 
@@ -185,13 +187,14 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   async function reconcileNow() {
     lastBalances = await balances();
-    const books = flowsFromBooks(store, ledger, "USD");
+    const books = flowsFromBooks(store, ledger, "USD", before);
     const currencies: Record<string, CurrencyFlows> = {};
     for (const ccy of new Set([...Object.keys(opening), ...Object.keys(lastBalances), ...Object.keys(books)])) {
       const b = books[ccy] ?? { depositsMinor: 0, boughtMinor: 0, soldMinor: 0, payoutsMinor: 0, feesMinor: 0, cardSpendMinor: 0 };
       currencies[ccy] = { openingMinor: opening[ccy] ?? 0, closingMinor: lastBalances[ccy] ?? 0, ...b };
     }
-    lastReconcile = reconcile({ rampCurrency: "USD", metalSweptMinor: ledger.verifiedOnChainMinor("USD"), rampCreditedMinor: ledger.creditedMinor("USD"), airwallexDepositsMinor: credit.depositedMinor(), currencies });
+    const ramp = rampSince(ledger, "USD", before);
+    lastReconcile = reconcile({ rampCurrency: "USD", metalSweptMinor: ramp.verifiedMinor, rampCreditedMinor: ramp.creditedMinor, airwallexDepositsMinor: credit.depositedMinor(), currencies });
     reportReconcile(lastReconcile);
     return lastReconcile;
   }

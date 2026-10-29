@@ -14,6 +14,21 @@ Sayso is a payout rail between agent money and the real economy.
 - **For marketplaces.** One agent call pays up to 100 sellers or contractors with a single x402 payment. Each line is checked on its own, and a bounced line is refunded on its own.
 - **From anywhere.** Any agent connects by URL with its own key: Claude Code (plugin included), claude.ai, ChatGPT, Cursor, OpenClaw, or the assistant someone texts from iMessage. Text it a photo of an invoice and get back "Pay €280 to Kreuzberg Studio? [tap]". Agents can propose payments but never approve them. Invoices can also be emailed to an AgentMail address.
 
+## How the agent decides
+
+Every payout goes through one pure function, `decide()` (`src/payouts/decide.ts`), which reads three inputs and the due date and returns a verdict, the input that decided it, and one sentence of reason. The rules run in order and the first match wins:
+
+| Input changes | Verdict | What moves |
+| --- | --- | --- |
+| Risk: new bank details, pressure, a payee's bank that disagrees | **Hold** | A 0.01 transfer with a code to the new account on Airwallex; the agent's USDZ stays in escrow on Metal |
+| Price: the rate is over 1.5% worse than the week's median, or the cost is above the agent's cap, and the bill isn't due for 2+ days | **Wait** | The agent pays now over x402 into escrow; Airwallex pays once the rate is back in band or a day before the due date |
+| Price over the cap and due within 2 days | **Hold**, with the cap it needs | The owner approves with `metal-agent mandate replace` |
+| Balance: the agent's budget (or Sayso's float, for the inbox) covers part of it and the payee takes part payments | **Split** | The covered part is paid now; the rest after the next earnings sweep |
+| Balance short otherwise | **Wait** for funds | An earnings sweep under the ramp-only mandate, then the transfer |
+| Everything clear | **Pay** | x402 on Metal, then the Airwallex transfer |
+
+The app shows the verdict, the three inputs and the reason on every payout, and on the sandbox a "What if" row changes one input to show the flip (labelled: nothing moves). The model never sets a number; it can only add risk findings.
+
 ## Why it matters
 
 Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a print shop in London. Businesses lose real money to invoice fraud ("our bank details have changed"). Sayso answers both with the same idea: **a prompt is not a financial control.** The model reads emails. Code and on-chain mandates decide what moves.
@@ -38,7 +53,7 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 ## How we built it
 
 - **Airwallex:** FX rates and conversions (only the shortfall is converted), beneficiary validation, account verification with bank name matching (VoP/CoP) and creation, transfers with `request_id` idempotency and a purpose code, signed webhooks for transfer status (including bank returns after `PAID`), balances, and deposit simulation for the off-ramp.
-- **Metal:** x402 payments with `@metalntwx/metal-pay` on Metal testnet (USDZ), and two mandates through the official `metal-agent` CLI: a ramp-only sweep mandate and a capped refund mandate. On-chain refusals are recorded for the heist. Agents can pay under their owner's mandate (Verifiable Intent): Sayso asks for the agent's signed order with `requireSignedOffer`, runs `verifyMandatePayment`'s four steps on every such payment, and reads the remaining budget with `readMandateState`. Sweeps release only delivered payouts (escrow), and each final payout's receipt hash is anchored on chain through the MIP20 gas envelope (`@metalntwx/metal-ts`).
+- **Metal (the builder guide's Kit 11, from the payer's side):** signed orders required on the x402 route, an owner's mandate per agent, refusals that come back with a reason, limits raised by `mandate replace`, disputes refunded by `mandate pull --payment-id`, earnings moved to Airwallex with the Metal hash as the deposit reference, and a timed-out payment looked up before anything is retried. x402 payments with `@metalntwx/metal-pay` 0.3.4 and `metal-agent` 0.3.3 on Metal testnet (USDZ), and two mandates through the official `metal-agent` CLI: a ramp-only sweep mandate and a capped refund mandate. On-chain refusals are recorded for the heist. Agents can pay under their owner's mandate (Verifiable Intent): Sayso asks for the agent's signed order with `requireSignedOffer`, runs `verifyMandatePayment`'s four steps on every such payment, and reads the remaining budget with `readMandateState`. Sweeps release only delivered payouts (escrow), and each final payout's receipt hash is anchored on chain through the MIP20 gas envelope (`@metalntwx/metal-ts`).
 - **Claude:** reads invoice emails into structured fields with a strict schema (Claude Opus 5.5 with structured outputs). A pattern extractor takes over with no key; neither one decides money.
 - **MCP, two ways.** A local server for agents with their own Metal wallet (`pay_invoice`, `pay_batch`, `pay_quote`, `quote_payout`, `payout_status`, `batch_status`). A hosted endpoint for any agent, with per-agent keys and caps (`forward_invoice`, `list_invoices`, `quote_payout`, `payout_status`). Approving is deliberately not a tool.
 - **Everywhere else:** a Claude Code plugin with a skill that teaches the approval flow, a skill for OpenClaw-style agents, AgentMail email intake (Svix-signed webhooks), and ntfy phone notifications that open the approval page.
