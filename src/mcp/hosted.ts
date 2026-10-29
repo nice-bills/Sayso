@@ -66,6 +66,8 @@ export function cardOf(item: Listed, base: string) {
     reference: p?.reference ?? f.reference, due: f.dueDate, account: account.length >= 4 ? account.slice(-4) : null,
     reasons: p?.reasons ?? [], missing: item.missing, price_usdz: p?.price_usdz ?? null, forwarded_by: via,
     approval_url: `${base}${approvalPath(item.id)}`,
+    // What Sayso decided and why, so the card can lead with it.
+    decision: p?.decision ? { verdict: p.decision.verdict, decided_by: p.decision.decided_by, reason: p.decision.reason, inputs: p.decision.inputs } : null,
   };
 }
 const cards = (d: HostedDeps, base: string, include_done?: boolean) =>

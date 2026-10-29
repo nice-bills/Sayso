@@ -13,7 +13,7 @@
 html,body{margin:0;background:transparent}
 body{font-family:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
 button{font-family:inherit;color:inherit}
-.sx{position:relative;overflow:hidden;min-height:560px;border-radius:24px;background:var(--bg,var(--ground));color:var(--fg,var(--ink));padding:20px;display:flex;flex-direction:column;transition:background-color .45s cubic-bezier(.65,0,.35,1),color .35s}
+.sx{position:relative;overflow:hidden;min-height:520px;border-radius:24px;background:var(--bg,var(--ground));color:var(--fg,var(--ink));padding:20px;display:flex;flex-direction:column;transition:background-color .45s cubic-bezier(.65,0,.35,1),color .35s}
 .sx>*:not(.zoom):not(.flood):not(.pop){width:100%;max-width:480px;align-self:center}
 .sx>.track{width:100%}
 .sx>.pop{width:80px}
@@ -93,6 +93,26 @@ button{font-family:inherit;color:inherit}
 @keyframes draw{to{stroke-dashoffset:0}}
 .huge{font-size:80px;font-weight:600;letter-spacing:-.06em;line-height:.95;animation:rise .7s .15s cubic-bezier(.16,1,.3,1) both}
 @keyframes rise{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:none}}
+/* the decision: verdict and reason first, then what it weighed, one row each */
+.dc{margin-top:20px;border-radius:20px;padding:16px 18px 6px;background:rgba(255,255,255,.6);color:var(--ink)}
+.dark .dc{background:#23282f;color:#ffffff}
+.dc-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.dc-v{font-size:28px;font-weight:600;letter-spacing:-.04em;line-height:1}
+.dc-v.pay{color:var(--paid)}.dc-v.hold,.dc-v.reject{color:var(--held)}.dc-v.wait,.dc-v.split{color:#8a5a00}
+.dark .dc-v.pay{color:var(--lime)}.dark .dc-v.hold,.dark .dc-v.reject{color:#ff8a80}.dark .dc-v.wait,.dark .dc-v.split{color:#ffc66b}
+.dc-by{font-size:13px;color:var(--muted)}.dark .dc-by{color:#b9bec5}
+.dc-r{margin:8px 0 6px;font-size:16px;line-height:1.45;letter-spacing:-.005em}
+.dc-f{display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:10px;padding:11px 0;border-top:1px solid rgba(21,25,30,.1);font-size:15px}
+.dark .dc-f{border-top-color:rgba(255,255,255,.1)}
+.dc-f .k{color:var(--muted);display:flex;align-items:center;gap:8px}.dark .dc-f .k{color:#b9bec5}
+.dc-f.by .k{color:inherit;font-weight:600}
+.dc-f .v{text-align:right;font-variant-numeric:tabular-nums}.dc-f .v b{font-weight:600}
+.dc-dot{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;background:var(--paid)}
+.dc-f.off .dc-dot{background:var(--held)}
+.dc-tag{font-size:11px;font-weight:600;background:var(--lime);color:var(--ink);border-radius:999px;padding:2px 8px}
+.facts.quiet{margin-top:12px}
+.facts .miss{color:var(--held)}
+.lead{margin:18px 0 0;font-size:19px;line-height:1.4;font-weight:500;letter-spacing:-.015em}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01s!important;transition-duration:.01s!important}}
 </style>
 </head>
@@ -187,6 +207,7 @@ function setGround(bg, fg) { root.style.setProperty("--bg", bg || "var(--ground)
 function render() {
   var keep = root.querySelector(".deck");
   root.textContent = "";
+  root.classList.remove("dark");
   var it = S.open && S.items.find(function (i) { return i.id === S.open; });
   if (S.phase === "done" && it) return renderDone(it);
   if (S.phase === "card" && it) return renderCard(it, keep);
@@ -199,7 +220,7 @@ function topBar(back) {
   var p = pending().length;
   return h("div", { class: "top" }, [
     back ? h("button", { class: "icon", "aria-label": "Back to the stack", onclick: back }, svg("M15 6l-6 6 6 6", "currentColor", 22, 2.2)) : h("span", { class: "mark" }, "sayso"),
-    back ? h("span", { class: "mark" }, "sayso") : h("span", {}, p ? p + (p === 1 ? " needs you" : " need you") : "All clear"),
+    back ? h("span", { class: "mark" }, "sayso") : null,
     h("button", { class: "icon", "aria-label": "Refresh", onclick: function () { refresh(); } }, svg("M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7", "currentColor", 20, 2.2)),
   ]);
 }
@@ -216,8 +237,8 @@ function renderList(keep) {
   }
   var cur = list[0].currency, same = list.every(function (i) { return i.amount && i.currency === cur; });
   var total = same ? list.reduce(function (n, i) { return n + Number(i.amount); }, 0) : 0;
-  root.append(h("div", { class: "head in" }, [h("span", { class: "lbl" }, "Waiting for your swipe"), h("span", { class: "lbl" }, list.length > 1 ? "Swipe for the next one" : "")]));
-  root.append(h("div", { class: "big in d1" }, total ? money(total.toFixed(2), cur) : list.length + (list.length === 1 ? " to check" : " to check")));
+  root.append(h("div", { class: "head in" }, [h("span", { class: "lbl" }, list.length === 1 ? "1 needs you" : list.length + " need you"), h("span", { class: "lbl" }, list.length > 1 ? "Swipe for the next, tap to open" : "Tap to open")]));
+  root.append(h("div", { class: "big in d1" }, total ? money(total.toFixed(2), cur) : list.length + " to check"));
   var deck = keep || h("div", { class: "deck" });
   var len = list.length, top = ((S.top % len) + len) % len;
   var byId = {};
@@ -236,7 +257,6 @@ function renderList(keep) {
   });
   [].slice.call(deck.children).sort(function (a, b) { return b._rank - a._rank; }).forEach(function (c) { deck.append(c); });
   root.append(deck);
-  root.append(h("div", { class: "hint in d2" }, "Tap a card to open it"));
   if (len > 1) root.append(h("div", { class: "dots", "aria-hidden": "true" }, list.map(function (_, i) { return h("span", { class: i === top ? "on" : "" }); })));
   root.append(h("div", { class: "fill" }));
 }
@@ -304,27 +324,28 @@ function renderCard(it, keep) {
   root.append(h("div", { class: "row in", style: "margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px;font-weight:500" }, [
     h("span", {}, it.payee || it.from), h("span", { class: "tag", style: "background:" + L.tagBg + ";color:" + L.tagFg }, L.tag)]));
   root.append(h("div", { class: "big blur", style: "margin-top:8px" }, amountOf(it)));
-  var chip = function (t, n, red) { return h("span", { class: "chip c" + n + (red ? " red" : "") }, t); };
+  var dark = it.status === "needs_verification";
+  root.classList.toggle("dark", dark);
+  var row = function (k, v, cls) { return v ? h("div", { class: cls || "" }, [h("span", {}, k), h("span", {}, v)]) : null; };
+  var facts = function (rows) { rows = rows.filter(Boolean); return rows.length ? h("div", { class: "facts quiet in d3" }, rows) : null; };
 
   if (it.status === "awaiting_approval") {
-    root.append(h("p", { class: "sent blur d1" }, [
-      it.forwarded_by ? it.forwarded_by + " forwarded " : "This is ", it.reference ? ["invoice ", chip(it.reference, 1)] : "an invoice", ". It goes to ",
-      it.account ? chip("•••• " + it.account, 2) : "the account on the invoice", it.due ? [", due ", chip(it.due, 3)] : "", ".",
-    ].flat()));
-    root.append(h("div", { class: "facts in d3" }, [
-      h("div", {}, [h("span", {}, "From"), h("span", {}, it.from)]),
-      h("div", {}, [h("span", {}, "From your balance"), h("span", {}, it.price_usdz ? "about $" + it.price_usdz : "on approval")]),
+    root.append(decision(it) || h("p", { class: "lead blur d1" }, "Ready to pay."));
+    root.append(facts([
+      row("Reference", it.reference), row("Into", it.account ? "•••• " + it.account : null), row("Due", it.due ? dateOf(it.due) : null),
+      row(it.forwarded_by ? "Forwarded by" : "From", it.forwarded_by || it.from), it.decision ? null : row("From your balance", it.price_usdz ? "about $" + it.price_usdz : null),
     ]));
     root.append(h("div", { class: "fill" }));
     if (S.phase === "card" && S.waiting === it.id) root.append(waitBox(it));
     else root.append(track(it, L));
   } else if (it.status === "needs_verification") {
-    root.append(h("p", { class: "sent blur d1" }, ["Sayso held this. ", it.reasons.map(function (r, i) { return [chip(r, i + 1, true), i < it.reasons.length - 1 ? " " : ""]; })].flat(2)));
-    root.append(h("p", { class: "note in d3" }, "Pay stays locked until you confirm the bank details with the payee directly. Sayso can send 1 cent with a code that only the account's owner can read back."));
+    root.append(decision(it) || h("p", { class: "lead blur d1" }, "Sayso held this: " + (it.reasons.join("; ") || "it looks risky") + "."));
+    root.append(h("p", { class: "note in d3" }, "Pay stays locked until the bank details are confirmed with the payee, not by email. Sayso can check with a 1-cent code only the account's owner can read back."));
     root.append(h("div", { class: "fill" }));
     root.append(h("button", { class: "btn in d4", style: "background:#c6f432;color:#15191e;font-weight:600", onclick: function () { openLink(it.approval_url); } }, "Check it in Sayso"));
   } else {
-    root.append(h("p", { class: "sent blur d1" }, ["They sent this without ", it.missing.map(function (m, i) { return [chip(m, i + 1), i < it.missing.length - 2 ? ", " : i === it.missing.length - 2 ? " and " : ""]; }), ". Sayso can't pay it yet."].flat(2)));
+    root.append(h("p", { class: "lead blur d1" }, "Sayso can't pay this yet. The email leaves out:"));
+    root.append(facts(it.missing.map(function (m) { return row(m.charAt(0).toUpperCase() + m.slice(1), "Missing", "miss"); })));
     root.append(h("div", { class: "fill" }));
     var a = S.asked[it.id];
     if (a && a.sending) root.append(h("div", { class: "wait in" }, ["Emailing them", h("span", { class: "pulse" }), h("span", { class: "pulse e2" }), h("span", { class: "pulse e3" })]));
@@ -332,6 +353,33 @@ function renderCard(it, keep) {
     else if (a && a.error) root.append(h("div", {}, [h("div", { class: "wait in" }, a.error), h("button", { class: "btn in d1", style: "margin-top:12px;width:100%;background:#15191e;color:#ffffff", onclick: function () { askFor(it); } }, "Try again")]));
     else root.append(h("button", { class: "btn in d3", style: "background:#15191e;color:#ffffff", onclick: function () { askFor(it); } }, "Ask them for the details"));
   }
+}
+
+var VERDICT = { pay: "Pay", wait: "Wait", split: "Split", hold: "Hold", reject: "Refuse" };
+var DECIDED = { price: "price", deadline: "the due date", balance: "balance", risk: "risk" };
+function decision(it) {
+  var d = it.decision;
+  if (!d) return null;
+  var i = d.inputs || {}, by = d.decided_by === "deadline" ? "price" : d.decided_by;
+  var price = Number(i.price_usdz), cap = Number(i.cap_usdz);
+  var f = function (key, label, value, ok) {
+    return h("div", { class: "dc-f" + (ok ? "" : " off") + (by === key ? " by" : "") }, [
+      h("span", { class: "dc-dot" }, svg(ok ? "M6 12.5l4 4L18 8.5" : "M12 7v6M12 17h.01", "#ffffff", 12, 3)),
+      h("span", { class: "k" }, [label, by === key ? h("span", { class: "dc-tag" }, "Decided it") : null]),
+      h("span", { class: "v" }, value),
+    ]);
+  };
+  return h("div", { class: "dc blur d1", role: "group", "aria-label": "Decision: " + (VERDICT[d.verdict] || d.verdict) }, [
+    h("div", { class: "dc-head" }, [h("span", { class: "dc-v " + d.verdict }, VERDICT[d.verdict] || d.verdict), h("span", { class: "dc-by" }, "Decided by " + (DECIDED[d.decided_by] || d.decided_by))]),
+    h("p", { class: "dc-r" }, d.reason),
+    f("price", "Price", [h("b", {}, i.price_usdz), cap ? " of " + i.cap_usdz + " USDZ" : " USDZ"], !(cap && price > cap) && !(i.rate_drift_pct > 1.5)),
+    f("balance", "Balance", i.spendable_usdz ? [h("b", {}, i.spendable_usdz), " USDZ"] : "No budget set", !i.spendable_usdz || Number(i.spendable_usdz) >= price),
+    f("risk", "Risk", i.risk === "allow" ? "Clear" : i.risk === "hold" ? "Held" : "Refused", i.risk === "allow"),
+  ]);
+}
+function dateOf(s) {
+  var d = new Date(s + "T12:00:00");
+  return isNaN(d) ? s : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 function track(it, L) {
