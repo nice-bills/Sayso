@@ -132,6 +132,7 @@ Claude.ai, ChatGPT, approval links on a phone and Airwallex webhooks need Sayso 
 | `src/web/` | The app (no build step). `tests/app.e2e.ts` drives it in a browser. |
 | `src/auth.ts`, `src/agents/` | The owner's sign-in, and agent keys. |
 | `src/mcp/hosted.ts` | The hosted MCP endpoint and its REST twin. |
+| `src/mcp/view.html` | The cards chat apps draw inline (an MCP App): swipe, tap to open, swipe to approve in Sayso. |
 | `plugins/sayso/`, `integrations/` | The Claude Code plugin and the skill for OpenClaw-style agents. |
 | `src/app.ts`, `src/serve.ts`, `src/demo.ts` | The service in one process, and the demo that drives it through MCP and the inbox. |
 | `src/treasury/`, `src/agent/` | The treasury policy, bound approvals, the email reader and the executor. |

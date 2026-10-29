@@ -13,6 +13,10 @@ Sayso needs a public HTTPS address for chat apps to reach it. Set `PUBLIC_URL` t
 | **OpenClaw, Hermes, other skill-based agents** | Copy `integrations/agent-skill/sayso` into the agent's skills folder and set `SAYSO_URL` and `SAYSO_AGENT_KEY`. The skill uses the REST twin, `POST /v1/agent/invoices`. | REST endpoint tested |
 | **An agent with its own Metal wallet** | Run the local MCP server, which pays quotes over x402 with the agent's key: `claude mcp add sayso -e SAYSO_URL=... -e SAYSO_BUYER_KEY=0x... -- npx tsx src/mcp/server.ts` | Yes (offline) |
 
+## Cards inside the chat (MCP Apps)
+
+In chat apps that support MCP Apps (Claude, ChatGPT, VS Code, Goose and others), `list_invoices` and `forward_invoice` show the inbox as Sayso cards right in the conversation. Swipe for the next invoice, tap one to open it, and swipe to approve. Approving opens Sayso, where you confirm with your passkey, and the card turns green once the payment is on its way. A held invoice opens the 1 cent check, and one missing details can ask the sender for them through the chat. Apps without MCP Apps get the same tools as plain text.
+
 ## Texting your agent (iMessage, WhatsApp, Telegram)
 
 Sayso doesn't run a chat bot; you bring your own assistant (OpenClaw, Poke, or anything that texts and supports MCP or skills). Connect it as above, then:

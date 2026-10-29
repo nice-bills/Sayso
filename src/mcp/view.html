@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sayso</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap">
+<style>
+/* Sayso inside a chat app (an MCP App). The same cards as the phone: swipe for the next one, tap
+   to open, swipe to approve. Approving still happens in Sayso with the owner's passkey. */
+:root{--ground:#d6eee2;--ink:#15191e;--muted:#3f454c;--lime:#c6f432;--paid:#0f7a4f;--held:#c8322b;--sky:#d9e5f4;--line:#e9ebe6}
+*{box-sizing:border-box}
+html,body{margin:0;background:transparent}
+body{font-family:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+button{font-family:inherit;color:inherit}
+.sx{position:relative;overflow:hidden;min-height:560px;border-radius:24px;background:var(--bg,var(--ground));color:var(--fg,var(--ink));padding:20px;display:flex;flex-direction:column;transition:background-color .45s cubic-bezier(.65,0,.35,1),color .35s}
+.sx>*:not(.zoom):not(.flood):not(.pop){width:100%;max-width:480px;align-self:center}
+.sx>.track{width:100%}
+.sx>.pop{width:80px}
+.sx>.track.morph{width:68px}
+.top{display:flex;justify-content:space-between;align-items:center;min-height:36px;font-size:14px;font-weight:500}
+.mark{font-size:17px;font-weight:600;letter-spacing:-.02em}
+.icon{width:40px;height:40px;margin:-4px;border:0;border-radius:50%;background:transparent;display:grid;place-items:center;cursor:pointer}
+.icon:hover{background:rgba(21,25,30,.06)}
+.in{animation:in .55s cubic-bezier(.16,1,.3,1) both}
+.d1{animation-delay:.08s}.d2{animation-delay:.16s}.d3{animation-delay:.24s}.d4{animation-delay:.32s}
+@keyframes in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.blur{animation:blur .8s cubic-bezier(.16,1,.3,1) both}
+@keyframes blur{from{opacity:0;filter:blur(10px);transform:translateY(10px)}to{opacity:1;filter:none;transform:none}}
+.lbl{font-size:14px;font-weight:500;color:var(--muted)}
+.head{margin-top:14px;display:flex;justify-content:space-between;align-items:baseline}
+.big{font-size:56px;font-weight:600;letter-spacing:-.055em;line-height:1;font-variant-numeric:tabular-nums}
+.deck{position:relative;margin:14px auto 0;width:100%;max-width:420px;height:200px}
+.card{position:absolute;left:0;right:0;top:0;height:160px;border:0;border-radius:24px;padding:18px 20px;text-align:left;cursor:pointer;display:flex;flex-direction:column;justify-content:space-between;touch-action:pan-y;user-select:none;-webkit-user-select:none;transition:transform .6s cubic-bezier(.34,1.25,.64,1),opacity .4s}
+.card.k0{transform:translateY(32px);z-index:4;cursor:grab}
+.card.k1{transform:translateY(16px) scale(.94);z-index:3}
+.card.k2{transform:translateY(0) scale(.88);z-index:2}
+.card.kx{transform:translateY(0) scale(.82);z-index:1;opacity:0}
+.card.drag{transition:none;cursor:grabbing}
+.card.out{transform:translate(-520px,40px) rotate(-22deg);z-index:5;transition:transform .38s cubic-bezier(.4,0,.8,.5)}
+.card.outR{transform:translate(520px,40px) rotate(22deg);z-index:5;transition:transform .38s cubic-bezier(.4,0,.8,.5)}
+.card .row{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px;font-weight:500}
+.card .who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag{flex:none;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:600}
+.card .amt{display:block;font-size:36px;font-weight:600;letter-spacing:-.05em;line-height:1}
+.card .sub{display:block;font-size:14px;margin-top:6px;opacity:.78}
+.arrow{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;flex:none;transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
+.card:hover .arrow{transform:rotate(45deg)}
+.hint{margin-top:8px;text-align:center;font-size:13px;color:var(--muted)}
+.dots{display:flex;justify-content:center;gap:6px;margin-top:10px}
+.dots span{width:6px;height:6px;border-radius:3px;background:rgba(21,25,30,.22);transition:width .35s cubic-bezier(.34,1.4,.64,1),background-color .3s}
+.dots span.on{width:20px;background:var(--ink)}
+.sent{margin:18px 0 0;font-size:25px;line-height:1.34;font-weight:500;letter-spacing:-.03em}
+.chip{display:inline-block;background:#ffffff;color:var(--ink);border-radius:10px;padding:0 8px;margin:2px 0;animation:chip .5s cubic-bezier(.34,1.56,.64,1) both}
+.chip.red{background:var(--held);color:#ffffff}
+.chip.c1{animation-delay:.3s}.chip.c2{animation-delay:.45s}.chip.c3{animation-delay:.6s}
+@keyframes chip{from{transform:scale(.6);opacity:0}to{transform:none;opacity:1}}
+.facts{margin-top:18px;background:#ffffff;color:var(--ink);border-radius:18px;padding:4px 18px;font-size:15px}
+.facts div{display:flex;justify-content:space-between;gap:12px;padding:12px 0}
+.facts div+div{border-top:1px solid var(--line)}
+.facts span:first-child{color:var(--muted)}
+.facts span:last-child{font-weight:600;text-align:right}
+.note{margin-top:16px;font-size:15px;line-height:1.45;opacity:.85}
+.fill{flex:1;min-height:20px}
+.btn{height:60px;border:0;border-radius:999px;font-size:17px;font-weight:500;cursor:pointer;transition:transform .15s}
+.btn:active{transform:scale(.97)}
+.track{position:relative;align-self:center;width:100%;height:68px;border-radius:999px;overflow:hidden;transition:width .45s cubic-bezier(.65,0,.35,1),background-color .3s}
+.track.morph{width:68px}
+.track .bar{position:absolute;left:0;top:0;bottom:0;border-radius:999px}
+.track .label{position:absolute;inset:0;display:grid;place-items:center;font-size:17px;font-weight:500;padding-left:40px;white-space:nowrap;pointer-events:none}
+.thumb{position:absolute;left:5px;top:5px;width:58px;height:58px;border-radius:50%;border:0;display:grid;place-items:center;cursor:grab;touch-action:none;transition:transform .5s cubic-bezier(.34,1.4,.64,1),opacity .2s}
+.thumb.drag{transition:none;cursor:grabbing}
+.track.morph .thumb,.track.morph .label,.track.morph .bar{opacity:0}
+.nudge{animation:nudge 1.8s ease-in-out infinite}
+.thumb.drag .nudge{animation:none}
+@keyframes nudge{0%,60%,100%{transform:none}30%{transform:translateX(5px)}}
+.spin{position:absolute;left:50%;top:50%;margin:-13px 0 0 -13px;opacity:0;transition:opacity .2s .25s}
+.track.morph .spin{opacity:1;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.wait{margin-top:18px;border-radius:18px;padding:16px 18px;font-size:15px;line-height:1.45;background:#ffffff;color:var(--ink)}
+.wait b{font-weight:600}
+.pulse{display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-left:4px;animation:pulse 1.2s ease-in-out infinite}
+.pulse.e2{animation-delay:.2s}.pulse.e3{animation-delay:.4s}
+@keyframes pulse{0%,100%{opacity:.2}50%{opacity:1}}
+.link{border:0;background:none;padding:0;font-size:15px;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.zoom{position:absolute;inset:0;z-index:30;animation:zoom .5s cubic-bezier(.65,0,.35,1) both;pointer-events:none}
+@keyframes zoom{from{clip-path:inset(var(--t) var(--x) var(--b) var(--x) round 24px)}to{clip-path:inset(0 0 0 0 round 24px)}}
+.flood{position:absolute;inset:0;z-index:30;background:var(--paid);animation:flood .75s cubic-bezier(.65,0,.35,1) both;pointer-events:none}
+@keyframes flood{from{clip-path:circle(34px at 50% calc(100% - 54px))}to{clip-path:circle(140% at 50% calc(100% - 54px))}}
+.pop{width:80px;height:80px;border-radius:50%;background:#ffffff;display:grid;place-items:center;animation:pop .6s .1s cubic-bezier(.34,1.7,.64,1) both}
+@keyframes pop{from{transform:scale(0)}to{transform:none}}
+.check{stroke-dasharray:40;stroke-dashoffset:40;animation:draw .45s .45s cubic-bezier(.65,0,.35,1) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.huge{font-size:80px;font-weight:600;letter-spacing:-.06em;line-height:.95;animation:rise .7s .15s cubic-bezier(.16,1,.3,1) both}
+@keyframes rise{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01s!important;transition-duration:.01s!important}}
+</style>
+</head>
+<body>
+<div class="sx" id="sx"><div class="top"><span class="mark">sayso</span><span>Loading…</span></div></div>
+<script>
+"use strict";
+// ---- The MCP Apps bridge: JSON-RPC over postMessage with the chat app hosting this view. ----
+var nextId = 1, waiting = new Map(), inHost = window.parent !== window;
+function post(msg) { if (inHost) window.parent.postMessage(Object.assign({ jsonrpc: "2.0" }, msg), "*"); }
+function request(method, params) {
+  if (!inHost) return Promise.reject(new Error("not in a chat app"));
+  var id = nextId++;
+  post({ id: id, method: method, params: params || {} });
+  return new Promise(function (resolve, reject) {
+    waiting.set(id, { resolve: resolve, reject: reject });
+    setTimeout(function () { if (waiting.delete(id)) reject(new Error(method + " timed out")); }, 20000);
+  });
+}
+function notify(method, params) { post({ method: method, params: params || {} }); }
+window.addEventListener("message", function (e) {
+  var m = e.data;
+  if (!m || m.jsonrpc !== "2.0") return;
+  if (m.id != null && !m.method) {
+    var w = waiting.get(m.id);
+    if (!w) return;
+    waiting.delete(m.id);
+    return m.error ? w.reject(new Error(m.error.message || "failed")) : w.resolve(m.result);
+  }
+  if (m.method === "ui/notifications/tool-result") return fromResult(m.params);
+  if (m.method === "ui/notifications/host-context-changed") return;
+  if (m.method === "ui/resource-teardown" && m.id != null) return post({ id: m.id, result: {} });
+  if (m.id != null) post({ id: m.id, result: {} });
+});
+
+// ---- State ----
+var S = { items: [], top: 0, open: null, phase: "list", sx: 0, drag: null, out: null, asked: {}, error: null };
+var MAXW = 0;
+
+function money(a, c) {
+  var sym = { EUR: "€", GBP: "£", USD: "$" }[c];
+  var n = Number(a).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return sym ? sym + n : n + " " + (c || "");
+}
+var looks = {
+  awaiting_approval: { tag: "Ready", tagBg: "#0f7a4f", tagFg: "#ffffff", bg: "#c6f432", fg: "#15191e" },
+  needs_verification: { tag: "Held", tagBg: "#c8322b", tagFg: "#ffffff", bg: "#15191e", fg: "#ffffff" },
+  needs_details: { tag: "Missing details", tagBg: "#ffffff", tagFg: "#15191e", bg: "#d9e5f4", fg: "#15191e" },
+  paying: { tag: "Paying", tagBg: "#ffffff", tagFg: "#0f7a4f", bg: "#0f7a4f", fg: "#ffffff" },
+};
+function look(it) { return looks[it.status] || looks.needs_details; }
+function amountOf(it) { return it.amount ? money(it.amount, it.currency) : "A question"; }
+function subOf(it) {
+  if (it.status === "needs_verification") return it.reasons[0] || "Looks risky";
+  if (it.status === "needs_details") return "Missing " + it.missing.join(", ");
+  if (it.status === "paying") return "Approved, paying now";
+  return (it.forwarded_by ? it.forwarded_by + " forwarded it" : "From " + it.from) + (it.reference ? " · " + it.reference : "");
+}
+function pending() { return S.items.filter(function (i) { return looks[i.status] && i.status !== "paying"; }); }
+
+function fromResult(r) {
+  var sc = r && r.structuredContent;
+  if (!sc || !Array.isArray(sc.items)) { S.error = "Sayso sent nothing to show."; return render(); }
+  S.items = sc.items; S.error = null;
+  if (sc.focus) { var f = S.items.find(function (i) { return i.id === sc.focus; }); if (f && looks[f.status]) { S.open = f.id; S.phase = "card"; } }
+  render();
+}
+function refresh() {
+  return request("tools/call", { name: "list_invoices", arguments: { include_done: true } }).then(fromResult, function () {});
+}
+
+// ---- Rendering: plain DOM, rebuilt per state change; the deck reuses its cards so they animate. ----
+var root = document.getElementById("sx");
+function h(tag, attrs, kids) {
+  var el = document.createElement(tag);
+  for (var k in attrs || {}) {
+    var v = attrs[k];
+    if (v == null || v === false) continue;
+    if (k.slice(0, 2) === "on") el.addEventListener(k.slice(2).toLowerCase(), v);
+    else if (k === "style") el.style.cssText = v;
+    else if (k === "html") el.innerHTML = v;
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  [].concat(kids == null ? [] : kids).forEach(function (c) { if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(String(c))); });
+  return el;
+}
+function svg(path, stroke, size, w, cls) {
+  return h("span", { "aria-hidden": "true", style: "display:grid", html: '<svg width="' + (size || 22) + '" height="' + (size || 22) + '" viewBox="0 0 24 24" fill="none" stroke="' + stroke + '" stroke-width="' + (w || 2.4) + '" stroke-linecap="round" stroke-linejoin="round"' + (cls ? ' class="' + cls + '"' : "") + '><path d="' + path + '"/></svg>' });
+}
+function setGround(bg, fg) { root.style.setProperty("--bg", bg || "var(--ground)"); root.style.setProperty("--fg", fg || "var(--ink)"); }
+
+function render() {
+  var keep = root.querySelector(".deck");
+  root.textContent = "";
+  var it = S.open && S.items.find(function (i) { return i.id === S.open; });
+  if (S.phase === "done" && it) return renderDone(it);
+  if (S.phase === "card" && it) return renderCard(it, keep);
+  S.phase = "list"; S.open = null;
+  setGround();
+  renderList(keep);
+}
+
+function topBar(back) {
+  var p = pending().length;
+  return h("div", { class: "top" }, [
+    back ? h("button", { class: "icon", "aria-label": "Back to the stack", onclick: back }, svg("M15 6l-6 6 6 6", "currentColor", 22, 2.2)) : h("span", { class: "mark" }, "sayso"),
+    back ? h("span", { class: "mark" }, "sayso") : h("span", {}, p ? p + (p === 1 ? " needs you" : " need you") : "All clear"),
+    h("button", { class: "icon", "aria-label": "Refresh", onclick: function () { refresh(); } }, svg("M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7", "currentColor", 20, 2.2)),
+  ]);
+}
+
+function renderList(keep) {
+  var list = pending();
+  root.append(topBar(null));
+  if (S.error) root.append(h("p", { class: "note" }, S.error));
+  if (!list.length) {
+    root.append(h("div", { class: "fill" }), h("div", { class: "pop", style: "align-self:center;background:#ffffff" }, svg("M6 12.5l4 4L18 8.5", "#0f7a4f", 40, 2.6, "check")),
+      h("p", { class: "in d2", style: "text-align:center;font-size:28px;font-weight:600;letter-spacing:-.03em;margin:18px 0 6px" }, "Nothing needs you"),
+      h("p", { class: "in d3 lbl", style: "text-align:center;margin:0" }, "Forward an invoice here and it shows up as a card."), h("div", { class: "fill" }));
+    return;
+  }
+  var cur = list[0].currency, same = list.every(function (i) { return i.amount && i.currency === cur; });
+  var total = same ? list.reduce(function (n, i) { return n + Number(i.amount); }, 0) : 0;
+  root.append(h("div", { class: "head in" }, [h("span", { class: "lbl" }, "Waiting for your swipe"), h("span", { class: "lbl" }, list.length > 1 ? "Swipe for the next one" : "")]));
+  root.append(h("div", { class: "big in d1" }, total ? money(total.toFixed(2), cur) : list.length + (list.length === 1 ? " to check" : " to check")));
+  var deck = keep || h("div", { class: "deck" });
+  var len = list.length, top = ((S.top % len) + len) % len;
+  var byId = {};
+  [].forEach.call(deck.children, function (c) { byId[c.dataset.id] = c; });
+  deck.textContent = "";
+  list.forEach(function (item, i) {
+    var rank = (i - top + len) % len, L = look(item);
+    var el = byId[item.id] || cardEl(item, L);
+    var cls = "card k" + (rank > 2 ? "x" : rank);
+    if (S.out && S.out.id === item.id) cls += S.out.dir > 0 ? " outR" : " out";
+    el.className = cls;
+    el.style.transform = "";
+    el.tabIndex = rank === 0 ? 0 : -1;
+    el._rank = rank;
+    deck.append(el);
+  });
+  [].slice.call(deck.children).sort(function (a, b) { return b._rank - a._rank; }).forEach(function (c) { deck.append(c); });
+  root.append(deck);
+  root.append(h("div", { class: "hint in d2" }, "Tap a card to open it"));
+  if (len > 1) root.append(h("div", { class: "dots", "aria-hidden": "true" }, list.map(function (_, i) { return h("span", { class: i === top ? "on" : "" }); })));
+  root.append(h("div", { class: "fill" }));
+}
+
+function cardEl(item, L) {
+  var el = h("button", { type: "button", class: "card", "data-id": item.id, "aria-label": L.tag + ": " + amountOf(item) + " to " + (item.payee || item.from) + ". Opens it.", style: "background:" + L.bg + ";color:" + L.fg }, [
+    h("span", { class: "row" }, [h("span", { class: "who" }, item.payee || item.from), h("span", { class: "tag", style: "background:" + L.tagBg + ";color:" + L.tagFg }, L.tag)]),
+    h("span", { class: "row", style: "align-items:flex-end" }, [
+      h("span", {}, [h("span", { class: "amt" }, amountOf(item)), h("span", { class: "sub" }, subOf(item))]),
+      h("span", { class: "arrow", style: "background:" + L.fg }, svg("M7 17L17 7M9 7h8v8", L.bg, 16, 2.6)),
+    ]),
+  ]);
+  var d = null;
+  el.addEventListener("pointerdown", function (e) {
+    if (el._rank !== 0 || S.out) return;
+    d = { x: e.clientX, y: e.clientY, dx: 0, live: false };
+    try { el.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  el.addEventListener("pointermove", function (e) {
+    if (!d) return;
+    d.dx = e.clientX - d.x;
+    if (!d.live && Math.abs(d.dx) > 6 && Math.abs(d.dx) > Math.abs(e.clientY - d.y)) d.live = true;
+    if (!d.live) return;
+    el.classList.add("drag");
+    el.style.transform = "translate(" + d.dx + "px,32px) rotate(" + (d.dx / 16).toFixed(2) + "deg)";
+    var p = Math.min(Math.abs(d.dx) / 140, 1), sibs = el.parentNode.children;
+    [].forEach.call(sibs, function (c) {
+      if (c._rank === 1) { c.classList.add("drag"); c.style.transform = "translateY(" + (16 + 16 * p) + "px) scale(" + (0.94 + 0.06 * p) + ")"; }
+      if (c._rank === 2) { c.classList.add("drag"); c.style.transform = "translateY(" + (16 * p) + "px) scale(" + (0.88 + 0.06 * p) + ")"; }
+    });
+  });
+  function end() {
+    if (!d) return;
+    var was = d; d = null;
+    [].forEach.call(el.parentNode ? el.parentNode.children : [], function (c) { c.classList.remove("drag"); c.style.transform = ""; });
+    if (!was.live) return;
+    el._swiped = true;
+    if (Math.abs(was.dx) > 90 && pending().length > 1) {
+      S.out = { id: item.id, dir: Math.sign(was.dx) };
+      render();
+      setTimeout(function () { S.out = null; S.top += 1; render(); }, 360);
+    }
+  }
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+  el.addEventListener("click", function () {
+    if (el._swiped) { el._swiped = false; return; }
+    if (el._rank === 0) openCard(item, el);
+    else { S.top += el._rank; render(); }
+  });
+  return el;
+}
+
+function openCard(item, el) {
+  var r = el.getBoundingClientRect(), R = root.getBoundingClientRect(), L = look(item);
+  var z = h("div", { class: "zoom", style: "background:" + L.bg + ";--t:" + (r.top - R.top) + "px;--b:" + (R.bottom - r.bottom) + "px;--x:" + (r.left - R.left) + "px" });
+  root.append(z);
+  setTimeout(function () { S.open = item.id; S.phase = "card"; S.sx = 0; render(); }, 470);
+}
+
+function renderCard(it, keep) {
+  var L = look(it);
+  setGround(L.bg, L.fg);
+  root.append(topBar(function () { S.open = null; S.phase = "list"; render(); }));
+  root.append(h("div", { class: "row in", style: "margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px;font-weight:500" }, [
+    h("span", {}, it.payee || it.from), h("span", { class: "tag", style: "background:" + L.tagBg + ";color:" + L.tagFg }, L.tag)]));
+  root.append(h("div", { class: "big blur", style: "margin-top:8px" }, amountOf(it)));
+  var chip = function (t, n, red) { return h("span", { class: "chip c" + n + (red ? " red" : "") }, t); };
+
+  if (it.status === "awaiting_approval") {
+    root.append(h("p", { class: "sent blur d1" }, [
+      it.forwarded_by ? it.forwarded_by + " forwarded " : "This is ", it.reference ? ["invoice ", chip(it.reference, 1)] : "an invoice", ". It goes to ",
+      it.account ? chip("•••• " + it.account, 2) : "the account on the invoice", it.due ? [", due ", chip(it.due, 3)] : "", ".",
+    ].flat()));
+    root.append(h("div", { class: "facts in d3" }, [
+      h("div", {}, [h("span", {}, "From"), h("span", {}, it.from)]),
+      h("div", {}, [h("span", {}, "From your balance"), h("span", {}, it.price_usdz ? "about $" + it.price_usdz : "on approval")]),
+    ]));
+    root.append(h("div", { class: "fill" }));
+    if (S.phase === "card" && S.waiting === it.id) root.append(waitBox(it));
+    else root.append(track(it, L));
+  } else if (it.status === "needs_verification") {
+    root.append(h("p", { class: "sent blur d1" }, ["Sayso held this. ", it.reasons.map(function (r, i) { return [chip(r, i + 1, true), i < it.reasons.length - 1 ? " " : ""]; })].flat(2)));
+    root.append(h("p", { class: "note in d3" }, "Pay stays locked until you confirm the bank details with the payee directly. Sayso can send 1 cent with a code that only the account's owner can read back."));
+    root.append(h("div", { class: "fill" }));
+    root.append(h("button", { class: "btn in d4", style: "background:#c6f432;color:#15191e;font-weight:600", onclick: function () { openLink(it.approval_url); } }, "Check it in Sayso"));
+  } else {
+    root.append(h("p", { class: "sent blur d1" }, ["They sent this without ", it.missing.map(function (m, i) { return [chip(m, i + 1), i < it.missing.length - 2 ? ", " : i === it.missing.length - 2 ? " and " : ""]; }), ". Sayso can't pay it yet."].flat(2)));
+    root.append(h("div", { class: "fill" }));
+    if (S.asked[it.id]) root.append(h("div", { class: "wait in" }, [h("b", {}, "Asked. "), "I'll bring it back when they reply."]));
+    else root.append(h("button", { class: "btn in d3", style: "background:#15191e;color:#ffffff", onclick: function () { askFor(it); } }, "Ask them for the details"));
+  }
+}
+
+function track(it, L) {
+  var max = 0, d = null;
+  var bar = h("span", { class: "bar", style: "width:63px;background:#ffffff" });
+  var label = h("span", { class: "label", style: "color:#ffffff" }, "Swipe to approve " + amountOf(it));
+  var thumb = h("button", { type: "button", class: "thumb", style: "background:#ffffff", "aria-label": "Approve " + amountOf(it) + " in Sayso" }, svg("M5 12h14M13 6l6 6-6 6", "#15191e", 22, 2.4, "nudge"));
+  var spin = h("span", { class: "spin", "aria-hidden": "true", html: '<svg width="26" height="26" viewBox="0 0 28 28" fill="none"><circle cx="14" cy="14" r="11" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-dasharray="48 100"/></svg>' });
+  var t = h("div", { class: "track in d4", style: "background:#15191e" }, [bar, label, thumb, spin]);
+  function set(x) { thumb.style.transform = "translateX(" + x + "px)"; bar.style.width = x + 63 + "px"; label.style.opacity = Math.max(0, 1 - x / 150); }
+  thumb.addEventListener("pointerdown", function (e) { max = t.clientWidth - 68; d = { x: e.clientX }; thumb.classList.add("drag"); try { thumb.setPointerCapture(e.pointerId); } catch (err) {} });
+  thumb.addEventListener("pointermove", function (e) { if (d) set(Math.max(0, Math.min(max, e.clientX - d.x))); });
+  function up(e) {
+    if (!d) return;
+    var x = Math.max(0, Math.min(max, e.clientX - d.x)); d = null;
+    thumb.classList.remove("drag");
+    if (x > max * 0.85) { set(max); approve(it, t); } else set(0);
+  }
+  thumb.addEventListener("pointerup", up);
+  thumb.addEventListener("pointercancel", up);
+  thumb.addEventListener("click", function (e) { if (e.detail === 0) approve(it, t); }); // keyboard
+  return t;
+}
+
+function approve(it, t) {
+  t.classList.add("morph");
+  t.style.background = "#0f7a4f";
+  setTimeout(function () { openLink(it.approval_url); S.waiting = it.id; render(); poll(it.id, 0); }, 700);
+}
+function waitBox(it) {
+  return h("div", {}, [
+    h("div", { class: "wait in" }, [h("b", {}, "Approve it with Face ID in Sayso. "), "This card turns green the moment you do", h("span", { class: "pulse" }), h("span", { class: "pulse e2" }), h("span", { class: "pulse e3" })]),
+    h("p", { class: "in d2", style: "margin:14px 0 0;text-align:center" }, h("button", { class: "link", onclick: function () { openLink(it.approval_url); } }, "Open Sayso again")),
+  ]);
+}
+function poll(id, n) {
+  if (S.waiting !== id || n > 60) return;
+  setTimeout(function () {
+    refresh().then(function () {
+      var it = S.items.find(function (i) { return i.id === id; });
+      if (it && it.status === "paying") { S.waiting = null; S.open = id; S.phase = "done"; flood(); }
+      else poll(id, n + 1);
+    });
+  }, 3000);
+}
+function flood() {
+  root.append(h("div", { class: "flood" }));
+  setTimeout(render, 760);
+}
+function renderDone(it) {
+  setGround("#0f7a4f", "#ffffff");
+  root.append(topBar(null));
+  root.append(h("div", { style: "margin-top:40px" }, h("div", { class: "pop" }, svg("M6 12.5l4 4L18 8.5", "#0f7a4f", 40, 2.6, "check"))));
+  root.append(h("div", { class: "huge", style: "margin-top:22px" }, "Paid."));
+  root.append(h("p", { class: "in d3", style: "margin:16px 0 0;font-size:21px;line-height:1.3;font-weight:500;letter-spacing:-.02em" }, amountOf(it) + " is on its way to " + (it.payee || it.from) + "."));
+  root.append(h("div", { class: "fill" }));
+  root.append(h("button", { class: "btn in d4", style: "background:#ffffff;color:#0f7a4f;font-weight:600", onclick: function () { S.open = null; S.phase = "list"; render(); } }, "Done"));
+  request("ui/update-model-context", { content: [{ type: "text", text: "The owner approved " + amountOf(it) + " to " + (it.payee || it.from) + " in Sayso. It is paying now; check payout_status before saying it has arrived." }] }).catch(function () {});
+}
+
+function openLink(url) {
+  request("ui/open-link", { url: url }).catch(function () { window.open(url, "_blank", "noopener"); });
+}
+function askFor(it) {
+  S.asked[it.id] = true; render();
+  request("ui/message", { role: "user", content: [{ type: "text", text: "Please ask " + it.from + " for the " + it.missing.join(", ") + " that their invoice (" + (it.subject || it.id) + ") is missing, then forward it to Sayso again." }] }).catch(function () {});
+}
+
+// ---- Size and start-up ----
+new ResizeObserver(function () { notify("ui/notifications/size-changed", { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight }); }).observe(document.body);
+request("ui/initialize", { appInfo: { name: "Sayso", version: "0.2.0" }, appCapabilities: {}, protocolVersion: "2026-01-26" })
+  .then(function () { notify("ui/notifications/initialized", {}); })
+  .catch(function () { S.error = "Open this inside a chat app that shows MCP Apps."; render(); });
+</script>
+</body>
+</html>

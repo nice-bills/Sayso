@@ -31,14 +31,26 @@ describe("hosted MCP endpoint", () => {
       expect(tools).toEqual(["forward_invoice", "list_invoices", "payout_status", "quote_payout"]);
       expect(tools.some((t) => /approve/.test(t))).toBe(false); // no tool can approve
 
+      // Chat apps that support MCP Apps draw the inbox as cards (the view can't approve either).
+      const listed = (await agent.listTools()).tools;
+      for (const t of ["forward_invoice", "list_invoices"]) expect(listed.find((x) => x.name === t)?._meta).toMatchObject({ ui: { resourceUri: "ui://sayso/cards.html" } });
+      const view = await agent.readResource({ uri: "ui://sayso/cards.html" });
+      expect(view.contents[0]).toMatchObject({ mimeType: "text/html;profile=mcp-app" });
+      expect((view.contents[0] as { text: string }).text).toContain("ui/initialize");
+
       const { body } = await call(agent, "forward_invoice", { text: studioInvoice.body, from: studioInvoice.from });
       expect(body.status).toBe("awaiting_approval");
       expect(body.approval_url).toMatch(new RegExp(`^${base}/p/[\\w-]{8}$`));
       expect((await fetch(body.approval_url, { redirect: "manual" })).headers.get("location")).toBe(`/approve/${encodeURIComponent(body.invoice_id)}`);
 
+      const shown = await agent.callTool({ name: "forward_invoice", arguments: { text: studioInvoice.body, from: studioInvoice.from, subject: "Again" } });
+      const sc = shown.structuredContent as { items: Array<Record<string, unknown>>; focus: string };
+      expect(sc.items.find((c) => c.id === sc.focus)).toMatchObject({ status: "duplicate" }); // the same invoice twice
+      expect(sc.items.find((c) => c.id === body.invoice_id)).toMatchObject({ status: "awaiting_approval", currency: "EUR", payee: expect.any(String), approval_url: body.approval_url });
       const held = await call(agent, "forward_invoice", { text: fakeLandlord.body, from: fakeLandlord.from });
       expect(held.body.status).toBe("needs_verification");
-      expect((await call(agent, "list_invoices", {})).body).toHaveLength(2);
+      const all = await agent.callTool({ name: "list_invoices", arguments: {} });
+      expect((all.structuredContent as { items: Array<{ status: string }> }).items.map((c) => c.status).sort()).toEqual(["awaiting_approval", "needs_verification"]);
 
       // The agent's key can't reach the owner's approval route.
       const tap = await fetch(`${base}/v1/inbox/${encodeURIComponent(body.invoice_id)}/approve`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: "{}" });

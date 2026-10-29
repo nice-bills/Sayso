@@ -8,6 +8,7 @@ import express, { type Request } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { AgentKey, AgentKeys } from "../agents/keys.js";
 import { emit } from "../events.js";
@@ -45,6 +46,30 @@ function summarise(item: InboxItem & { payout?: ReturnType<typeof publicView> | 
   return { invoice_id: item.id, status: item.status, what, next: next[item.status], approval_url: `${base}${approvalPath(item.id)}`, payout_id: item.payoutId };
 }
 
+// The cards view chat apps draw inline (an MCP App): swipe through invoices, tap one, swipe to approve.
+// Approving still opens Sayso, where the owner signs with their passkey; the view can't pay anyone.
+export const VIEW_URI = "ui://sayso/cards.html";
+const VIEW_MIME = "text/html;profile=mcp-app";
+const viewHtml = readFileSync(new URL("./view.html", import.meta.url), "utf8");
+const withView = { ui: { resourceUri: VIEW_URI }, "ui/resourceUri": VIEW_URI };
+
+type Listed = ReturnType<Inbox["list"]>[number];
+/** One card for the view: who, how much, why it's waiting, and the owner's approval link. */
+export function cardOf(item: Listed, base: string) {
+  const p = item.payout, f = item.fields;
+  const account = (f.iban ?? f.accountNumber ?? "").replace(/\s/g, "");
+  const via = item.id.startsWith("agent-") ? (item.subject.match(/^Forwarded by (.+)$/)?.[1] ?? "Your agent") : null;
+  return {
+    id: item.id, status: item.status, from: item.from, subject: item.subject, received_at: item.receivedAt,
+    payee: p?.payee ?? f.payeeName, amount: p?.amount ?? f.amount, currency: p?.currency ?? f.currency,
+    reference: p?.reference ?? f.reference, due: f.dueDate, account: account.length >= 4 ? account.slice(-4) : null,
+    reasons: p?.reasons ?? [], missing: item.missing, price_usdz: p?.price_usdz ?? null, forwarded_by: via,
+    approval_url: `${base}${approvalPath(item.id)}`,
+  };
+}
+const cards = (d: HostedDeps, base: string, include_done?: boolean) =>
+  d.inbox.list().filter((i) => include_done || pending.includes(i.status)).slice(0, 50).map((i) => cardOf(i, base));
+
 const overCap = (agent: AgentKey, priceUsdz: string) => agent.capMinor !== null && toMinor(Number(priceUsdz)) > agent.capMinor;
 const pending = ["awaiting_approval", "needs_verification", "needs_details", "paying"];
 
@@ -69,6 +94,7 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
 
   server.registerTool("forward_invoice", {
     description: "Put an invoice in the owner's Sayso inbox. Paste the whole invoice or email text (OCR the photo first if you were sent one). Sayso reads it, checks the payee with Airwallex, and sends the owner a one-tap approval link. Returns the link and what happens next.",
+    _meta: withView,
     inputSchema: {
       text: z.string().min(1).max(20_000).describe("The full invoice or email text, including bank details and the total"),
       from: z.string().optional().describe("Who sent the invoice, e.g. \"Kreuzberg Studio <billing@kreuzberg.de>\""),
@@ -76,16 +102,25 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
     },
   }, async (args) => {
     const r = await forward(d, agent, base, args);
-    return "error" in r ? fail(r.error) : text(r);
+    if ("error" in r) return fail(r.error);
+    return { ...text(r), structuredContent: { items: cards(d, base, true).filter((c) => c.id === r.invoice_id || pending.includes(c.status)), focus: r.invoice_id } };
   });
 
   server.registerTool("list_invoices", {
-    description: "The owner's Sayso inbox: invoices waiting for their tap, held for a check, missing details, or paying.",
+    description: "The owner's Sayso inbox: invoices waiting for their tap, held for a check, missing details, or paying. Chat apps that support MCP Apps show them as cards the owner can swipe through and approve.",
+    _meta: withView,
     inputSchema: { include_done: z.boolean().optional().describe("Also list paid, ignored and duplicate invoices") },
   }, async ({ include_done }) => {
     const items = d.inbox.list().filter((i) => include_done || pending.includes(i.status));
-    return text(items.slice(0, 50).map((i) => summarise(i, base)));
+    return { ...text(items.slice(0, 50).map((i) => summarise(i, base))), structuredContent: { items: cards(d, base, include_done) } };
   });
+
+  server.registerResource("cards", VIEW_URI, { title: "Sayso cards", description: "Invoices as cards: swipe, tap to open, swipe to approve in Sayso.", mimeType: VIEW_MIME }, async () => ({
+    contents: [{
+      uri: VIEW_URI, mimeType: VIEW_MIME, text: viewHtml,
+      _meta: { ui: { prefersBorder: false, csp: { resourceDomains: ["https://fonts.googleapis.com", "https://fonts.gstatic.com"] } } },
+    }],
+  }));
 
   server.registerTool("quote_payout", {
     description: "Price a payout in local currency, for free. Returns the USDZ price and a pay_url an x402-capable agent can pay from its own Metal wallet, or why Sayso won't pay it as asked.",
