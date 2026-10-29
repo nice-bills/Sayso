@@ -8,7 +8,10 @@
 //
 // Agents may only email people who already emailed this address or sent an invoice in, so a hijacked
 // agent can't use the business's address to write to strangers.
-//   AGENTMAIL_API_KEY + AGENTMAIL_INBOX_ID  use an inbox you made in the AgentMail console instead
+// Whoever hosts Sayso can skip that code for everyone: verify one AgentMail account once, set its key
+// as AGENTMAIL_API_KEY, and each Sayso makes its own address under that account, ready to send.
+//   AGENTMAIL_API_KEY                       a verified AgentMail account: Sayso makes its address there
+//   AGENTMAIL_API_KEY + AGENTMAIL_INBOX_ID  use an inbox you already made instead
 //   AGENTMAIL_AUTO=off                       don't sign up for one automatically
 
 import { randomBytes, randomUUID } from "node:crypto";
@@ -34,7 +37,7 @@ export interface MailboxStatus {
   needs: string | null;
 }
 
-interface Creds { api_key: string; inbox_id: string; verified: boolean; source: "env" | "signup" }
+interface Creds { api_key: string; inbox_id: string; verified: boolean; source: "env" | "account" | "signup" }
 
 export class MailError extends Error {}
 
@@ -55,7 +58,9 @@ export class Mailbox {
     if (AGENTMAIL_API_KEY && AGENTMAIL_INBOX_ID) this.creds = { api_key: AGENTMAIL_API_KEY, inbox_id: AGENTMAIL_INBOX_ID, verified: true, source: "env" };
     else {
       const row = store.db.prepare("SELECT v FROM mailbox WHERE k = 'creds'").get() as { v: string } | undefined;
-      if (row) this.creds = JSON.parse(row.v) as Creds;
+      const saved = row ? (JSON.parse(row.v) as Creds) : null;
+      // A host key set later replaces an inbox Sayso signed up for on its own.
+      if (saved && !(AGENTMAIL_API_KEY && saved.source === "signup")) this.creds = saved;
     }
   }
 
@@ -82,6 +87,17 @@ export class Mailbox {
   async ensure(): Promise<MailboxStatus> {
     if (this.opts.offline || this.creds || process.env.AGENTMAIL_AUTO === "off") return this.status();
     const username = `sayso-${randomBytes(4).toString("hex")}`;
+    const hostKey = process.env.AGENTMAIL_API_KEY;
+    if (hostKey) {
+      // The host's verified account: a new address that can send at once, no code for the owner.
+      const res = await this.http(`${this.base}/inboxes`, { method: "POST", headers: { Authorization: `Bearer ${hostKey}`, "content-type": "application/json" }, body: JSON.stringify({ username, display_name: "Sayso" }) });
+      if (!res.ok) throw new MailError(`AgentMail inbox ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      const inbox = (await res.json()) as { inbox_id: string; email?: string };
+      this.creds = { api_key: hostKey, inbox_id: inbox.inbox_id, verified: true, source: "account" };
+      this.save();
+      emit("observe", `Sayso's email address is ${inbox.email ?? inbox.inbox_id}. Forward invoices there.`);
+      return this.status();
+    }
     const res = await this.http(`${this.base}/agent/sign-up`, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ username, source: "sayso", ...(this.opts.ownerEmail ? { human_email: this.opts.ownerEmail } : {}) }),

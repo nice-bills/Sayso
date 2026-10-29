@@ -41,4 +41,23 @@ describe("Sayso's own mailbox", () => {
     expect(await again.ensure()).toMatchObject({ address: "sayso-ab12@agentmail.to", can_send: true });
     expect(calls.filter((c) => c.url.endsWith("/agent/sign-up"))).toHaveLength(1);
   });
+
+  it("makes its address under the host's verified account, so the owner never sees a code", async () => {
+    process.env.AGENTMAIL_API_KEY = "am_host";
+    delete process.env.AGENTMAIL_INBOX_ID;
+    try {
+      const { http, calls } = fakeAgentMail((url) => {
+        if (url.endsWith("/inboxes")) return { json: { pod_id: "p", inbox_id: "sayso-cd34@agentmail.to", email: "sayso-cd34@agentmail.to" } };
+        if (url.endsWith("/messages/send")) return { json: { message_id: "<m2>", thread_id: "t2" } };
+        return { status: 404 };
+      });
+      const mb = new Mailbox(new Store(":memory:"), { ownerEmail: "owner@acme.example", http });
+      expect(await mb.ensure()).toEqual({ address: "sayso-cd34@agentmail.to", can_receive: true, can_send: true, needs: null });
+      expect(calls[0]).toMatchObject({ auth: "Bearer am_host", body: { display_name: "Sayso" } });
+      expect(calls.some((c) => c.url.includes("sign-up"))).toBe(false);
+      expect((await mb.send("supplier@x.example", "Hi", "Hello")).message_id).toBe("<m2>");
+    } finally {
+      delete process.env.AGENTMAIL_API_KEY;
+    }
+  });
 });
