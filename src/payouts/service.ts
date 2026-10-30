@@ -483,7 +483,8 @@ const short = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}
 /** What the API returns for a payout. Never the bank details. */
 export function publicView(p: Payout) {
   return {
-    id: p.id, status: p.status, reasons: p.reasons, amount: toMajor(p.amountMinor).toFixed(2), currency: p.currency, method: p.method,
+    // A quote nobody paid in time reads as expired, even before anything marks it so.
+    id: p.id, status: p.status === "quoted" && new Date(p.expiresAt) < new Date() ? "expired" : p.status, reasons: p.reasons, amount: toMajor(p.amountMinor).toFixed(2), currency: p.currency, method: p.method,
     payee: p.payeeName, reference: p.reference,
     price_usdz: toMajor(p.totalMinor).toFixed(2), fee_usdz: toMajor(p.feeMinor).toFixed(2), rate_used: p.rateUsed,
     decision: p.decision ? decisionView(p.decision) : null,

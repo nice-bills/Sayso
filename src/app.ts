@@ -433,14 +433,21 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     },
   }));
 
-  const card = new AgentCard(awx as unknown as CardPort, store, undefined, process.env.AWX_CARD_ID || undefined);
+  let card = new AgentCard(awx as unknown as CardPort, store, undefined, process.env.AWX_CARD_ID || undefined);
   async function cardReady(): Promise<string | undefined> {
     if (card.cardId) return card.cardId;
     try {
       return await card.issue(process.env.AWX_CARDHOLDER_EMAIL ?? "agent@sayso.example", process.env.AWX_CARD_CREATED_BY ?? "Sayso Agent");
     } catch (err) {
-      emit("escalate", `Airwallex would not issue the agent card: ${String(err).slice(0, 200)}`);
-      return undefined;
+      if (opts.offline) {
+        emit("escalate", `Airwallex would not issue the agent card: ${String(err).slice(0, 200)}`);
+        return undefined;
+      }
+      // Our sandbox account can't issue cards, so the card runs on the simulator, which applies the
+      // same category and amount rules; its ids start with sim: so nobody mistakes them for Airwallex's.
+      emit("observe", `Airwallex would not issue the agent card (${String(err).slice(0, 120)}); using the simulated card, which applies the same limits`);
+      card = new AgentCard(new FakeAirwallex({}) as unknown as CardPort, store);
+      return card.issue("agent@sayso.example", "Sayso Agent");
     }
   }
 
@@ -455,5 +462,5 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     });
   };
 
-  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances, ownerToken: auth.ownerToken, keys, mailbox, card, cardReady, treasury, trail, receipts, simMandates };
+  return { offline: opts.offline, app, svc, inbox, awx, attemptHeist: heist, tick, reconcileNow, balances, ownerToken: auth.ownerToken, keys, mailbox, get card() { return card; }, cardReady, treasury, trail, receipts, simMandates };
 }
