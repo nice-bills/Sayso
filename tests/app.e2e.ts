@@ -138,3 +138,12 @@ test('an agent payout proves itself, and a dispute the proof answers is denied',
   await expect(browser.locator(`${row} .pv-dispute`)).toContainText('Denied');
   await expect(browser.locator(`${row} .pv-dispute`)).toContainText('mandate allowed this payment');
 });
+
+test('the landing board asks decide() and flips to hold when the payee name does not match', async ({ app, screen, browser }) => {
+  await app.open('/');
+  await screen.getByRole('button', 'Name mismatch').tap();
+  await expect(browser.locator('.b-reason')).toContainText('Holding EUR 480.00');
+  await expect(browser.locator('.dial.decider .d-val')).toHaveText('Held');
+  await screen.getByRole('button', 'Paid before').tap();
+  await expect(browser.locator('.b-live')).toHaveText("YOU'RE DRIVING");
+});

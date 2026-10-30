@@ -38,7 +38,8 @@ import { requireSignedOffer } from "@metalntwx/metal-pay/mandates";
 import { Trail } from "./trail.js";
 import { payoutApi, type PaymentMode } from "./payouts/http.js";
 import { BatchBook } from "./payouts/batch.js";
-import { whatIf } from "./payouts/decide.js";
+import { decide, whatIf } from "./payouts/decide.js";
+import type { RiskVerdict } from "./payouts/risk.js";
 import { decisionView, PayoutError, PayoutService, publicView, type PayoutAirwallex, type Refunder } from "./payouts/service.js";
 import { RateMedian } from "./payouts/rates.js";
 import type { Payout, PayoutBook } from "./payouts/book.js";
@@ -438,6 +439,21 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
       risk,
     });
     res.json({ simulated: true, decision: decisionView(d) });
+  });
+  // The landing's decision board: one sample invoice (EUR 480.00, due in 6 days, part payment allowed)
+  // run through the same decide() with the inputs a visitor sets. Public and pure; nothing moves.
+  app.post("/v1/decide/preview", express.json({ limit: "1kb" }), (req, res) => {
+    const b = req.body ?? {};
+    const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
+    const drift = num(b.rate_drift_pct, -5, 10, 0.3) / 100, spendable = num(b.spendable_usdz, 0, 5000, 820), dueDays = num(b.due_in_days, 0, 60, 6);
+    const RISK: Record<string, string> = { newbank: "the invoice asks to pay new bank details", mismatch: "the bank says this account belongs to Mark Lehmann, not Kreuzberg Studio" };
+    const why = RISK[String(b.risk)];
+    const risk: RiskVerdict = why ? { verdict: "hold", reasons: [why] } : { verdict: "allow" };
+    const amountMinor = 48000, median = 1.0791, fee = 0.0078;
+    const costUsdzMinor = Math.round(amountMinor * median * (1 + drift) * (1 + fee));
+    const now = new Date();
+    const d = decide({ amountMinor, currency: "EUR", costUsdzMinor, capUsdzMinor: toMinor(600), rateDrift: drift, spendableUsdzMinor: toMinor(spendable), risk, dueAt: new Date(now.getTime() + dueDays * 86_400_000), partPaymentAllowed: true }, now);
+    res.json({ sample: true, rate: Number((median * (1 + drift)).toFixed(4)), median, decision: decisionView(d) });
   });
   // A dispute the owner upholds: the agent gets its USDZ back under the refund mandate.
   app.post("/v1/payouts/:id/dispute", auth.requireOwner, express.json(), async (req, res) => {
