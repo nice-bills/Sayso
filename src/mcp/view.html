@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sayso</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..900&family=Martian+Mono:wdth,wght@87.5,400..800&display=swap">
 <style>
 /* Sayso inside a chat app (an MCP App). The same cards as the phone: swipe for the next one, tap
    to open, swipe to approve. Approving still happens in Sayso with the owner's passkey. */
-:root{--ground:#d6eee2;--ink:#15191e;--muted:#3f454c;--lime:#c6f432;--paid:#0f7a4f;--held:#c8322b;--sky:#d9e5f4;--line:#e9ebe6}
+:root{--ground:#f2f1ec;--ink:#0d0f1a;--muted:#474a58;--lime:#1832d6;--cobalt:#1832d6;--paid:#0b7a3d;--held:#c42a1c;--sky:#dfe9f5;--line:#e3e2db;--flap:#10121c;--flap-2:#1b1e2c;--v-pay:#36e07e;--v-wait:#ffb21e;--v-split:#6fd6ff;--v-hold:#ff5a4a;--mono:"Martian Mono",ui-monospace,Menlo,monospace}
 *{box-sizing:border-box}
 html,body{margin:0;background:transparent}
-body{font-family:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
+body{font-family:"Archivo",ui-sans-serif,system-ui,-apple-system,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased}
 button{font-family:inherit;color:inherit}
 .sx{position:relative;overflow:hidden;min-height:520px;border-radius:24px;background:var(--bg,var(--ground));color:var(--fg,var(--ink));padding:20px;display:flex;flex-direction:column;transition:background-color .45s cubic-bezier(.65,0,.35,1),color .35s}
 .sx>*:not(.zoom):not(.flood):not(.pop){width:100%;max-width:480px;align-self:center}
@@ -19,7 +19,7 @@ button{font-family:inherit;color:inherit}
 .sx>.pop{width:80px}
 .sx>.track.morph{width:68px}
 .top{display:flex;justify-content:space-between;align-items:center;min-height:36px;font-size:14px;font-weight:500}
-.mark{font-size:17px;font-weight:600;letter-spacing:-.02em}
+.mark{font-size:18px;font-weight:850;font-stretch:125%;letter-spacing:-.02em}
 .icon{width:40px;height:40px;margin:-4px;border:0;border-radius:50%;background:transparent;display:grid;place-items:center;cursor:pointer}
 .icon:hover{background:rgba(21,25,30,.06)}
 .in{animation:in .55s cubic-bezier(.16,1,.3,1) both}
@@ -29,9 +29,9 @@ button{font-family:inherit;color:inherit}
 @keyframes blur{from{opacity:0;filter:blur(10px);transform:translateY(10px)}to{opacity:1;filter:none;transform:none}}
 .lbl{font-size:14px;font-weight:500;color:var(--muted)}
 .head{margin-top:14px;display:flex;justify-content:space-between;align-items:baseline}
-.big{font-size:56px;font-weight:600;letter-spacing:-.055em;line-height:1;font-variant-numeric:tabular-nums}
+.big{font-size:56px;font-weight:800;font-stretch:115%;letter-spacing:-.04em;line-height:1;font-variant-numeric:tabular-nums}
 .deck{position:relative;margin:14px auto 0;width:100%;max-width:420px;height:200px}
-.card{position:absolute;left:0;right:0;top:0;height:160px;border:0;border-radius:24px;padding:18px 20px;text-align:left;cursor:pointer;display:flex;flex-direction:column;justify-content:space-between;touch-action:pan-y;user-select:none;-webkit-user-select:none;transition:transform .6s cubic-bezier(.34,1.25,.64,1),opacity .4s}
+.card{position:absolute;left:0;right:0;top:0;height:160px;border:0;border-radius:12px;padding:18px 20px;text-align:left;cursor:pointer;display:flex;flex-direction:column;justify-content:space-between;touch-action:pan-y;user-select:none;-webkit-user-select:none;transition:transform .6s cubic-bezier(.34,1.25,.64,1),opacity .4s}
 .card.k0{transform:translateY(32px);z-index:4;cursor:grab}
 .card.k1{transform:translateY(16px) scale(.94);z-index:3}
 .card.k2{transform:translateY(0) scale(.88);z-index:2}
@@ -41,8 +41,8 @@ button{font-family:inherit;color:inherit}
 .card.outR{transform:translate(520px,40px) rotate(22deg);z-index:5;transition:transform .38s cubic-bezier(.4,0,.8,.5)}
 .card .row{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:14px;font-weight:500}
 .card .who{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tag{flex:none;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:600}
-.card .amt{display:block;font-size:36px;font-weight:600;letter-spacing:-.05em;line-height:1}
+.tag{flex:none;border-radius:4px;padding:5px 9px;font-family:var(--mono);font-stretch:87.5%;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.card .amt{display:block;font-size:36px;font-weight:800;font-stretch:112%;letter-spacing:-.035em;line-height:1}
 .card .sub{display:block;font-size:14px;margin-top:6px;opacity:.78}
 .arrow{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;flex:none;transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
 .card:hover .arrow{transform:rotate(45deg)}
@@ -55,7 +55,7 @@ button{font-family:inherit;color:inherit}
 .chip.red{background:var(--held);color:#ffffff}
 .chip.c1{animation-delay:.3s}.chip.c2{animation-delay:.45s}.chip.c3{animation-delay:.6s}
 @keyframes chip{from{transform:scale(.6);opacity:0}to{transform:none;opacity:1}}
-.facts{margin-top:18px;background:#ffffff;color:var(--ink);border-radius:18px;padding:4px 18px;font-size:15px}
+.facts{margin-top:18px;background:#ffffff;color:var(--ink);border-radius:8px;padding:4px 18px;font-size:15px}
 .facts div{display:flex;justify-content:space-between;gap:12px;padding:12px 0}
 .facts div+div{border-top:1px solid var(--line)}
 .facts span:first-child{color:var(--muted)}
@@ -94,12 +94,19 @@ button{font-family:inherit;color:inherit}
 .huge{font-size:80px;font-weight:600;letter-spacing:-.06em;line-height:.95;animation:rise .7s .15s cubic-bezier(.16,1,.3,1) both}
 @keyframes rise{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:none}}
 /* the decision: verdict and reason first, then what it weighed, one row each */
-.dc{margin-top:20px;border-radius:20px;padding:16px 18px 6px;background:rgba(255,255,255,.6);color:var(--ink)}
+.dc{margin-top:20px;border-radius:10px;padding:16px 18px 6px;background:#0a0c16;color:#ffffff}
+.dc .dc-by,.dc .dc-f .k{color:#a9aec4}.dc .dc-f{border-top-color:rgba(255,255,255,.1)}.dc .dc-f.by .k{color:#ffffff}
 .dark .dc{background:#23282f;color:#ffffff}
 .dc-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
 .dc-v{font-size:28px;font-weight:600;letter-spacing:-.04em;line-height:1}
+/* the verdict as split-flaps, as on the board: each letter turns in once */
+.flaps{display:inline-flex;gap:3px;--c:#f6f5ef}
+.flaps.t-pay{--c:var(--v-pay)}.flaps.t-wait{--c:var(--v-wait)}.flaps.t-split{--c:var(--v-split)}.flaps.t-hold,.flaps.t-reject{--c:var(--v-hold)}
+.fc{position:relative;width:29px;height:40px;border-radius:5px;background:linear-gradient(#262a3e 50%,#1d2031 50%);color:var(--c);font:800 23px/40px var(--mono);text-align:center;animation:fc .5s cubic-bezier(.3,1.4,.6,1) both}
+.fc::after{content:"";position:absolute;left:0;right:0;top:19px;height:2px;background:#05060b}
+@keyframes fc{from{transform:rotateX(90deg);opacity:.2}to{transform:none;opacity:1}}
 .dc-v.pay{color:var(--paid)}.dc-v.hold,.dc-v.reject{color:var(--held)}.dc-v.wait,.dc-v.split{color:#8a5a00}
-.dark .dc-v.pay{color:var(--lime)}.dark .dc-v.hold,.dark .dc-v.reject{color:#ff8a80}.dark .dc-v.wait,.dark .dc-v.split{color:#ffc66b}
+.dark .dc-v.pay{color:var(--v-pay)}.dark .dc-v.hold,.dark .dc-v.reject{color:#ff8a80}.dark .dc-v.wait,.dark .dc-v.split{color:#ffc66b}
 .dc-by{font-size:13px;color:var(--muted)}.dark .dc-by{color:#b9bec5}
 .dc-r{margin:8px 0 6px;font-size:16px;line-height:1.45;letter-spacing:-.005em}
 .dc-f{display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:10px;padding:11px 0;border-top:1px solid rgba(21,25,30,.1);font-size:15px}
@@ -109,7 +116,7 @@ button{font-family:inherit;color:inherit}
 .dc-f .v{text-align:right;font-variant-numeric:tabular-nums}.dc-f .v b{font-weight:600}
 .dc-dot{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;background:var(--paid)}
 .dc-f.off .dc-dot{background:var(--held)}
-.dc-tag{font-size:11px;font-weight:600;background:var(--lime);color:var(--ink);border-radius:999px;padding:2px 8px}
+.dc-tag{font-size:11px;font-weight:600;background:var(--cobalt);color:#ffffff;border-radius:4px;padding:2px 8px}
 .facts.quiet{margin-top:12px}
 .facts .miss{color:var(--held)}
 .lead{margin:18px 0 0;font-size:19px;line-height:1.4;font-weight:500;letter-spacing:-.015em}
@@ -158,10 +165,10 @@ function money(a, c) {
   return sym ? sym + n : n + " " + (c || "");
 }
 var looks = {
-  awaiting_approval: { tag: "Ready", tagBg: "#0f7a4f", tagFg: "#ffffff", bg: "#c6f432", fg: "#15191e" },
-  needs_verification: { tag: "Held", tagBg: "#c8322b", tagFg: "#ffffff", bg: "#15191e", fg: "#ffffff" },
-  needs_details: { tag: "Missing details", tagBg: "#ffffff", tagFg: "#15191e", bg: "#d9e5f4", fg: "#15191e" },
-  paying: { tag: "Paying", tagBg: "#ffffff", tagFg: "#0f7a4f", bg: "#0f7a4f", fg: "#ffffff" },
+  awaiting_approval: { tag: "Ready", tagBg: "#10121c", tagFg: "#36e07e", bg: "#1832d6", fg: "#ffffff" },
+  needs_verification: { tag: "Held", tagBg: "#10121c", tagFg: "#ff5a4a", bg: "#0d0f1a", fg: "#ffffff" },
+  needs_details: { tag: "Missing details", tagBg: "#10121c", tagFg: "#ffb21e", bg: "#dfe9f5", fg: "#0d0f1a" },
+  paying: { tag: "Paying", tagBg: "#10121c", tagFg: "#36e07e", bg: "#0b7a3d", fg: "#ffffff" },
 };
 function look(it) { return looks[it.status] || looks.needs_details; }
 function amountOf(it) { return it.amount ? money(it.amount, it.currency) : "A question"; }
@@ -342,7 +349,7 @@ function renderCard(it, keep) {
     root.append(decision(it) || h("p", { class: "lead blur d1" }, "Sayso held this: " + (it.reasons.join("; ") || "it looks risky") + "."));
     root.append(h("p", { class: "note in d3" }, "Pay stays locked until the bank details are confirmed with the payee, not by email. Sayso can check with a 1-cent code only the account's owner can read back."));
     root.append(h("div", { class: "fill" }));
-    root.append(h("button", { class: "btn in d4", style: "background:#c6f432;color:#15191e;font-weight:600", onclick: function () { openLink(it.approval_url); } }, "Check it in Sayso"));
+    root.append(h("button", { class: "btn in d4", style: "background:#1832d6;color:#ffffff;font-weight:600", onclick: function () { openLink(it.approval_url); } }, "Check it in Sayso"));
   } else {
     root.append(h("p", { class: "lead blur d1" }, "Sayso can't pay this yet. The email leaves out:"));
     root.append(facts(it.missing.map(function (m) { return row(m.charAt(0).toUpperCase() + m.slice(1), "Missing", "miss"); })));
@@ -350,13 +357,16 @@ function renderCard(it, keep) {
     var a = S.asked[it.id];
     if (a && a.sending) root.append(h("div", { class: "wait in" }, ["Emailing them", h("span", { class: "pulse" }), h("span", { class: "pulse e2" }), h("span", { class: "pulse e3" })]));
     else if (a && a.to) root.append(h("div", { class: "wait in" }, [h("b", {}, "Emailed " + a.to + ". "), "It went from Sayso's address" + (a.from ? " (" + a.from + ")" : "") + ", so their reply comes straight back here."]));
-    else if (a && a.error) root.append(h("div", {}, [h("div", { class: "wait in" }, a.error), h("button", { class: "btn in d1", style: "margin-top:12px;width:100%;background:#15191e;color:#ffffff", onclick: function () { askFor(it); } }, "Try again")]));
-    else root.append(h("button", { class: "btn in d3", style: "background:#15191e;color:#ffffff", onclick: function () { askFor(it); } }, "Ask them for the details"));
+    else if (a && a.error) root.append(h("div", {}, [h("div", { class: "wait in" }, a.error), h("button", { class: "btn in d1", style: "margin-top:12px;width:100%;background:#0d0f1a;color:#ffffff", onclick: function () { askFor(it); } }, "Try again")]));
+    else root.append(h("button", { class: "btn in d3", style: "background:#0d0f1a;color:#ffffff", onclick: function () { askFor(it); } }, "Ask them for the details"));
   }
 }
 
 var VERDICT = { pay: "Pay", wait: "Wait", split: "Split", hold: "Hold", reject: "Refuse" };
 var DECIDED = { price: "price", deadline: "the due date", balance: "balance", risk: "risk" };
+function flapWord(word, tone) {
+  return h("span", { class: "flaps t-" + tone, role: "img", "aria-label": word }, word.toUpperCase().split("").map(function (ch, i) { return h("span", { class: "fc", "aria-hidden": "true", style: "animation-delay:" + (0.15 + i * 0.07) + "s" }, ch); }));
+}
 function decision(it) {
   var d = it.decision;
   if (!d) return null;
@@ -370,7 +380,7 @@ function decision(it) {
     ]);
   };
   return h("div", { class: "dc blur d1", role: "group", "aria-label": "Decision: " + (VERDICT[d.verdict] || d.verdict) }, [
-    h("div", { class: "dc-head" }, [h("span", { class: "dc-v " + d.verdict }, VERDICT[d.verdict] || d.verdict), h("span", { class: "dc-by" }, "Decided by " + (DECIDED[d.decided_by] || d.decided_by))]),
+    h("div", { class: "dc-head" }, [flapWord(VERDICT[d.verdict] || d.verdict, d.verdict), h("span", { class: "dc-by" }, "Decided by " + (DECIDED[d.decided_by] || d.decided_by))]),
     h("p", { class: "dc-r" }, d.reason),
     f("price", "Price", [h("b", {}, i.price_usdz), cap ? " of " + i.cap_usdz + " USDZ" : " USDZ"], !(cap && price > cap) && !(i.rate_drift_pct > 1.5)),
     f("balance", "Balance", i.spendable_usdz ? [h("b", {}, i.spendable_usdz), " USDZ"] : "No budget set", !i.spendable_usdz || Number(i.spendable_usdz) >= price),
@@ -386,9 +396,9 @@ function track(it, L) {
   var max = 0, d = null;
   var bar = h("span", { class: "bar", style: "width:63px;background:#ffffff" });
   var label = h("span", { class: "label", style: "color:#ffffff" }, "Swipe to approve " + amountOf(it));
-  var thumb = h("button", { type: "button", class: "thumb", style: "background:#ffffff", "aria-label": "Approve " + amountOf(it) + " in Sayso" }, svg("M5 12h14M13 6l6 6-6 6", "#15191e", 22, 2.4, "nudge"));
+  var thumb = h("button", { type: "button", class: "thumb", style: "background:#ffffff", "aria-label": "Approve " + amountOf(it) + " in Sayso" }, svg("M5 12h14M13 6l6 6-6 6", "#0d0f1a", 22, 2.4, "nudge"));
   var spin = h("span", { class: "spin", "aria-hidden": "true", html: '<svg width="26" height="26" viewBox="0 0 28 28" fill="none"><circle cx="14" cy="14" r="11" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-dasharray="48 100"/></svg>' });
-  var t = h("div", { class: "track in d4", style: "background:#15191e" }, [bar, label, thumb, spin]);
+  var t = h("div", { class: "track in d4", style: "background:#0d0f1a" }, [bar, label, thumb, spin]);
   function set(x) { thumb.style.transform = "translateX(" + x + "px)"; bar.style.width = x + 63 + "px"; label.style.opacity = Math.max(0, 1 - x / 150); }
   thumb.addEventListener("pointerdown", function (e) { max = t.clientWidth - 68; d = { x: e.clientX }; thumb.classList.add("drag"); try { thumb.setPointerCapture(e.pointerId); } catch (err) {} });
   thumb.addEventListener("pointermove", function (e) { if (d) set(Math.max(0, Math.min(max, e.clientX - d.x))); });
