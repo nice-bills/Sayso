@@ -122,3 +122,19 @@ test('a payout is one line until you open it, then shows its decision', async ({
   await browser.locator(`${row} button.row-head`).click();
   await expect(browser.locator(`${row} .decision`)).not.toBeVisible();
 });
+
+test('an agent payout proves itself, and a dispute the proof answers is denied', async ({ app, screen, browser }) => {
+  await openEverything(app, screen);
+  await screen.getByRole('tab', 'Payments').tap();
+  const row = 'article.row:has-text("Rechenzentrum Nord")';
+  await expect(browser.locator(`${row} .pill`)).toHaveText('Delivered', { timeout: 20_000 });
+  await browser.locator(`${row} button.row-head`).click();
+  await browser.locator(`${row} button:has-text("Prove it")`).click();
+  const prove = browser.locator(`${row} .prove`);
+  await expect(prove).toContainText("The owner's Metal mandate");
+  await expect(prove).toContainText('signed this exact order');
+  await expect(browser.locator(`${row} .pv-proven`)).toHaveCount(6);
+  await browser.locator(`${row} .prove button:has-text("Wasn't allowed")`).click();
+  await expect(browser.locator(`${row} .pv-dispute`)).toContainText('Denied');
+  await expect(browser.locator(`${row} .pv-dispute`)).toContainText('mandate allowed this payment');
+});

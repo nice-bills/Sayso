@@ -41,9 +41,10 @@ import { BatchBook } from "./payouts/batch.js";
 import { whatIf } from "./payouts/decide.js";
 import { decisionView, PayoutError, PayoutService, publicView, type PayoutAirwallex, type Refunder } from "./payouts/service.js";
 import { RateMedian } from "./payouts/rates.js";
-import type { PayoutBook } from "./payouts/book.js";
+import type { Payout, PayoutBook } from "./payouts/book.js";
 import { booksBefore, flowsFromBooks, rampSince, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
 import { FakeAirwallex, FakeMandate, FakeRefunder } from "./sim/offline.js";
+import { buildProof, CLAIMS, Disputes, judge, type Claim } from "./payouts/proof.js";
 import { Store } from "./store.js";
 import { fmt, toMinor } from "./treasury/money.js";
 
@@ -243,6 +244,46 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     });
   });
 
+  // "Prove it": what Sayso can show when an agent's purchase is questioned. Public like the receipt:
+  // the payout id is the key, and the proof holds no bank details.
+  const disputes = new Disputes(store);
+  const proofOf = async (p: Payout) => {
+    const t = p.transferId ? await awx.transferByRequestId(p.id).catch(() => undefined) : undefined;
+    return buildProof(p, trail.for(p.id), receipts.get(p.id), t?.status);
+  };
+  app.get("/v1/payouts/:id/proof", async (req, res) => {
+    const p = svc.book.get(String(req.params.id));
+    if (!p) return void res.status(404).json({ error: "no such payout" });
+    res.json({ ...(await proofOf(p)), disputes: disputes.for(p.id), claims: CLAIMS });
+  });
+  // A dispute names what it says went wrong; judge() settles it from the proof, in code.
+  app.post("/v1/payouts/:id/disputes", express.json(), async (req, res) => {
+    const p = svc.book.get(String(req.params.id));
+    if (!p) return void res.status(404).json({ error: "no such payout" });
+    const claim = String(req.body?.claim ?? "") as Claim;
+    if (!(claim in CLAIMS)) return void res.status(400).json({ error: `claim must be one of ${Object.keys(CLAIMS).join(", ")}` });
+    if (p.status !== "paid") return void res.status(409).json({ error: `only a delivered payout can be disputed; this one is ${p.status}` });
+    if (!p.buyer || p.buyer.startsWith("internal:")) return void res.status(409).json({ error: "only an agent's payout can be disputed" });
+    if (disputes.open(p.id)) return void res.status(409).json({ error: "a dispute on this payout is already waiting for the owner" });
+    const note = String(req.body?.note ?? "").trim().slice(0, 200);
+    const by = String(req.body?.by ?? "the paying agent").trim().slice(0, 60);
+    const proof = await proofOf(p);
+    const j = judge(claim, proof);
+    const d = disputes.add({ payout: p.id, claim, note, by, verdict: j.verdict, reason: j.reason, cites: j.cites, proof_hash: proof.hash });
+    trail.add(p.id, "decide", `Disputed by ${by} (${CLAIMS[claim].toLowerCase()}): ${j.verdict}. ${j.reason}`, { claim, note, cites: j.cites, proof_hash: proof.hash });
+    try {
+      if (j.verdict === "upheld") await svc.dispute(p.id, "Sayso's dispute rules", `${CLAIMS[claim].toLowerCase()}; upheld from the proof`);
+      else if (j.verdict === "review") emit("escalate", `A dispute on ${p.payeeName}'s payout needs you: ${CLAIMS[claim]}. ${j.reason}`, { payout: p.id });
+      else {
+        // Denied: the proof it rests on is anchored on Metal, so the answer can't be rewritten later.
+        const a = await anchorer.anchor(proof.hash as `0x${string}`).catch(() => undefined);
+        if (a) disputes.anchored(d.id, a.tx);
+        emit("refuse", `Dispute on ${p.payeeName}'s payout denied: ${j.reason}`, { payout: p.id }, a?.explorer);
+      }
+    } catch (err) { return void fail(res, err); }
+    res.status(201).json({ dispute: disputes.for(p.id).find((x) => x.id === d.id), proof, payout: publicView(svc.book.get(p.id)!) });
+  });
+
   const webDir = fileURLToPath(new URL("./web", import.meta.url));
   // The app itself: static files under a strict CSP, since it renders text from strangers' emails.
   app.use((_req, res, next) => {
@@ -382,7 +423,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   app.get("/v1/payouts/:id/why", auth.requireOwner, (req, res) => {
     const p = svc.book.get(String(req.params.id));
     if (!p) return void res.status(404).json({ error: "no such payout" });
-    res.json({ payout: publicView(p), steps: trail.for(p.id), receipts: receipts.get(p.id) });
+    res.json({ payout: publicView(p), steps: trail.for(p.id), receipts: receipts.get(p.id), disputes: disputes.for(p.id) });
   });
   // What the agent would decide with one input changed. Sandbox and offline only; nothing moves.
   app.post("/v1/payouts/:id/what-if", auth.requireOwner, express.json(), (req, res) => {
@@ -403,7 +444,20 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     if (!(await auth.confirmed(req, req.body?.confirmation, "dispute", String(req.params.id)))) return void res.status(401).json({ error: "Confirm with your passkey to refund it.", need: "passkey" });
     const reason = String(req.body?.reason ?? "").trim().slice(0, 200);
     if (!reason) return void res.status(400).json({ error: "say why the payout was wrong" });
-    try { res.json(publicView(await svc.dispute(String(req.params.id), "owner", reason))); } catch (err) { fail(res, err); }
+    try {
+      const p = await svc.dispute(String(req.params.id), "owner", reason);
+      const open = disputes.open(p.id);
+      if (open) disputes.settle(open.id, "refunded_by_owner", `You refunded it: ${reason}`);
+      res.json(publicView(p));
+    } catch (err) { fail(res, err); }
+  });
+  // The owner keeps a dispute the proof couldn't settle: the payout stands.
+  app.post("/v1/payouts/:id/dispute/deny", auth.requireOwner, express.json(), (req, res) => {
+    const open = disputes.open(String(req.params.id));
+    if (!open) return void res.status(409).json({ error: "no dispute is waiting for you" });
+    disputes.settle(open.id, "denied_by_owner", "You kept the payout after reading the proof.");
+    trail.add(open.payout, "decide", "You kept the payout after reading the proof");
+    res.json({ dispute: disputes.for(open.payout).at(-1) });
   });
   app.post("/v1/payouts/:id/review", auth.requireOwner, express.json(), async (req, res) => {
     if (req.body?.decision !== "reject" && !(await auth.confirmed(req, req.body?.confirmation, "review", String(req.params.id)))) return void res.status(401).json({ error: "Confirm with your passkey to allow it.", need: "passkey" });

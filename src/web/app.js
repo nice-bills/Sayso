@@ -1250,7 +1250,7 @@ function timeline(p, inbox) {
 
 function failure(p) {
   if (!p.failure) return null;
-  if (p.failure.startsWith("disputed: ")) return h("div", { class: "sub" }, `Disputed: ${p.failure.slice(10)}. The agent got all ${usdz(p.price_usdz)} back.`);
+  if (p.failure.startsWith("disputed: ")) return h("div", { class: "sub" }, `Disputed: ${p.failure.slice(10).replace(/\.$/, "")}. The agent got all ${usdz(p.price_usdz)} back.`);
   return h("div", { class: "sub" }, p.status === "refunded" && p.source === "agent" ? `The bank returned it (${p.failure.replace(/^bank returned it: /, "")}). The agent got all ${usdz(p.price_usdz)} back.` : `The bank returned it: ${p.failure.replace(/^bank returned it: /, "")}.`);
 }
 
@@ -1261,7 +1261,8 @@ const reviewable = () => state.payouts.filter((p) => p.status === "needs_review"
 // decision, the progress and the proof. One that needs you is open from the start.
 function payoutRow(p, opts = {}) {
   const tapPending = linkedPayouts().has(p.id) && ["quoted", "needs_review"].includes(p.status);
-  const [label, tone] = tapPending ? (p.status === "quoted" ? ["Waiting for your tap", "coin"] : ["Check before paying", "stop"]) : PAYOUT_PILL[p.status] ?? [p.status, ""];
+  const [label, tone] = tapPending ? (p.status === "quoted" ? ["Waiting for your tap", "coin"] : ["Check before paying", "stop"])
+    : p.status === "refunded" && p.failure?.startsWith("disputed: ") ? ["Disputed, refunded", "warn"] : PAYOUT_PILL[p.status] ?? [p.status, ""];
   const from = p.source === "agent" ? "Agent" : p.source === "inbox" || linkedPayouts().has(p.id) ? "Inbox" : "Quote";
   const needsYou = p.status === "needs_review" && !linkedPayouts().has(p.id);
   const open = opts.open || needsYou || state.rows.has(p.id);
@@ -1296,10 +1297,47 @@ function payoutRow(p, opts = {}) {
         prow("Metal payment", p.funding_tx), prow("Airwallex transfer", p.airwallex_transfer_id), prow("Refund", p.refund_tx),
         p.reasons?.length ? prow("Why", p.reasons.join("; ")) : null,
       ) : null,
-      state.why[p.id] && p.status === "paid" && from === "Agent" ? disputeButton(p) : null,
+      from === "Agent" && ["paid", "refunded"].includes(p.status) ? provePanel(p) : null,
     ) : null,
   );
 }
+/**
+ * "Prove it": what Sayso can show about an agent's payout, piece by piece, and the disputes on it.
+ * A dispute names its claim and the rules settle it from this proof; one they can't settle waits here.
+ */
+const CLAIM_CHIPS = [["not_authorized", "Wasn't allowed"], ["wrong_amount", "Charged too much"], ["not_delivered", "Never arrived"], ["wrong_payee", "Wrong account"], ["other", "Something else"]];
+const DISPUTE_VERDICT = { denied: ["Denied", "go"], upheld: ["Upheld, refunded", "warn"], review: ["Needs you", "warn"], refunded_by_owner: ["You refunded it", "warn"], denied_by_owner: ["You kept it", "go"] };
+function provePanel(p) {
+  const key = `prove:${p.id}`, proof = state.proof?.[p.id];
+  const load = () => act(key, async () => { state.proof = { ...state.proof, [p.id]: await api(`/v1/payouts/${encodeURIComponent(p.id)}/proof`) }; });
+  if (!proof) return h("div", { class: "prove" }, h("button", { type: "button", class: "btn quiet small", disabled: state.busy[key], onclick: load }, "Prove it"));
+  const file = (claim) => act(key, async () => {
+    await api(`/v1/payouts/${encodeURIComponent(p.id)}/disputes`, { claim, by: "the paying agent" });
+    state.proof[p.id] = await api(`/v1/payouts/${encodeURIComponent(p.id)}/proof`);
+  });
+  const keep = () => act(key, async () => {
+    await api(`/v1/payouts/${encodeURIComponent(p.id)}/dispute/deny`, {});
+    state.proof[p.id] = await api(`/v1/payouts/${encodeURIComponent(p.id)}/proof`);
+  }, "Kept. The payout stands.");
+  const mark = { proven: "✓", against: "✕", missing: "–" };
+  const last = proof.disputes.at(-1);
+  const open = last?.verdict === "review";
+  return h("div", { class: "prove" },
+    h("div", { class: "wi-head" }, h("span", { class: "dc-label" }, "Prove it"), h("button", { type: "button", class: "linkish wi-reset", onclick: () => { delete state.proof[p.id]; render(); } }, "Hide")),
+    h("ol", { class: "pv-list" }, proof.evidence.map((e) => h("li", { class: `pv-item pv-${e.status}` },
+      h("span", { class: "pv-mark", "aria-label": e.status }, mark[e.status]),
+      h("span", { class: "pv-body" }, h("b", {}, e.title), h("span", {}, e.detail), e.link ? h("a", { href: e.link, target: "_blank", rel: "noopener" }, "See it on Metal") : null)))),
+    h("div", { class: "pv-hash" }, "Proof hash ", h("code", {}, `${proof.hash.slice(0, 10)}…${proof.hash.slice(-6)}`)),
+    proof.disputes.map((d) => h("div", { class: "pv-dispute" },
+      h("span", { class: `pill ${DISPUTE_VERDICT[d.verdict]?.[1] ?? ""}` }, DISPUTE_VERDICT[d.verdict]?.[0] ?? d.verdict),
+      h("span", {}, h("b", {}, `${proof.claims[d.claim]}. `), d.reason, d.anchor_tx?.startsWith("0x") ? h("a", { href: `https://testnet.metalntwx.com/tx/${d.anchor_tx}`, target: "_blank", rel: "noopener" }, " Anchored on Metal") : null))),
+    p.status === "paid" ? h("div", { class: "actions" }, disputeButton(p), open ? h("button", { type: "button", class: "btn quiet small", disabled: state.busy[key], onclick: keep }, "Keep the payout") : null) : null,
+    p.status === "paid" && !open ? h("div", { class: "pv-try" },
+      h("span", { class: "wi-hint" }, "Dispute it as the agent would. The rules answer from the proof above."),
+      h("div", { class: "wi-chips" }, CLAIM_CHIPS.map(([c, label]) => h("button", { type: "button", class: "chip", disabled: state.busy[key], onclick: () => file(c) }, label)))) : null,
+  );
+}
+
 /** The owner upholds an agent's dispute: the agent gets every cent back under the refund mandate. */
 function disputeButton(p) {
   const key = `dispute:${p.id}`;

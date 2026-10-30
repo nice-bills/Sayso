@@ -29,6 +29,20 @@ Every payout goes through one pure function, `decide()` (`src/payouts/decide.ts`
 
 The app shows the verdict, the three inputs and the reason on every payout, and on the sandbox a "What if" row changes one input to show the flip (labelled: nothing moves). The model never sets a number; it can only add risk findings.
 
+## Prove it: when an agent's purchase is questioned
+
+Sayso is the seller here, so it has to show what it sold and who allowed it. `GET /v1/payouts/:id/proof` (and the `prove_payout` MCP tool) lists six pieces of evidence, each marked proven, missing or against: the order the agent placed (and whether its key signed that exact order), the owner's Metal mandate and its limits, the owner's approval if the payout was held, the agent's payment on Metal, the Airwallex transfer, and the receipt anchored on chain. No bank details are included.
+
+A dispute (`POST /v1/payouts/:id/disputes`, or `dispute_payout`) names what went wrong: not authorized, wrong amount, not delivered, wrong account, or something else. `judge()` (`src/payouts/proof.ts`) settles it from the evidence, in code:
+
+| The proof | Verdict | What moves |
+| --- | --- | --- |
+| Answers the claim (for example a verified mandate against "not authorized") | **Denied** | The proof's hash is anchored on Metal, so the answer can't be rewritten |
+| Contradicts the payout (no mandate on record, or the transfer came back) | **Upheld** | The agent's USDZ is refunded on Metal by `mandate pull --payment-id` |
+| Can't settle it | **Review** | The owner refunds it with their passkey, or keeps it |
+
+In the seeded app, the Rechenzentrum Nord payout was made under an owner's mandate with a signed order, so "Wasn't allowed" is denied. The Lingua Freelance payout came from a bare key, so the same claim is upheld and refunded.
+
 ## Why it matters
 
 Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a print shop in London. Businesses lose real money to invoice fraud ("our bank details have changed"). Sayso answers both with the same idea: **a prompt is not a financial control.** The model reads emails. Code and on-chain mandates decide what moves.
@@ -53,13 +67,13 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 ## How we built it
 
 - **Airwallex:** FX rates and conversions (only the shortfall is converted), beneficiary validation, account verification with bank name matching (VoP/CoP) and creation, transfers with `request_id` idempotency and a purpose code, signed webhooks for transfer status (including bank returns after `PAID`), balances, and deposit simulation for the off-ramp.
-- **Metal (the builder guide's Kit 11, from the payer's side):** signed orders required on the x402 route, an owner's mandate per agent, refusals that come back with a reason, limits raised by `mandate replace`, disputes refunded by `mandate pull --payment-id`, earnings moved to Airwallex with the Metal hash as the deposit reference, and a timed-out payment looked up before anything is retried. x402 payments with `@metalntwx/metal-pay` 0.3.4 and `metal-agent` 0.3.3 on Metal testnet (USDZ), and two mandates through the official `metal-agent` CLI: a ramp-only sweep mandate and a capped refund mandate. On-chain refusals are recorded for the heist. Agents can pay under their owner's mandate (Verifiable Intent): Sayso asks for the agent's signed order with `requireSignedOffer`, runs `verifyMandatePayment`'s four steps on every such payment, and reads the remaining budget with `readMandateState`. Sweeps release only delivered payouts (escrow), and each final payout's receipt hash is anchored on chain through the MIP20 gas envelope (`@metalntwx/metal-ts`).
+- **Metal (the builder guide's Kit 11, from the payer's side):** signed orders required on the x402 route, an owner's mandate per agent, refusals that come back with a reason, limits raised by `mandate replace`, disputes settled from the proof (denied answers anchored on chain, upheld ones refunded by `mandate pull --payment-id`), earnings moved to Airwallex with the Metal hash as the deposit reference, and a timed-out payment looked up before anything is retried. x402 payments with `@metalntwx/metal-pay` 0.3.4 and `metal-agent` 0.3.3 on Metal testnet (USDZ), and two mandates through the official `metal-agent` CLI: a ramp-only sweep mandate and a capped refund mandate. On-chain refusals are recorded for the heist. Agents can pay under their owner's mandate (Verifiable Intent): Sayso asks for the agent's signed order with `requireSignedOffer`, runs `verifyMandatePayment`'s four steps on every such payment, and reads the remaining budget with `readMandateState`. Sweeps release only delivered payouts (escrow), and each final payout's receipt hash is anchored on chain through the MIP20 gas envelope (`@metalntwx/metal-ts`).
 - **Claude:** reads invoice emails into structured fields with a strict schema (Claude Opus 5.5 with structured outputs). A pattern extractor takes over with no key; neither one decides money.
 - **MCP, two ways.** A local server for agents with their own Metal wallet (`pay_invoice`, `pay_batch`, `pay_quote`, `quote_payout`, `payout_status`, `batch_status`). A hosted endpoint for any agent, with per-agent keys and caps (`forward_invoice`, `list_invoices`, `quote_payout`, `payout_status`). Approving is deliberately not a tool.
 - **Everywhere else:** a Claude Code plugin with a skill that teaches the approval flow, a skill for OpenClaw-style agents, AgentMail email intake (Svix-signed webhooks), and ntfy phone notifications that open the approval page.
 - **App:** built for people whose agents do the work, and kept quiet. Home leads with what needs your say and a plain timeline of what the agents are doing, each step with its proof. Then an inbox, payments with live progress, an agents page, and a bottom tab bar on phones. Owner sign-in, strict CSP, invoice text always rendered as text.
 - **Its own card and its own treasury.** Sayso pays its compute bills with its own card, built on the Airwallex Issuing API (merchant-category and amount limits on the card; an unknown merchant freezes it). In the demo the card is simulated, because the sandbox account can't issue cards. It also runs its own bills through a treasury policy that decides hold, convert or pay, and an email that lowers the earnings forecast tightens what it may do without a person.
-- **Quality:** TypeScript, SQLite, 129 unit and integration tests, 9 browser end-to-end tests, and a full offline mode with simulators that follow the same rules as the real services.
+- **Quality:** TypeScript, SQLite, 142 unit and integration tests, 10 browser end-to-end tests, and a full offline mode with simulators that follow the same rules as the real services.
 
 ## Proven live
 

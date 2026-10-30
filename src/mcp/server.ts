@@ -112,6 +112,23 @@ server.registerTool("payout_receipt", {
   inputSchema: { payout_id: z.string() },
 }, async ({ payout_id }) => text(await (await fetch(`${base}/v1/payouts/${payout_id}/receipt`)).json()));
 
+server.registerTool("prove_payout", {
+  description: "Everything Sayso can prove about a payout, as the seller: the order the agent placed, the Metal mandate that allowed it, the owner's approval if it was held, the Metal payment, the Airwallex transfer and the receipt on chain. Each piece is proven, missing, or against.",
+  inputSchema: { payout_id: z.string() },
+}, async ({ payout_id }) => text(await (await fetch(`${base}/v1/payouts/${payout_id}/proof`)).json()));
+
+server.registerTool("dispute_payout", {
+  description: "Dispute a delivered payout. Name what went wrong; Sayso's rules check the claim against the proof. Denied: the proof answers it, and that answer is anchored on Metal. Upheld: the agent's USDZ is refunded on Metal. Review: the owner decides.",
+  inputSchema: {
+    payout_id: z.string(),
+    claim: z.enum(["not_authorized", "wrong_amount", "not_delivered", "wrong_payee", "other"]),
+    note: z.string().max(200).optional(),
+  },
+}, async ({ payout_id, claim, note }) => {
+  const res = await fetch(`${base}/v1/payouts/${payout_id}/disputes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ claim, note, by: "the paying agent" }) });
+  return text(await res.json());
+});
+
 server.registerTool("payout_status", {
   description: "Where a payout is: quoted, needs_review, accepted, funded, submitted, paid, failed, refunded.",
   inputSchema: { payout_id: z.string() },

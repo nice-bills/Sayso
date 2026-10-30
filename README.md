@@ -50,6 +50,8 @@ claude mcp add sayso -e SAYSO_URL=http://127.0.0.1:4021 -e SAYSO_BUYER_KEY=0x...
 | `pay_quote` | Pays an existing quote by id. |
 | `payout_status` | Reports where a payout is. |
 | `payout_receipt` | A final payout's receipt and the Metal transaction anchoring its hash. |
+| `prove_payout` | Everything Sayso can prove about a payout, piece by piece. |
+| `dispute_payout` | Dispute a delivered payout; the rules settle it from the proof. |
 
 Metal itself refuses to sign above `SAYSO_MAX_USDZ`.
 
@@ -79,7 +81,10 @@ Metal refuses any payment above the cap, past the budget, after the expiry, or t
 | `POST /v1/inbox/:id/approve` | owner | The one tap. `verified_with_payee: true` is needed for held invoices. |
 | `POST /v1/inbox/:id/details` | owner | Fill in what the extractor couldn't find; the invoice is checked again. |
 | `GET /v1/payouts`, `POST /v1/payouts/:id/review` | owner | Every payout; allow or block a held agent payout. |
-| `POST /v1/payouts/:id/dispute` | owner | Uphold an agent's dispute: the agent is refunded in full under the refund mandate. |
+| `GET /v1/payouts/:id/proof` | free | What Sayso can prove about a payout: the order, the owner's mandate, the approval, the Metal payment, the transfer, the receipt. No bank details. |
+| `POST /v1/payouts/:id/disputes` | free | `{ claim, note }`: a dispute settled from the proof. Denied answers are anchored on Metal; upheld ones are refunded. |
+| `POST /v1/payouts/:id/dispute` | owner | Refund an agent's payout yourself (passkey): the agent is refunded in full under the refund mandate. |
+| `POST /v1/payouts/:id/dispute/deny` | owner | Keep a payout whose dispute the proof couldn't settle. |
 | `POST /v1/payouts/:id/what-if` | owner, sandbox only | Re-run the decision with one input changed (rate, budget, risk). Moves nothing. |
 | `GET /v1/payouts/:id/why` | owner | Every step behind a payout, with its proof: what was said or read, the rules, the bank, the mandate, Airwallex, the receipt. |
 | `POST /v1/say` | owner | `{ transcript }`: what you said becomes an invoice to approve, with what was heard, what was understood and where each field came from. |
