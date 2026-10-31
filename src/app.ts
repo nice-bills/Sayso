@@ -175,7 +175,10 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const rates = opts.offline ? RateMedian.fromCsv() : new RateMedian();
   const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, rates, floatReserveMinor: policyConfig.reserveFloorMinor, onFinal: (p) => void receipts.issue(p) });
   const inbox = new Inbox(store, svc);
-  const credit = new SimulatedDepositCredit(awx, process.env.AWX_GLOBAL_ACCOUNT_ID ?? "sim:ga_usd");
+  // Live, the ramp credits Sayso's own USD global account; a made-up id would only fail later at Airwallex.
+  const globalAccount = process.env.AWX_GLOBAL_ACCOUNT_ID || (opts.offline ? "sim:ga_usd" : undefined);
+  if (!globalAccount) emit("escalate", "AWX_GLOBAL_ACCOUNT_ID is not set: earnings will not be swept into Airwallex until it is");
+  const credit = new SimulatedDepositCredit(awx, globalAccount ?? "");
   const earnings = earningsFor(svc);
 
   const balances = async () => Object.fromEntries((await awx.currentBalances()).map((b) => [b.currency, toMinor(b.available_amount)]));
@@ -186,6 +189,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   let lastBalances = opening;
 
   async function sweep() {
+    if (!globalAccount) return;
     const e = await earnings.pending();
     if (!e) return;
     const r = await sweepEpoch({ ...e, currency: "USD" }, ledger, verifier, credit);
@@ -213,10 +217,34 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   // Sayso's own email address: made on first start if there isn't one, so nobody sets one up.
   const mailbox = new Mailbox(store, { offline: opts.offline, ownerEmail: process.env.OWNER_EMAIL?.trim().toLowerCase() || undefined });
   if (!opts.offline) await mailbox.ensure().catch((e) => emit("escalate", `Couldn't make Sayso's email address: ${String(e).slice(0, 200)}`));
+  // RECONCILE_EVERY_MS=0 turns it off (the demo reconciles once, at the end).
+  const reconcileEveryMs = Number(process.env.RECONCILE_EVERY_MS ?? (opts.offline ? 60_000 : 10 * 60_000));
+  // The first tick after start reconciles once the opening snapshot has settled.
+  let lastReconcileAt = Date.now() - reconcileEveryMs + Math.min(reconcileEveryMs, opts.offline ? 5_000 : 60_000);
+
+  // On the Airwallex sandbox no bank ever answers, so a transfer stays PROCESSING until someone calls
+  // the simulation API. Here Sayso plays the payee's bank after a delay, through Airwallex's own
+  // simulator, and says so; everything after it (follow, receipts, escrow, sweeps) is the same code a
+  // live account runs. Off on a live account, or with AWX_SANDBOX_DELIVER=off.
+  const deliverAfterMs = Number(process.env.AWX_SANDBOX_DELIVER_AFTER_MS ?? 60_000);
+  const simulateTransfer = "simulateTransfer" in awx ? (awx as Airwallex).simulateTransfer : undefined;
+  async function sandboxBank() {
+    if (opts.offline || !sandbox || !simulateTransfer || process.env.AWX_SANDBOX_DELIVER === "off") return;
+    for (const p of svc.book.list(500).filter((x) => x.status === "submitted" && x.transferId)) {
+      const t = await awx.transferByRequestId(p.id).catch(() => undefined);
+      if (!t || Date.now() - new Date(p.createdAt).getTime() < deliverAfterMs) continue;
+      const next = t.status === "SENT" ? "PAID" : ["PROCESSING", "SCHEDULED", "SUBMITTED", "PENDING"].includes(t.status) ? "SENT" : undefined;
+      if (!next) continue;
+      await simulateTransfer(p.transferId!, { next_status: next });
+      trail.add(p.id, "observe", `Sandbox: Airwallex's simulator moved transfer ${p.transferId} to ${next}, standing in for the payee's bank`);
+    }
+  }
+
   // Without a public URL for the webhook, the AgentMail inbox is polled instead.
   let agentMail: AgentMailPoller | undefined;
   async function tick() {
     await sweep().catch((e) => emit("escalate", `Sweep failed: ${String(e).slice(0, 200)}`));
+    await sandboxBank().catch((e) => emit("escalate", `Sandbox delivery failed: ${String(e).slice(0, 200)}`));
     await svc.follow().catch((e) => emit("escalate", `Following payouts failed: ${String(e).slice(0, 200)}`));
     await svc.releaseWaiting().catch((e) => emit("escalate", `Releasing waiting payouts failed: ${String(e).slice(0, 200)}`));
     await receipts.retry();
@@ -225,6 +253,11 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     if (mc) agentMail ??= new AgentMailPoller(mc.apiKey, mc.inboxId);
     if (agentMail) await agentMail.poll((e) => inbox.receive(e)).catch((e) => emit("escalate", `AgentMail poll failed: ${String(e).slice(0, 200)}`));
     lastBalances = await balances().catch(() => lastBalances);
+    // The books are checked on their own, not only when someone runs the demo.
+    if (reconcileEveryMs > 0 && Date.now() - lastReconcileAt >= reconcileEveryMs) {
+      lastReconcileAt = Date.now();
+      await reconcileNow().catch((e) => emit("escalate", `Reconciliation failed: ${String(e).slice(0, 200)}`));
+    }
   }
 
   // ---------- HTTP ----------

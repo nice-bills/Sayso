@@ -122,6 +122,7 @@ What the live sandbox taught us, now handled in code: FX rates come back in mark
 
 Claude.ai, ChatGPT, approval links on a phone and Airwallex webhooks need Sayso on a public HTTPS address. It's one long-running Node service, so it fits Render, Fly or Railway (not serverless).
 
+- **On its own, live:** the service reconciles every 10 minutes (`RECONCILE_EVERY_MS`; `0` turns it off). On the Airwallex sandbox no bank ever answers, so after a minute (`AWX_SANDBOX_DELIVER_AFTER_MS`) Sayso moves each submitted transfer to SENT and then PAID through Airwallex's own simulation API, and writes that on the payout's trail; `AWX_SANDBOX_DELIVER=off` stops it. Without `AWX_GLOBAL_ACCOUNT_ID` a live Sayso says so at start and doesn't sweep, instead of crediting a made-up account.
 - **Render:** New > Blueprint > this repo. `render.yaml` builds the Dockerfile and asks for the secrets: your Airwallex keys and `AWX_GLOBAL_ACCOUNT_ID`, the Metal lines from `.env`, `METAL_BUNDLE` (the output of `npm run bundle:metal`, your `.metal` keys as one value), an `OWNER_TOKEN` you choose, and `PUBLIC_URL` (the `https://...onrender.com` address it gives you).
 - **Anywhere with Docker:** `docker build -t sayso . && docker run -p 4021:4021 --env-file .env -e METAL_BUNDLE="$(npm run -s bundle:metal)" sayso`.
 - Without Airwallex and Metal settings the container starts offline, which is handy for a first check. `GET /healthz` answers when it's up.

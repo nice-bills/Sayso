@@ -36,6 +36,9 @@ const exit = process.argv.includes("--exit");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const beat = async (n: number, title: string) => { emit("observe", `Beat ${n}: ${title}`); await sleep(offline ? 500 : 0); };
 
+// The demo moves sandbox transfers itself (one of them to a bounce) and reconciles once, at the end.
+process.env.AWX_SANDBOX_DELIVER ??= "off";
+process.env.RECONCILE_EVERY_MS ??= "0";
 const cs = await buildSayso({ offline, simMetal });
 const server = cs.app.listen(Number(process.env.PORT ?? 4021));
 const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
