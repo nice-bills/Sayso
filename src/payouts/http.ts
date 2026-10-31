@@ -18,7 +18,7 @@ import type { x402ResourceServer } from "@x402/core/server";
 import { mandateRefOf, signedOfferOf, SIGNED_OFFER_REQUIRED } from "@metalntwx/metal-pay/mandates";
 import { emit } from "../events.js";
 import type { MandateChecker, MandatePolicy, MandateProof, SimMandates } from "../metal/agent-mandate.js";
-import { PayoutError, publicView, type PayoutService } from "./service.js";
+import { PayoutError, publicView, WAITS_FOR_FUNDS, waitsForFunds, type PayoutService } from "./service.js";
 import type { BatchBook } from "./batch.js";
 import type { Payout } from "./book.js";
 import type { SignedOffer } from "./offer.js";
@@ -45,7 +45,13 @@ const PAY_BATCH = /^\/v1\/batches\/([0-9a-f-]{36})\/pay$/;
 
 export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchBook, mandates: MandateOptions = { policy: "verify", record: () => {} }, signOffer?: SignOffer): Router {
   const r = express.Router();
-  const withOffer = async (p: Payout) => ({ ...publicView(p), offer: signOffer && SIGNED.has(p.status) ? await signOffer(p) : null });
+  const withOffer = async (p: Payout) => {
+    const left = svc.remainder(p);
+    return {
+      ...publicView(p), offer: signOffer && SIGNED.has(p.status) ? await signOffer(p) : null,
+      ...(left ? { remainder: { amount: (left.amountMinor / 100).toFixed(2), quote_id: left.quoteId, quote_url: `/v1/payouts/${p.id}/remainder` } } : {}),
+    };
+  };
   const linesOf = (x: { kind: "payout" | "batch"; id: string }) => (x.kind === "payout" ? [x.id] : batches.get(x.id)?.payoutIds ?? []);
   r.use(express.json({ limit: "1mb" }));
 
@@ -72,7 +78,17 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
   r.post("/v1/quotes", async (req, res) => {
     try {
       const p = await svc.quote(req.body);
-      res.status(p.status === "rejected" ? 422 : 201).json({ ...(await withOffer(p)), pay_url: p.status === "quoted" ? `/v1/payouts/${p.id}/pay` : null });
+      res.status(p.status === "rejected" ? 422 : 201).json({ ...(await withOffer(p)), pay_url: p.status === "quoted" && !waitsForFunds(p) ? `/v1/payouts/${p.id}/pay` : null });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  // A split's second part: a quote for what is left, to the same payee, paid like any other.
+  r.post("/v1/payouts/:id/remainder", async (req, res) => {
+    try {
+      const q = await svc.quoteRemainder(req.params.id);
+      res.status(201).json({ ...(await withOffer(q)), pay_url: q.status === "quoted" && !waitsForFunds(q) ? `/v1/payouts/${q.id}/pay` : null });
     } catch (err) {
       sendError(res, err);
     }
@@ -88,6 +104,7 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
   r.post("/v1/payouts/:id/pay", (req, res, next) => {
     const p = svc.book.get(req.params.id);
     if (!p) return void res.status(404).json({ error: "no such quote" });
+    if (p.status === "quoted" && waitsForFunds(p)) return void res.status(409).json({ error: WAITS_FOR_FUNDS, payout: publicView(p) });
     if (!svc.priceOf(p.id)) return void res.status(p.status === "quoted" ? 410 : 409).json({ error: p.status === "quoted" ? "quote expired" : `quote is ${p.status}`, payout: publicView(p) });
     next();
   });

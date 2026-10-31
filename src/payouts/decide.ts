@@ -58,7 +58,7 @@ export interface Decision {
   /** One sentence, shown on the decision card. */
   reason: string;
   inputs: { costUsdzMinor: number; capUsdzMinor: number; rateDrift: number; spendableUsdzMinor: number; risk: RiskVerdict["verdict"]; dueInDays: number; partPaymentAllowed: boolean };
-  /** Split only: what is paid now and what follows the next earnings sweep. */
+  /** Split only: what is paid now and what the agent pays after its next top-up (POST /v1/payouts/:id/remainder). */
   tranches?: Tranche[];
   /** Wait only: what releases the payout. */
   until?: { rateWithinPct?: number; fundsUsdzMinor?: number; by?: string };
@@ -103,7 +103,7 @@ export function decide(i: DecideInput, now: Date, cfg: DecideConfig = DEFAULT_DE
         { amountMinor: nowMinor, costUsdzMinor: nowCost, when: "now" },
         { amountMinor: i.amountMinor - nowMinor, costUsdzMinor: i.costUsdzMinor - nowCost, when: "on_sweep" },
       ];
-      return { verdict: "split", decidedBy: "balance", reason: `Splitting: ${usdz(i.spendableUsdzMinor)} can be spent and this costs ${usdz(i.costUsdzMinor)}, so paying ${fmt(nowMinor, i.currency)} now and ${fmt(i.amountMinor - nowMinor, i.currency)} after the next earnings sweep.`, inputs, tranches };
+      return { verdict: "split", decidedBy: "balance", reason: `Splitting: ${usdz(i.spendableUsdzMinor)} can be spent and this costs ${usdz(i.costUsdzMinor)}, so paying ${fmt(nowMinor, i.currency)} now and ${fmt(i.amountMinor - nowMinor, i.currency)} after the agent's next top-up.`, inputs, tranches };
     }
     return { verdict: "wait", decidedBy: "balance", reason: `Waiting for funds: ${usdz(i.spendableUsdzMinor)} can be spent and this costs ${usdz(i.costUsdzMinor)}; sweeping earnings first.`, inputs, until: { fundsUsdzMinor: i.costUsdzMinor } };
   }

@@ -61,7 +61,10 @@ type Decision = { verdict: "pay" | "wait" | "split" | "hold" | "reject"; decided
 type Quote = { id: string; status: string; amount: string; currency: string; reference: string; price_usdz: string; pay_url: string | null; reasons: string[]; decision?: Decision | null; offer?: SignedOffer | null };
 
 async function quote(i: Invoice, limits: { max_usdz?: string; spendable_usdz?: string } = {}) {
-  const res = await fetch(`${base}/v1/quotes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...toRequest(i), ...limits }) });
+  // Name the paying address, so Sayso checks what it really holds on Metal, not just what the agent says.
+  const key = process.env.SAYSO_BUYER_KEY as `0x${string}` | undefined;
+  const buyer = simPayer ?? (key ? privateKeyToAccount(key).address : undefined);
+  const res = await fetch(`${base}/v1/quotes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...toRequest(i), ...limits, ...(buyer ? { buyer } : {}) }) });
   return (await res.json()) as Quote;
 }
 
@@ -116,6 +119,24 @@ server.registerTool("pay_invoice", {
   const bad = await checkOffer(q, i as Invoice);
   if (bad) return text({ paid: false, reason: `Not paying: ${bad}`, quote: q });
   // A price wait is still paid now: the USDZ waits in escrow at this price and Airwallex pays once the rate is back in band.
+  const r = await pay(q.id);
+  const split = q.decision?.verdict === "split" && r.http_status < 400;
+  return text({ paid: r.http_status < 400, quote_id: q.id, decision: q.decision, ...r,
+    ...(split ? { remainder: `Only part of the invoice was paid. After your next top-up, call pay_remainder with payout_id ${q.id} to pay the rest.` } : {}) });
+});
+
+server.registerTool("pay_remainder", {
+  description: "Pay the rest of an invoice Sayso split because the agent's budget was short. Quotes what is left, to the same payee, checks Sayso's signed offer, and pays it if it is at most max_usdz.",
+  inputSchema: { payout_id: z.string().describe("The first part's payout id"), max_usdz: z.string() },
+}, async ({ payout_id, max_usdz }) => {
+  const first = (await (await fetch(`${base}/v1/payouts/${payout_id}`)).json()) as { amount: string; currency: string; remainder?: { amount: string } };
+  if (!first.remainder) return text({ paid: false, reason: "that payout was not split; nothing is left to pay" });
+  const res = await fetch(`${base}/v1/payouts/${payout_id}/remainder`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  const q = (await res.json()) as Quote & { error?: string };
+  if (!q.pay_url) return text({ paid: false, ...q });
+  if (Number(q.price_usdz) > Number(max_usdz)) return text({ paid: false, reason: `price ${q.price_usdz} USDZ is above max_usdz ${max_usdz}`, quote: q });
+  const bad = await checkOffer(q, { amount: first.remainder.amount, currency: first.currency } as Invoice);
+  if (bad) return text({ paid: false, reason: `Not paying: ${bad}`, quote: q });
   const r = await pay(q.id);
   return text({ paid: r.http_status < 400, quote_id: q.id, decision: q.decision, ...r });
 });

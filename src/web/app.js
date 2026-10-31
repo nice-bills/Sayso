@@ -321,13 +321,13 @@ function stage() {
       travel(coin, [POS[1], POS[2]], tok).then(() => { if (tok === railTok) coin.classList.add("parked"); });
     } else if (d.verdict === "wait") {
       tag(coin, `${i.spendable_usdz} USDZ`);
-      railNote.textContent = "Not enough budget yet. Nothing moves until the next earnings sweep tops it up.";
+      railNote.textContent = "Not enough budget yet. Nothing moves until the agent tops up.";
       travel(coin, [POS[1] - 6], tok).then(() => { if (tok === railTok) coin.classList.add("parked"); });
     } else if (d.verdict === "split") {
       const [now, later] = d.tranches;
       coin2.classList.remove("hidden"); place(coin2, POS[1] - 6); tag(coin2, `€${later.amount} later`); coin2.classList.add("parked");
       tag(coin, `€${now.amount} now`);
-      railNote.textContent = `€${now.amount} goes now. €${later.amount} follows the next earnings sweep.`;
+      railNote.textContent = `€${now.amount} goes now. €${later.amount} follows once the agent tops up.`;
       travel(coin, [POS[1], POS[2], POS[3], POS[4]], tok);
     } else {
       track.classList.add("cut");
@@ -1343,7 +1343,7 @@ function decisionCard(p) {
       factor("price", "Price", priceText, priceOk, [meter, drift]),
       factor("balance", "Balance", i.spendable_usdz ? [h("b", {}, i.spendable_usdz), " USDZ"] : "No budget set", balOk),
       factor("risk", "Risk", i.risk === "allow" ? "Clear" : i.risk === "hold" ? "Held" : "Refused", i.risk === "allow")),
-    d.tranches ? h("p", { class: "dc-note" }, d.tranches.map((t) => `${money(t.amount, p.currency)} ${t.when === "now" ? "now" : "after the next sweep"}`).join(" · ")) : null,
+    d.tranches ? h("p", { class: "dc-note" }, d.tranches.map((t) => `${money(t.amount, p.currency)} ${t.when === "now" ? "now" : "once the agent tops up"}`).join(" · ")) : null,
     d.proposed_cap_usdz ? h("p", { class: "dc-note" }, `To pay it, raise the agent's cap to ${d.proposed_cap_usdz} USDZ on Metal. On the owner's machine: `, h("code", {}, `npm run setup:agent-budget -- --cap ${d.proposed_cap_usdz} --replaces .metal/agent-budget.json`)) : null,
     proofs.length ? h("div", { class: "dc-proof" }, h("span", { class: "dc-label" }, "Proof"), proofs.map(([k, v]) => h("span", { class: "dc-pf" }, h("span", {}, k), v))) : null,
     state.summary?.offline || state.summary?.sandbox ? whatIfPanel(p) : null,

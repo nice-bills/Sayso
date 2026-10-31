@@ -83,6 +83,8 @@ export interface PayoutDeps {
   decideConfig?: DecideConfig;
   /** The inbox pays from Sayso's own Airwallex float; this much USD always stays in it. */
   floatReserveMinor?: number;
+  /** What an address holds in USDZ cents, read from Metal. Undefined when it can't be read. */
+  balanceOf?: (address: string) => Promise<number | undefined>;
 }
 
 const HOUR = 3_600_000;
@@ -103,6 +105,45 @@ export class PayoutService {
     this.risk = d.risk ?? DEFAULT_RISK;
     this.ttl = d.quoteTtlMs ?? 120_000;
     this.read = d.read ?? readAuto;
+    // A split's second part, once quoted: one per split, so it can't be quoted (or paid) twice.
+    d.store.db.exec("CREATE TABLE IF NOT EXISTS split_parts (parent TEXT PRIMARY KEY, child TEXT NOT NULL UNIQUE)");
+  }
+
+  // ---------- a split's second part ----------
+
+  /** What is left of a split, and the quote for it once one exists. Undefined for anything not split. */
+  remainder(p: Payout): { amountMinor: number; quoteId: string | null } | undefined {
+    const later = p.decision?.verdict === "split" ? p.decision.tranches?.find((t) => t.when === "on_sweep") : undefined;
+    if (!later || later.amountMinor <= 0) return undefined;
+    const row = this.d.store.db.prepare("SELECT child FROM split_parts WHERE parent = ?").get(p.id) as { child: string } | undefined;
+    return { amountMinor: later.amountMinor, quoteId: row?.child ?? null };
+  }
+
+  /**
+   * Quotes the rest of a split, to the same payee and bank details, once the first part is paid for.
+   * The agent pays it like any quote, after its next top-up; asking again returns the same quote while
+   * it can still be paid, and a fresh one once it has expired unpaid.
+   */
+  async quoteRemainder(id: string, now = new Date()): Promise<Payout> {
+    const p = this.book.get(id);
+    if (!p) throw new PayoutError(404, "no such payout");
+    const left = this.remainder(p);
+    if (!left) throw new PayoutError(409, "this payout was not split; nothing is left to pay");
+    if (!["funded", "waiting", "submitted", "paid"].includes(p.status)) throw new PayoutError(409, `pay the first part first; it is ${p.status}`);
+    const prior = left.quoteId ? this.book.get(left.quoteId) : undefined;
+    if (prior && !(prior.status === "quoted" && new Date(prior.expiresAt) < now) && !["expired", "rejected"].includes(prior.status)) return prior;
+    const bank = { ...(p.beneficiary.bank_details as Record<string, string>) };
+    delete bank.account_currency; delete bank.bank_country_code; delete bank.account_name;
+    const b = p.beneficiary as { entity_type: "COMPANY" | "PERSONAL"; address: { country_code: string; city: string; street_address: string; postcode: string; state?: string } };
+    const child = await this.quote({
+      amount: toMajor(left.amountMinor).toFixed(2), currency: p.currency, method: p.method, reference: p.reference,
+      payee: { name: p.payeeName, entity_type: b.entity_type, address: b.address, bank, bank_country_code: p.bankCountry },
+      ...(p.buyer && !p.buyer.startsWith("internal:") ? { buyer: p.buyer } : {}),
+    }, now);
+    this.d.store.db.prepare("INSERT INTO split_parts (parent, child) VALUES (?, ?) ON CONFLICT(parent) DO UPDATE SET child = excluded.child").run(p.id, child.id);
+    this.d.trail?.add(p.id, "decide", `Quoted the rest of the split: ${fmt(left.amountMinor, p.currency)} as ${child.id.slice(0, 8)}`, { remainder: child.id }, undefined, now);
+    this.d.trail?.add(child.id, "decide", `The second part of split ${p.id.slice(0, 8)}`, { parent: p.id }, undefined, now);
+    return child;
   }
 
   // ---------- 1. quote ----------
@@ -167,6 +208,15 @@ export class PayoutService {
 
     // Price, balance and risk decide what happens: pay, wait, split or hold. Code, not the model.
     const risk: RiskVerdict = status === "rejected" ? { verdict: "reject", reasons } : status === "needs_review" ? { verdict: "hold", reasons } : { verdict: "allow" };
+    // What the agent can spend: what it says, but never more than Metal says its address holds.
+    let spendableMinor = r.spendable_usdz ? toMinor(Number(r.spendable_usdz)) : Number.MAX_SAFE_INTEGER;
+    if (r.buyer && this.d.balanceOf && !opts.fromFloat) {
+      const held = await this.d.balanceOf(r.buyer).catch(() => undefined);
+      if (held !== undefined) {
+        this.d.trail?.add(id, "observe", `Metal says ${r.buyer.slice(0, 8)}…${r.buyer.slice(-4)} holds ${toMajor(held).toFixed(2)} USDZ${r.spendable_usdz && held < spendableMinor ? `, less than the ${r.spendable_usdz} it said it could spend` : ""}`, { address: r.buyer, held_usdz: toMajor(held).toFixed(2) }, undefined, now);
+        spendableMinor = Math.min(spendableMinor, held);
+      }
+    }
     const median = r.currency === "USD" ? undefined : this.d.rates?.median(r.currency, now);
     if (r.currency !== "USD") this.d.rates?.record(r.currency, rate, now);
     const decision = decide({
@@ -175,12 +225,12 @@ export class PayoutService {
       // Units per USD: fewer of them than the median means the currency got dearer.
       rateDrift: median ? (median - rate) / median : 0,
       // The inbox spends Sayso's own float, so its balance is what Airwallex holds above the reserve.
-      spendableUsdzMinor: r.spendable_usdz ? toMinor(Number(r.spendable_usdz)) : opts.fromFloat ? await this.floatSpendable(r.currency, rate) : Number.MAX_SAFE_INTEGER,
+      spendableUsdzMinor: opts.fromFloat && !r.spendable_usdz ? await this.floatSpendable(r.currency, rate) : spendableMinor,
       risk, dueAt: r.due_date ? new Date(`${r.due_date}T23:59:59Z`) : new Date(now.getTime() + 30 * DAY), partPaymentAllowed: r.part_payment,
     }, now, this.d.decideConfig ?? DEFAULT_DECIDE);
     if (decision.verdict === "hold" && status === "quoted") { status = "needs_review"; reasons.push(decision.reason); }
-    // A split quotes the part that can be paid now; the rest is quoted again after the next sweep.
-    const quoted = decision.verdict === "split" ? this.trimSplit(decision, amountMinor, r.currency, r.method, rate, toMinor(Number(r.spendable_usdz)), pr.totalMinor) : { amountMinor, ...pr };
+    // A split quotes the part that can be paid now; the rest is quoted again (quoteRemainder) after the agent tops up.
+    const quoted = decision.verdict === "split" ? this.trimSplit(decision, amountMinor, r.currency, r.method, rate, decision.inputs.spendableUsdzMinor, pr.totalMinor) : { amountMinor, ...pr };
 
     this.d.trail?.add(id, "decide", decision.reason, { verdict: decision.verdict, decided_by: decision.decidedBy }, undefined, now);
 
@@ -212,7 +262,7 @@ export class PayoutService {
       pp = price(part, currency, method, rate, this.pricing);
     }
     decision.tranches = [{ amountMinor: part, costUsdzMinor: pp.totalMinor, when: "now" }, { amountMinor: amountMinor - part, costUsdzMinor: Math.max(0, fullTotalMinor - pp.totalMinor), when: "on_sweep" }];
-    decision.reason = `Splitting: ${toMajor(spendableMinor).toFixed(2)} USDZ can be spent and this costs ${toMajor(fullTotalMinor).toFixed(2)} USDZ, so paying ${fmt(part, currency)} now and ${fmt(amountMinor - part, currency)} after the next earnings sweep.`;
+    decision.reason = `Splitting: ${toMajor(spendableMinor).toFixed(2)} USDZ can be spent and this costs ${toMajor(fullTotalMinor).toFixed(2)} USDZ, so paying ${fmt(part, currency)} now and ${fmt(amountMinor - part, currency)} after the agent's next top-up.`;
     return { amountMinor: part, ...pp };
   }
 
@@ -249,7 +299,7 @@ export class PayoutService {
   /** The x402 price of a quote, in USDZ major units. Undefined for anything not payable. */
   priceOf(id: string, now = new Date()): string | undefined {
     const p = this.book.get(id);
-    if (!p || p.status !== "quoted" || new Date(p.expiresAt) < now) return undefined;
+    if (!p || p.status !== "quoted" || new Date(p.expiresAt) < now || waitsForFunds(p)) return undefined;
     return toMajor(p.totalMinor).toFixed(2);
   }
 
@@ -501,6 +551,10 @@ function nameParts(name: string) {
 const short = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 
 /** What the API returns for a payout. Never the bank details. */
+/** An agent's quote decided "wait for funds" can't be paid: there is nothing to pay with yet. (The inbox's own invoices wait for the float instead.) */
+export const waitsForFunds = (p: Payout) => p.decision?.verdict === "wait" && p.decision.decidedBy === "balance";
+export const WAITS_FOR_FUNDS = "this quote waits for funds: ask for a new one after the agent's next top-up";
+
 export function publicView(p: Payout) {
   return {
     // A quote nobody paid in time reads as expired, even before anything marks it so.

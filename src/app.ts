@@ -6,7 +6,7 @@ import express from "express";
 import { fileURLToPath } from "node:url";
 import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
 import { METAL_NETWORKS, registerMetalScheme, sellerToken } from "@metalntwx/metal-pay";
-import { createPublicClient, http, type Address } from "viem";
+import { createPublicClient, erc20Abi, http, isAddress, type Address } from "viem";
 import { Airwallex, type Transfer } from "./airwallex/client.js";
 import { AgentCard, type CardPort } from "./airwallex/card.js";
 import { Agent, type LoopAirwallex } from "./agent/loop.js";
@@ -30,7 +30,7 @@ import { imapFromEnv, pollImap } from "./inbox/imap.js";
 import { AgentMailPoller, agentMailRouter } from "./inbox/agentmail.js";
 import { MailError, Mailbox } from "./inbox/mailbox.js";
 import { ChainEarnings, type EarningsSource } from "./metal/earnings.js";
-import { MandateRefunder, MandateSweepVerifier, MetalMandate, type PullResult } from "./metal/mandate.js";
+import { MandateRefunder, MandateSweepVerifier, MetalMandate, USDZ, type PullResult } from "./metal/mandate.js";
 import { ChainMandateChecker, describeMandate, mandatePolicy, SimMandates } from "./metal/agent-mandate.js";
 import { escrow } from "./metal/escrow.js";
 import { MetalAnchorer, readAnchor, RECEIPT_TAG, Receipts, SimAnchorer, type Anchorer } from "./metal/receipts.js";
@@ -173,7 +173,13 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const receipts = new Receipts(store, anchorer, anchorAddress);
   // Offline, the week's median comes from the ECB history; live, from the rates Airwallex has quoted.
   const rates = opts.offline ? RateMedian.fromCsv() : new RateMedian();
-  const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, rates, floatReserveMinor: policyConfig.reserveFloorMinor, onFinal: (p) => void receipts.issue(p) });
+  // Live, what an agent says it can spend is checked against what its address holds on Metal.
+  const rpcUrl = process.env.METAL_RPC_URL;
+  const balanceOf = !opts.offline && !opts.simMetal && rpcUrl ? (() => {
+    const client = createPublicClient({ transport: http(rpcUrl) });
+    return async (address: string) => isAddress(address) ? Number((await client.readContract({ address: USDZ, abi: erc20Abi, functionName: "balanceOf", args: [address] })) / 10n ** 16n) : undefined;
+  })() : undefined;
+  const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, rates, floatReserveMinor: policyConfig.reserveFloorMinor, onFinal: (p) => void receipts.issue(p), balanceOf });
   const inbox = new Inbox(store, svc);
   // Live, the ramp credits Sayso's own USD global account; a made-up id would only fail later at Airwallex.
   const globalAccount = process.env.AWX_GLOBAL_ACCOUNT_ID || (opts.offline ? "sim:ga_usd" : undefined);
