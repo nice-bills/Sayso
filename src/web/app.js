@@ -267,12 +267,13 @@ function stage() {
   const verdictSr = h("span", { class: "sr", "aria-live": "polite" });
   const reason = h("p", { class: "b-reason" });
   const mode = h("span", { class: "b-live" }, "Playing a run");
+  const source = h("p", { class: "v-source small" });
   const val = {}, dial = {};
   const mk = (key, label, control) => {
     val[key] = h("div", { class: "d-val" });
     return (dial[key] = h("div", { class: "dial" }, h("div", { class: "d-label" }, h("span", {}, label), h("i", {}, "Decided it")), val[key], control));
   };
-  const drift = h("input", { type: "range", id: "b-drift", min: -1, max: 4, step: 0.1, value: st.rate_drift_pct, "aria-label": "EUR rate against this week's median, percent", oninput: (e) => change({ rate_drift_pct: Number(e.target.value) }) });
+  const drift = h("input", { type: "range", id: "b-drift", min: -1, max: 4, step: 0.1, value: st.rate_drift_pct, "aria-label": "EUR rate against the week's median, percent", oninput: (e) => change({ rate_drift_pct: Number(e.target.value) }) });
   const spend = h("input", { type: "range", id: "b-spend", min: 0, max: 1000, step: 10, value: st.spendable_usdz, "aria-label": "USDZ the agent can spend", oninput: (e) => change({ spendable_usdz: Number(e.target.value) }) });
   const seg = (key, opts) => h("div", { class: "seg" }, opts.map(([v, label]) => h("button", { type: "button", "data-v": String(v), "aria-pressed": String(st[key] === v), onclick: () => change({ [key]: v }) }, label)));
   const risk = seg("risk", [["allow", "Paid before"], ["newbank", "New bank details"], ["mismatch", "Name mismatch"]]);
@@ -280,9 +281,9 @@ function stage() {
   const dials = h("div", { class: "dials" },
     mk("price", "Price", drift), mk("balance", "Balance", spend), mk("risk", "Payee", risk), mk("deadline", "Due", due));
 
-  // The wire: Claude asks, Sayso decides, Metal holds the USDZ, Airwallex pays out, the payee is paid.
+  // The wire: the agent asks, Sayso decides, Metal holds the USDZ, Airwallex pays out, the payee is paid.
   const POS = [2, 26, 51, 76, 98];
-  const STATIONS = [["Claude", "asks"], ["Sayso", "decides"], ["Metal", "USDZ"], ["Airwallex", "EUR"], ["Kreuzberg", "paid"]];
+  const STATIONS = [["Agent", "asks"], ["Sayso", "decides"], ["Metal", "USDZ"], ["Airwallex", "EUR"], ["Kreuzberg", "paid"]];
   const nodes = POS.map((x, i) => h("span", { class: `node${i === 1 ? " v-gate" : ""}`, style: `left:${x}%` }));
   const names = STATIONS.map(([k, n], i) => h("span", { class: `node-l${i === 0 ? " first" : i === POS.length - 1 ? " last" : ""}`, style: `left:${POS[i]}%` }, k, h("small", {}, n)));
   const coin = h("span", { class: "coin" }, h("span", { class: "tag" })), coin2 = h("span", { class: "coin hidden" }, h("span", { class: "tag" }));
@@ -312,11 +313,11 @@ function stage() {
     coin.classList.remove("parked"); coin2.classList.remove("parked"); coin2.classList.add("hidden");
     place(coin, POS[0]); reach(POS[0]); tag(coin, `${i.price_usdz} USDZ`);
     if (d.verdict === "pay") {
-      railNote.textContent = "Paid over x402 on Metal, held in escrow until Airwallex delivers, then released.";
+      railNote.textContent = "Paid over x402 to Sayso's Metal account. Sayso's books hold it back from sweeps until Airwallex delivers.";
       travel(coin, [POS[1], POS[2]], tok).then(() => { if (tok === railTok) tag(coin, "€480.00"); return travel(coin, [POS[3], POS[4]], tok); })
-        .then(() => { if (tok === railTok) railNote.textContent = "Delivered €480.00 to Kreuzberg Studio by SEPA. The escrow is released."; });
+        .then(() => { if (tok === railTok) railNote.textContent = "Delivered €480.00 to Kreuzberg Studio. Now it can be swept."; });
     } else if (d.verdict === "wait" && d.until?.rate_within_pct !== undefined) {
-      railNote.textContent = `The USDZ waits in escrow on Metal until EUR is back within ${d.until.rate_within_pct}%, or until ${new Date(d.until.by).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}.`;
+      railNote.textContent = `The USDZ waits with Sayso until EUR is back within ${d.until.rate_within_pct}%, or until ${new Date(d.until.by).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}.`;
       travel(coin, [POS[1], POS[2]], tok).then(() => { if (tok === railTok) coin.classList.add("parked"); });
     } else if (d.verdict === "wait") {
       tag(coin, `${i.spendable_usdz} USDZ`);
@@ -350,13 +351,14 @@ function stage() {
     try { r = await api("/v1/decide/preview", st); } catch { return; }
     if (mine !== seq) return;
     const d = r.decision, i = d.inputs, tone = COLORS[d.verdict];
+    source.textContent = `A sample €480 invoice, priced like a real quote with ${r.rate_source === "airwallex" ? "Airwallex's EUR rate right now" : "the simulator's EUR rate"} (${r.median} USD) as the week's median. The Price dial moves today's rate away from it.`;
     stageEl.dataset.tone = tone;
     setWord((VERDICT[d.verdict] ?? d.verdict).toUpperCase());
     verdictSr.textContent = VERDICT[d.verdict] ?? d.verdict;
     const [lead, ...rest] = d.reason.split(":");
     reason.replaceChildren(h("b", {}, `${lead}:`), rest.join(":"));
     for (const [k, el] of Object.entries(dial)) el.classList.toggle("decider", k === d.decided_by);
-    val.price.textContent = `${st.rate_drift_pct >= 0 ? "+" : ""}${st.rate_drift_pct.toFixed(1)}% on the median`;
+    val.price.textContent = `${st.rate_drift_pct >= 0 ? "+" : ""}${st.rate_drift_pct.toFixed(1)}% on the week's median`;
     val.balance.textContent = `${st.spendable_usdz} of ${i.price_usdz} USDZ`;
     val.risk.textContent = st.risk === "allow" ? "Checks out" : "Held";
     val.deadline.textContent = st.due_in_days <= 1 ? "Tomorrow" : `In ${st.due_in_days} days`;
@@ -367,7 +369,7 @@ function stage() {
     if (key !== lastVerdict) { lastVerdict = key; rail(d); }
   }
   // The run: each beat changes one input, the way someone trying it would.
-  const BEATS = [{ rate_drift_pct: 0.3, spendable_usdz: 820, risk: "allow", due_in_days: 6 }, { rate_drift_pct: 2.4 }, { due_in_days: 1 }, { rate_drift_pct: 0.3, due_in_days: 6, spendable_usdz: 310 }, { spendable_usdz: 820, risk: "mismatch" }];
+  const BEATS = [{ rate_drift_pct: 0.3, spendable_usdz: 820, risk: "allow", due_in_days: 6 }, { rate_drift_pct: 2.4 }, { due_in_days: 1 }, { rate_drift_pct: 0.3, due_in_days: 6, spendable_usdz: 310 }, { spendable_usdz: 820, risk: "newbank" }];
   let beat = 0, timer = null;
   function play() {
     clearTimeout(timer); beat = 0; mode.textContent = "Playing a run"; mode.classList.remove("you");
@@ -389,8 +391,8 @@ function stage() {
         h("h1", { class: "sr" }, "Sayso decides how your agent pays: pay, wait, split or hold"),
         word, verdictSr,
         h("div", { class: "v-why" },
-          h("p", { class: "v-ask" }, "Claude wants to pay Kreuzberg Studio €480"),
-          reason,
+          h("p", { class: "v-ask" }, "Your agent wants to pay Kreuzberg Studio €480"),
+          reason, source,
           h("div", { class: "l-actions" },
             h("a", { class: "l-btn", href: "#signin", onclick: toToken }, "Open the demo"),
             h("a", { class: "l-btn quiet", href: "#prove" }, "See the proof")))),
@@ -410,53 +412,78 @@ async function receiptHash(r) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
   return `0x${[...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
-const SAMPLE_RECEIPT = { v: 1, payout: "68830b99-5c1e-4b7a-9d02-3f1c2a7e91aa", status: "paid", amount: "480.00", currency: "EUR", price_usdz: "521.92", payee_hash: "0x2c7e41d09b5f…91aa", reference: "INV-2026-114", funding_tx: "0x3f0b…77c1", airwallex_transfer_id: "tfr_8c21…", refund_tx: null, final_at: "2026-10-30T19:42:07.000Z" };
+const SAMPLE_RECEIPT = { v: 1, payout: "68830b99-5c1e-4b7a-9d02-3f1c2a7e91aa", status: "paid", amount: "480.00", currency: "EUR", price_usdz: "542.10", payee_hash: "2c7e41d09b5f4e1a8c3d7b6a5f4e91aa", reference: "INV-2026-114", funding_tx: null, airwallex_transfer_id: null, refund_tx: null, final_at: "2026-10-30T19:42:07.000Z" };
+// What every payout carries, shown when this Sayso has no real payout to prove yet.
 const CHAIN = [
-  ["Sayso's signed offer", "521.92 USDZ for €480.00 to Kreuzberg Studio. Single use, so it can't be paid twice.", "Sayso"],
-  ["The budget a person signed", "A Metal mandate whose only payee is Sayso: a cap per payment, a total and an expiry. The agent can't go past it.", "Owner"],
-  ["Settled on Metal, checked four ways", "A successful receipt, the exact Transfer event, consensus finality and a durable event key.", "Metal"],
-  ["The owner's tap", "A held invoice is paid only after a passkey approval, which an agent can't fake.", "Owner"],
-  ["Delivered by Airwallex", "The payee's bank confirmed whose account it is before anything was paid.", "Airwallex"],
+  ["Sayso's signed offer", "An EIP-712 signature from Sayso's published quote key over the price, the amount, the payee and the expiry. Single use."],
+  ["The budget a person signed", "A Metal mandate whose only payee is Sayso: a cap per payment, a total and an expiry, when the agent pays under one."],
+  ["The agent's payment on Metal", "Settled over x402 before any money moves through Airwallex."],
+  ["The owner's tap", "A held invoice is paid only after a passkey approval, which an agent can't fake."],
+  ["Delivered by Airwallex", "Airwallex checks the bank details and that the account exists before anything is paid, and reports when the transfer arrives."],
 ];
+const TICK = { proven: ["✓", "ok"], against: ["✕", "bad"], missing: ["–", "missing"] };
 let proveEl;
 function proveSection() {
   if (proveEl) return proveEl;
-  const r = { ...SAMPLE_RECEIPT };
-  let anchored = "";
+  let r = { ...SAMPLE_RECEIPT }, live = null;
+  let expected = "";
   const hashOut = h("b", { class: "r-hash" }, "…");
   const anchorLine = h("div", { class: "hashline" });
   const verdict = h("span", { class: "v-line", role: "status" });
-  const last = h("li", { class: "link" }, h("span", { class: "tick" }, "?"), h("div", {}, h("h3", {}, "Receipt anchored on chain"), h("p", {}, "Its SHA-256 is in a Metal transaction's data, after the tag SAYSO1. Anyone can check it."), anchorLine), h("span", { class: "who" }, "Anyone"));
+  const tag = h("span", {}, "Sample");
+  const hint = h("p", { class: "r-hint" }, "Nothing has been anchored here yet, so this is a sample. The amount and reference are editable.");
+  const last = h("li", { class: "link" }, h("span", { class: "tick" }, "?"), h("div", {}, h("h3", {}, "Receipt anchored on chain"), h("p", {}, "Its SHA-256 is in a Metal transaction's data, after the tag SAYSO1. Anyone can check it."), anchorLine));
+  const chainList = h("ol", { class: "chain" }, CHAIN.map(([t, p]) => h("li", { class: "link" }, h("span", { class: "tick" }, "·"), h("div", {}, h("h3", {}, t), h("p", {}, p)))), last);
+  const dl = h("dl", {});
   const rehash = async () => { hashOut.textContent = await receiptHash(r); };
-  receiptHash(r).then((x) => { anchored = x; anchorLine.textContent = `anchor data: SAYSO1 ${x.slice(0, 18)}…${x.slice(-6)}`; rehash(); });
+  const rows = () => dl.replaceChildren(...Object.entries(r).flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, ["amount", "reference"].includes(k)
+    ? h("input", { id: `r-${k}`, value: v, "aria-label": `Receipt ${k}`, oninput: (e) => { r[k] = e.target.value; rehash(); } })
+    : String(v))]));
   const check = async () => {
-    const ok = (await receiptHash(r)) === anchored;
+    const mine = await receiptHash(r);
+    const ok = live?.chain?.read ? live.chain.input.toLowerCase() === `${live.chain.tag}${mine.slice(2)}`.toLowerCase() : mine === expected;
     last.className = `link ${ok ? "ok" : "bad"}`; last.querySelector(".tick").textContent = ok ? "✓" : "✕";
     verdict.className = `v-line ${ok ? "ok" : "bad"}`;
-    verdict.textContent = ok ? "Matches the chain. This is the receipt Sayso anchored." : "Doesn't match the chain. This receipt was changed.";
+    verdict.replaceChildren(live?.chain?.read
+      ? (ok ? "Matches the anchor transaction on Metal. " : "Doesn't match the anchor on Metal. This receipt was changed. ")
+      : live ? (ok ? "Matches the hash Sayso recorded. This Sayso anchors with the simulator, so nothing is on Metal to compare. " : "Doesn't match the recorded hash. This receipt was changed. ")
+      : (ok ? "Matches the sample's own hash. A real payout is checked against its Metal transaction. " : "Doesn't match. This receipt was changed. "),
+    live?.explorer ? h("a", { href: live.explorer, target: "_blank", rel: "noopener" }, "Open it on the explorer") : null);
   };
-  const rows = Object.entries(r).map(([k, v]) => [h("dt", {}, k), h("dd", {}, ["amount", "reference"].includes(k)
-    ? h("input", { id: `r-${k}`, value: v, "aria-label": `Receipt ${k}`, oninput: (e) => { r[k] = e.target.value; rehash(); } })
-    : String(v))]);
+  rows();
+  receiptHash(r).then((x) => { expected = x; anchorLine.textContent = `sample hash: ${x.slice(0, 18)}…${x.slice(-6)}`; rehash(); });
+  // The newest real receipt, its anchor as Metal reports it, and that payout's own proof.
+  api("/v1/receipts/latest").then(async (l) => {
+    live = l; r = { ...l.receipt }; expected = l.hash; rows(); rehash();
+    tag.textContent = l.chain?.read ? "Live, on Metal" : "Simulated anchor";
+    anchorLine.textContent = l.chain?.read ? `tx ${l.tx.slice(0, 10)}…${l.tx.slice(-6)} data: ${l.chain.input.slice(0, 22)}…${l.chain.input.slice(-6)}` : `recorded hash: ${l.hash.slice(0, 18)}…${l.hash.slice(-6)} (${l.chain?.why ?? "not on Metal"})`;
+    hint.textContent = l.chain?.read ? "This is the newest real receipt. Sayso read its anchor transaction from Metal; the explorer shows the same data. Edit the amount or reference and compare again." : "This is the newest receipt this Sayso issued. Edit the amount or reference and compare again.";
+    const proof = await api(`/v1/payouts/${encodeURIComponent(l.payout)}/proof`);
+    chainList.replaceChildren(...proof.evidence.filter((e) => e.id !== "receipt").map((e) => {
+      const [mark, cls] = TICK[e.status] ?? TICK.missing;
+      return h("li", { class: `link ${cls}` }, h("span", { class: "tick" }, mark), h("div", {}, h("h3", {}, e.title), h("p", {}, e.detail)));
+    }), last);
+  }).catch(() => {});
   return (proveEl = h("section", { id: "prove", class: "l-sheet" },
     h("div", { class: "sheet-in" },
       h("div", { class: "scene" },
         h("div", { class: "scene-copy" },
           h("span", { class: "eyebrow" }, "Prove it"),
-          h("h2", { class: "serif" }, "Claude tried to pay. ", h("em", {}, "Sayso said no.")),
-          h("p", { class: "lede" }, "The invoice looked right. The bank said the account belonged to someone else, so the €480 never left. When a payment is questioned later, by you, a merchant or a dispute, Sayso can show exactly why it paid or didn't.")),
+          h("h2", { class: "serif" }, "The agent tried to pay. ", h("em", {}, "Sayso held it.")),
+          h("p", { class: "lede" }, "The invoice looked right, but it asked to pay an account that had never been paid, after an email said the bank had changed. So the €480 waited for the owner. When a payment is questioned later, by you, a merchant or a dispute, Sayso shows exactly why it paid or didn't."),
+          h("p", { class: "small muted" }, "An example invoice. The new-bank-details hold runs on every Sayso, the live sandbox included.")),
         stampedInvoice()),
       h("h3", { class: "sub-h" }, "And every payout that does go through carries proof anyone can check"),
-      h("p", { class: "lede" }, "No need to trust Sayso. Change a line of the receipt, then hash it again."),
+      h("p", { class: "lede" }, "Don't take Sayso's word for it. Change a line of the receipt, then hash it again."),
       h("div", { class: "l-prove" },
         h("div", {},
-          h("ol", { class: "chain" }, CHAIN.map(([t, p, who]) => h("li", { class: "link ok" }, h("span", { class: "tick" }, "✓"), h("div", {}, h("h3", {}, t), h("p", {}, p)), h("span", { class: "who" }, who))), last),
+          chainList,
           h("div", { class: "verify" }, h("button", { type: "button", class: "btn pay", onclick: check }, "Hash the receipt and compare"), verdict)),
         h("div", { class: "receipt" },
-          h("div", { class: "r-head" }, h("span", {}, "Receipt v1"), h("span", {}, "Sample")),
-          h("dl", {}, rows),
+          h("div", { class: "r-head" }, h("span", {}, "Receipt v1"), tag),
+          dl,
           h("div", { class: "r-sum" }, h("span", {}, "sha256(sorted keys) ="), hashOut),
-          h("p", { class: "r-hint" }, "The amount and reference are editable. In the app, every paid payout has its own receipt and anchor.")),
+          hint),
       ),
     )));
 }
@@ -465,17 +492,17 @@ function proveSection() {
 function stampedInvoice() {
   const line = (k, v, cls = "") => h("div", { class: "iv-l" }, h("span", {}, k), h("span", { class: cls }, v));
   const el = h("div", { class: "iv-wrap" },
-    h("div", { class: "iv-chat" }, h("small", {}, "Claude · 09:41"), "Paying Kreuzberg Studio €480 for INV-2026-114 now."),
+    h("div", { class: "iv-chat" }, h("small", {}, "Agent · 09:41"), "Paying Kreuzberg Studio €480 for INV-2026-114 now."),
     h("div", { class: "iv" },
       h("span", { class: "iv-k" }, "Invoice · INV-2026-114"),
       h("div", { class: "iv-who" }, "Kreuzberg Studio GmbH"),
       line("Brand refresh, phase 2", "€480.00"),
-      line("Pay to", "DE44 5001 0517 5407 3249 31", "iv-mark"),
+      line("Pay to", "DE44 5001 0517 5407 3249 31 (new)", "iv-mark"),
       line("Due", "5 Nov 2026"),
       line("Note", "“Our bank changed”"),
       h("div", { class: "iv-tot" }, "€480.00")),
-    h("div", { class: "iv-stamp", "aria-hidden": "true" }, "HELD", h("small", {}, "Name does not match")),
-    h("p", { class: "iv-note" }, "Bank says this account is Mark Lehmann’s, not Kreuzberg’s"));
+    h("div", { class: "iv-stamp", "aria-hidden": "true" }, "HELD", h("small", {}, "New bank details")),
+    h("p", { class: "iv-note" }, "Kreuzberg has never been paid at this account, and the email asks to switch"));
   if ("IntersectionObserver" in window && !stillMotion) {
     const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { el.classList.add("stamped"); io.disconnect(); } }, { threshold: 0.45 });
     io.observe(el);
@@ -730,6 +757,7 @@ function homeView() {
       h("span", { class: "sh-mark" }, "sayso"),
       h("div", { class: "sh-icons" },
         sum?.offline ? h("span", { class: "sh-mode", title: "Airwallex and Metal are simulated" }, "Demo") : null,
+        state.me?.viewer ? h("span", { class: "sh-mode mode read-only", title: "You can look, but nothing you do pays or changes anything" }, "Read-only") : null,
         passkeyButton(true),
         h("button", { class: "sh-icon", title: "Everything: inbox, payments, agents", "aria-label": "Everything", onclick: () => { state.tab = "inbox"; sessionSet("tab", "inbox"); render(); window.scrollTo(0, 0); } }, icon("ledger", 20)),
       )),

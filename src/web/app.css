@@ -1118,3 +1118,6 @@ h1, h2, h3, h4 { font-weight: 500; }
   .iv-note { width: 200px; font-size: 20px; }
   .sub-h { margin-top: 64px; }
 }
+
+.v-source { margin: 8px 0 0; opacity: .7; max-width: 40rem; }
+.link.missing .tick { background: var(--raised); color: var(--faint); }

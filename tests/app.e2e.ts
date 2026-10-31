@@ -147,3 +147,24 @@ test('the landing board asks decide() and flips to hold when the payee name does
   await screen.getByRole('button', 'Paid before').tap();
   await expect(browser.locator('.b-live')).toHaveText("You're driving");
 });
+
+test('the landing checks a real receipt: its own hash matches, an edited one does not', async ({ app, browser }) => {
+  await app.open('/#prove');
+  // Offline, the newest receipt is a real one Sayso issued, anchored by the simulator.
+  await expect(browser.locator('.receipt .r-head')).toContainText('Simulated anchor', { timeout: 20_000 });
+  await expect(browser.locator('#prove .chain')).toContainText("The agent's payment on Metal");
+  await browser.locator('button:has-text("Hash the receipt and compare")').click();
+  await expect(browser.locator('#prove .v-line')).toContainText('Matches the hash Sayso recorded');
+  await browser.locator('#r-amount').fill('9999.00');
+  await browser.locator('button:has-text("Hash the receipt and compare")').click();
+  await expect(browser.locator('#prove .v-line')).toContainText("Doesn't match");
+});
+
+test('a visitor can look around read-only, and nothing they do pays', async ({ app, screen, browser }) => {
+  await app.open('/');
+  await screen.getByRole('button', 'Look around, read-only').tap();
+  await expect(screen.getByRole('button', 'Hold to talk')).toBeVisible();
+  await expect(browser.locator('.mode.read-only').first()).toHaveText('Read-only');
+  const status = await browser.evaluate(async () => (await fetch('/v1/inbox', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ from: 'a@b.c', body: 'pay 10 EUR' }) })).status);
+  expect(status).toBe(403);
+});

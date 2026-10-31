@@ -92,6 +92,7 @@ const isAmbiguous = (err: unknown) => !(err instanceof AirwallexError) || err.st
 export class PayoutService {
   readonly book: PayoutBook;
   private readonly pricing: PricingConfig;
+  private readonly previewRates = new Map<string, { rate: number; at: number }>();
   private readonly risk: RiskConfig;
   private readonly ttl: number;
   private readonly read: (text: string) => Promise<Findings>;
@@ -179,21 +180,7 @@ export class PayoutService {
     }, now, this.d.decideConfig ?? DEFAULT_DECIDE);
     if (decision.verdict === "hold" && status === "quoted") { status = "needs_review"; reasons.push(decision.reason); }
     // A split quotes the part that can be paid now; the rest is quoted again after the next sweep.
-    let quoted = { amountMinor, ...pr };
-    const first = decision.verdict === "split" ? decision.tranches?.at(0) : undefined;
-    if (first) {
-      // Fees don't shrink with the amount, so trim the first tranche until its full price fits what the agent can spend.
-      const spendable = toMinor(Number(r.spendable_usdz));
-      let part = first.amountMinor;
-      let pp = price(part, r.currency, r.method, rate, this.pricing);
-      while (pp.totalMinor > spendable && part > 0) {
-        part -= Math.max(1, Math.ceil((pp.totalMinor - spendable) * pp.rateUsed));
-        pp = price(part, r.currency, r.method, rate, this.pricing);
-      }
-      quoted = { amountMinor: part, ...pp };
-      decision.tranches = [{ amountMinor: part, costUsdzMinor: pp.totalMinor, when: "now" }, { amountMinor: amountMinor - part, costUsdzMinor: Math.max(0, pr.totalMinor - pp.totalMinor), when: "on_sweep" }];
-      decision.reason = `Splitting: ${toMajor(spendable).toFixed(2)} USDZ can be spent and this costs ${toMajor(pr.totalMinor).toFixed(2)} USDZ, so paying ${fmt(part, r.currency)} now and ${fmt(amountMinor - part, r.currency)} after the next earnings sweep.`;
-    }
+    const quoted = decision.verdict === "split" ? this.trimSplit(decision, amountMinor, r.currency, r.method, rate, toMinor(Number(r.spendable_usdz)), pr.totalMinor) : { amountMinor, ...pr };
 
     this.d.trail?.add(id, "decide", decision.reason, { verdict: decision.verdict, decided_by: decision.decidedBy }, undefined, now);
 
@@ -211,6 +198,39 @@ export class PayoutService {
     else if (status === "needs_review") emit("escalate", `Held ${label} for review: ${reasons.join("; ")}`, { payout: p.id, citations: findings?.citations });
     else emit("refuse", `Refused ${label}: ${reasons.join("; ")}`, { payout: p.id });
     return p;
+  }
+
+  /**
+   * Fees don't shrink with the amount, so a split's first tranche is trimmed until its full price
+   * fits what the agent can spend. Rewrites the decision's tranches and reason to match.
+   */
+  private trimSplit(decision: Decision, amountMinor: number, currency: string, method: "LOCAL" | "SWIFT", rate: number, spendableMinor: number, fullTotalMinor: number) {
+    let part = decision.tranches?.at(0)?.amountMinor ?? amountMinor;
+    let pp = price(part, currency, method, rate, this.pricing);
+    while (pp.totalMinor > spendableMinor && part > 0) {
+      part -= Math.max(1, Math.ceil((pp.totalMinor - spendableMinor) * pp.rateUsed));
+      pp = price(part, currency, method, rate, this.pricing);
+    }
+    decision.tranches = [{ amountMinor: part, costUsdzMinor: pp.totalMinor, when: "now" }, { amountMinor: amountMinor - part, costUsdzMinor: Math.max(0, fullTotalMinor - pp.totalMinor), when: "on_sweep" }];
+    decision.reason = `Splitting: ${toMajor(spendableMinor).toFixed(2)} USDZ can be spent and this costs ${toMajor(fullTotalMinor).toFixed(2)} USDZ, so paying ${fmt(part, currency)} now and ${fmt(amountMinor - part, currency)} after the next earnings sweep.`;
+    return { amountMinor: part, ...pp };
+  }
+
+  /**
+   * What decide() says about an invoice, priced exactly as a quote is (Airwallex's rate now, the
+   * same fees, the same split trimming), with the visitor's inputs. Nothing is stored or moved.
+   */
+  async preview(i: { amountMinor: number; currency: string; rateDrift: number; spendableUsdzMinor: number; risk: RiskVerdict; dueAt: Date; partPaymentAllowed: boolean; capUsdzMinor: number }, now = new Date()) {
+    // Every slider move asks again, so Airwallex's rate is kept for a minute.
+    const cached = this.previewRates.get(i.currency);
+    const live = i.currency === "USD" ? 1 : cached && now.getTime() - cached.at < 60_000 ? cached.rate : (await this.d.awx.fxRate("USD", i.currency)).rate;
+    if (i.currency !== "USD" && live !== cached?.rate) this.previewRates.set(i.currency, { rate: live, at: now.getTime() });
+    // A positive drift is a worse rate than the median: fewer units of the currency per USD.
+    const rate = live * (1 - i.rateDrift);
+    const pr = price(i.amountMinor, i.currency, "LOCAL", rate, this.pricing);
+    const decision = decide({ amountMinor: i.amountMinor, currency: i.currency, costUsdzMinor: pr.totalMinor, capUsdzMinor: i.capUsdzMinor, rateDrift: i.rateDrift, spendableUsdzMinor: i.spendableUsdzMinor, risk: i.risk, dueAt: i.dueAt, partPaymentAllowed: i.partPaymentAllowed }, now, this.d.decideConfig ?? DEFAULT_DECIDE);
+    if (decision.verdict === "split") this.trimSplit(decision, i.amountMinor, i.currency, "LOCAL", rate, i.spendableUsdzMinor, pr.totalMinor);
+    return { decision, liveRate: live, rate };
   }
 
   /** The operator looked at a held payout and is happy to quote it. */

@@ -6,7 +6,7 @@ import express from "express";
 import { fileURLToPath } from "node:url";
 import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
 import { METAL_NETWORKS, registerMetalScheme, sellerToken } from "@metalntwx/metal-pay";
-import type { Address } from "viem";
+import { createPublicClient, http, type Address } from "viem";
 import { Airwallex, type Transfer } from "./airwallex/client.js";
 import { AgentCard, type CardPort } from "./airwallex/card.js";
 import { Agent, type LoopAirwallex } from "./agent/loop.js";
@@ -33,7 +33,7 @@ import { ChainEarnings, type EarningsSource } from "./metal/earnings.js";
 import { MandateRefunder, MandateSweepVerifier, MetalMandate, type PullResult } from "./metal/mandate.js";
 import { ChainMandateChecker, describeMandate, mandatePolicy, SimMandates } from "./metal/agent-mandate.js";
 import { escrow } from "./metal/escrow.js";
-import { MetalAnchorer, Receipts, SimAnchorer, type Anchorer } from "./metal/receipts.js";
+import { MetalAnchorer, readAnchor, RECEIPT_TAG, Receipts, SimAnchorer, type Anchorer } from "./metal/receipts.js";
 import { requireSignedOffer } from "@metalntwx/metal-pay/mandates";
 import { Trail } from "./trail.js";
 import { payoutApi, type PaymentMode } from "./payouts/http.js";
@@ -257,6 +257,22 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     });
   });
 
+  // The landing's receipt check: the newest real receipt, and its anchor transaction as Metal reports it
+  // (read by Sayso from the RPC; the explorer link lets anyone read it themselves).
+  app.get("/v1/receipts/latest", async (_req, res) => {
+    const a = receipts.latest();
+    if (!a) return void res.status(404).json({ error: "no receipt has been issued yet" });
+    let chain: Record<string, unknown> = { read: false, why: a.tx?.startsWith("sim:") ? "this receipt was anchored by the simulator, not on Metal" : "no Metal RPC" };
+    const rpc = process.env.METAL_RPC_URL;
+    if (a.tx?.startsWith("0x") && rpc && !opts.offline) {
+      try {
+        const t = await readAnchor(createPublicClient({ transport: http(rpc) }), a.tx as `0x${string}`);
+        chain = { read: true, ...t, from_is_sayso: anchorAddress ? t.from.toLowerCase() === anchorAddress.toLowerCase() : null, tag: RECEIPT_TAG };
+      } catch (err) { chain = { read: false, why: `Metal RPC: ${String(err).slice(0, 120)}` }; }
+    }
+    res.json({ payout: a.payout, status: a.status, receipt: a.receipt, hash: a.hash, tx: a.tx, explorer: a.explorer, anchor_address: anchorAddress ?? null, chain });
+  });
+
   // "Prove it": what Sayso can show when an agent's purchase is questioned. Public like the receipt:
   // the payout id is the key, and the proof holds no bank details.
   const disputes = new Disputes(store);
@@ -458,20 +474,22 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     });
     res.json({ simulated: true, decision: decisionView(d) });
   });
-  // The landing's decision board: one sample invoice (EUR 480.00, due in 6 days, part payment allowed)
-  // run through the same decide() with the inputs a visitor sets. Public and pure; nothing moves.
-  app.post("/v1/decide/preview", express.json({ limit: "1kb" }), (req, res) => {
+  // The landing's decision board: one sample invoice (EUR 480.00, part payment allowed) run through
+  // the same pricing and decide() as a real quote, at Airwallex's EUR rate now, with the inputs a
+  // visitor sets. Public; nothing is stored or moved.
+  app.post("/v1/decide/preview", express.json({ limit: "1kb" }), async (req, res) => {
     const b = req.body ?? {};
     const num = (v: unknown, lo: number, hi: number, d: number) => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d);
     const drift = num(b.rate_drift_pct, -5, 10, 0.3) / 100, spendable = num(b.spendable_usdz, 0, 5000, 820), dueDays = num(b.due_in_days, 0, 60, 6);
-    const RISK: Record<string, string> = { newbank: "the invoice asks to pay new bank details", mismatch: "the bank says this account belongs to Mark Lehmann, not Kreuzberg Studio" };
+    const RISK: Record<string, string> = { newbank: "the invoice asks to pay new bank details that have never been paid", mismatch: "the bank says this account belongs to Mark Lehmann, not Kreuzberg Studio" };
     const why = RISK[String(b.risk)];
     const risk: RiskVerdict = why ? { verdict: "hold", reasons: [why] } : { verdict: "allow" };
-    const amountMinor = 48000, median = 1.0791, fee = 0.0078;
-    const costUsdzMinor = Math.round(amountMinor * median * (1 + drift) * (1 + fee));
     const now = new Date();
-    const d = decide({ amountMinor, currency: "EUR", costUsdzMinor, capUsdzMinor: toMinor(600), rateDrift: drift, spendableUsdzMinor: toMinor(spendable), risk, dueAt: new Date(now.getTime() + dueDays * 86_400_000), partPaymentAllowed: true }, now);
-    res.json({ sample: true, rate: Number((median * (1 + drift)).toFixed(4)), median, decision: decisionView(d) });
+    try {
+      const r = await svc.preview({ amountMinor: 48000, currency: "EUR", rateDrift: drift, spendableUsdzMinor: toMinor(spendable), risk, dueAt: new Date(now.getTime() + dueDays * 86_400_000), partPaymentAllowed: true, capUsdzMinor: toMinor(800) }, now);
+      // Rates as USD per EUR, the way people read them.
+      res.json({ sample: true, rate_source: opts.offline ? "simulated" : "airwallex", median: Number((1 / r.liveRate).toFixed(4)), rate: Number((1 / r.rate).toFixed(4)), decision: decisionView(r.decision) });
+    } catch (err) { fail(res, err); }
   });
   // A dispute the owner upholds: the agent gets its USDZ back under the refund mandate.
   app.post("/v1/payouts/:id/dispute", auth.requireOwner, express.json(), async (req, res) => {

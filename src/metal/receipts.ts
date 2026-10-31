@@ -156,10 +156,23 @@ export class Receipts {
     }
   }
 
+  /** The newest anchored receipt, preferring one anchored on Metal over a simulated one. */
+  latest(): (Anchored & { payout: string }) | undefined {
+    const row = this.store.db.prepare("SELECT payout_id, status FROM receipts WHERE tx IS NOT NULL ORDER BY (tx LIKE '0x%') DESC, rowid DESC LIMIT 1").get() as { payout_id: string; status: string } | undefined;
+    const a = row && this.get(row.payout_id).find((x) => x.status === row.status);
+    return a && { ...a, payout: row.payout_id };
+  }
+
   get(payoutId: string): Anchored[] {
     return this.store.db.prepare("SELECT * FROM receipts WHERE payout_id = ? ORDER BY rowid").all(payoutId).map((row) => {
       const x = row as Record<string, string | null>;
       return { status: x.status as Receipt["status"], receipt: JSON.parse(x.receipt!), hash: x.hash as Hex, tx: x.tx ?? null, explorer: x.explorer ?? null, error: x.error ?? null };
     });
   }
+}
+
+/** Reads an anchor transaction from the chain: who sent it, whether it succeeded, and the data it carries. */
+export async function readAnchor(client: Pick<PublicClient, "getTransaction" | "getTransactionReceipt">, tx: Hash) {
+  const [t, r] = await Promise.all([client.getTransaction({ hash: tx }), client.getTransactionReceipt({ hash: tx })]);
+  return { from: t.from, to: t.to, input: t.input, status: r.status, block: Number(r.blockNumber) };
 }
