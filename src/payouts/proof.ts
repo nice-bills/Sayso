@@ -7,6 +7,8 @@
 // A dispute names what it says went wrong. judge() checks that claim against the evidence, in code:
 //   proof answers the claim       -> denied, citing the evidence (its hash is anchored on Metal)
 //   proof contradicts the payout  -> upheld, and the agent's USDZ comes back under the refund mandate
+//                                    (only where Sayso's own record is at fault: the money didn't arrive,
+//                                    or a held payee was never cleared; never just on the agent's word)
 //   proof can't settle it         -> review, for the owner to decide with their passkey
 
 import { createHash, randomUUID } from "node:crypto";
@@ -105,7 +107,10 @@ export function judge(claim: Claim, proof: Proof): Judgement {
   switch (claim) {
     case "not_authorized":
       if (is("mandate", "proven") && is("funding", "proven")) return { verdict: "denied", reason: "The owner's Metal mandate allowed this payment, and Metal enforced its limits on chain when it settled.", cites: ["mandate", "order", "funding"] };
-      return { verdict: "upheld", reason: "Sayso can't show a mandate that allowed this payment, so the agent gets its USDZ back.", cites: ["mandate"] };
+      // The payee already has the money, so a refund here would be Sayso paying twice. The owner decides.
+      return { verdict: "review", reason: is("mandate", "against")
+        ? "Metal couldn't verify the mandate behind this payment, but the payee has been paid. The owner decides whether to refund it."
+        : "The agent's own key paid, under no mandate, and the payee has been paid. Sayso won't refund that on its own; the owner decides.", cites: ["mandate", "funding", "delivery"] };
     case "wrong_amount":
       if (is("funding", "proven")) return { verdict: "denied", reason: "The agent paid exactly the quoted price; the 402 response told it that price before it paid.", cites: ["order", "funding"] };
       return { verdict: "review", reason: "No Metal payment is on record to compare with the quote.", cites: ["funding"] };

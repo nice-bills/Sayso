@@ -17,6 +17,7 @@ import { createMandatePaymentClient, p256DigestSigner, parseCredential, privateK
 import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
 import { invoiceShape, toRequest, type Invoice } from "./tools.js";
+import { disputeMessage } from "../payouts/dispute-auth.js";
 
 const base = process.env.SAYSO_URL ?? "http://127.0.0.1:4021";
 const maxUsdz = process.env.SAYSO_MAX_USDZ ?? "250";
@@ -39,6 +40,17 @@ function payingFetch(): typeof fetch {
   if (!key) throw new Error("Set SAYSO_BUYER_KEY (a Metal testnet private key) or SAYSO_SIM_PAYER for offline use");
   // Metal refuses to sign above maxAmount, so a wrong quote can never overspend the agent's wallet.
   return createMetalPaymentClient({ account: privateKeyToAccount(key), network: "testnet", maxAmount: BigInt(usdzBaseUnits(maxUsdz)) }).fetchWithPayment as typeof fetch;
+}
+
+/** Offline, the same headers that paid say who is disputing. */
+const simHeaders = (): Record<string, string> => (simMandate ? { "x-sim-mandate": simMandate } : simPayer ? { "x-sim-payer": simPayer } : {});
+
+/** Live, the key that paid signs the dispute, so only the payer can start one. A mandate's payer is the owner's account, which signs in Sayso instead. */
+async function signDispute(payoutId: string, claim: string): Promise<{ signature?: string; issued_at?: string }> {
+  const key = process.env.SAYSO_BUYER_KEY as `0x${string}` | undefined;
+  if (!key || simPayer || simMandate) return {};
+  const issued_at = new Date().toISOString();
+  return { issued_at, signature: await privateKeyToAccount(key).signMessage({ message: disputeMessage(payoutId, claim, issued_at) }) };
 }
 
 const text = (o: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(o, null, 2) }] });
@@ -118,14 +130,14 @@ server.registerTool("prove_payout", {
 }, async ({ payout_id }) => text(await (await fetch(`${base}/v1/payouts/${payout_id}/proof`)).json()));
 
 server.registerTool("dispute_payout", {
-  description: "Dispute a delivered payout. Name what went wrong; Sayso's rules check the claim against the proof. Denied: the proof answers it, and that answer is anchored on Metal. Upheld: the agent's USDZ is refunded on Metal. Review: the owner decides.",
+  description: "Dispute a delivered payout. Name what went wrong; Sayso's rules check the claim against the proof. Denied: the proof answers it, and that answer is anchored on Metal. Upheld: Sayso's record shows it got it wrong, and the agent's USDZ is refunded on Metal. Review: the owner decides. Signed with the agent's own key; only the agent that paid can dispute.",
   inputSchema: {
     payout_id: z.string(),
     claim: z.enum(["not_authorized", "wrong_amount", "not_delivered", "wrong_payee", "other"]),
     note: z.string().max(200).optional(),
   },
 }, async ({ payout_id, claim, note }) => {
-  const res = await fetch(`${base}/v1/payouts/${payout_id}/disputes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ claim, note, by: "the paying agent" }) });
+  const res = await fetch(`${base}/v1/payouts/${payout_id}/disputes`, { method: "POST", headers: { "content-type": "application/json", ...simHeaders() }, body: JSON.stringify({ claim, note, ...(await signDispute(payout_id, claim)) }) });
   return text(await res.json());
 });
 

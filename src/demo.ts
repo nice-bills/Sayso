@@ -169,7 +169,8 @@ await beat(8, "an agent questions two of its payouts; Sayso answers each from th
     const d = result(await agents[2].callTool({ name: "dispute_payout", arguments: { payout_id: labelling.id, claim: "not_delivered", note: "the payee says nothing arrived" } }));
     emit("observe", `buyer-agent-3 disputed ${labelling.payeeName} (never arrived): ${d.dispute?.verdict}. ${d.dispute?.reason ?? d.error}`);
   }
-  // buyer-agent-1's owner: "wasn't allowed", against a payment from a bare key under no mandate. Upheld, refunded on Metal.
+  // buyer-agent-1: "wasn't allowed", against a payment its own bare key made under no mandate. The payee
+  // already has the euros, so Sayso won't refund on the agent's word: it goes to the owner.
   const translation = paidFor("Translation Oct");
   if (translation && agents[0]) {
     const d = result(await agents[0].callTool({ name: "dispute_payout", arguments: { payout_id: translation.id, claim: "not_authorized", note: "the owner never allowed this" } }));

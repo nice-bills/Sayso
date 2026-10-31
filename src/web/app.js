@@ -1416,7 +1416,7 @@ function provePanel(p) {
   const load = () => act(key, async () => { state.proof = { ...state.proof, [p.id]: await api(`/v1/payouts/${encodeURIComponent(p.id)}/proof`) }; });
   if (!proof) return h("div", { class: "prove" }, h("button", { type: "button", class: "btn quiet small", disabled: state.busy[key], onclick: load }, "Prove it"));
   const file = (claim) => act(key, async () => {
-    await api(`/v1/payouts/${encodeURIComponent(p.id)}/disputes`, { claim, by: "the paying agent" });
+    await api(`/v1/payouts/${encodeURIComponent(p.id)}/disputes`, { claim });
     state.proof[p.id] = await api(`/v1/payouts/${encodeURIComponent(p.id)}/proof`);
   });
   const keep = () => act(key, async () => {

@@ -82,7 +82,7 @@ Metal refuses any payment above the cap, past the budget, after the expiry, or t
 | `POST /v1/inbox/:id/details` | owner | Fill in what the extractor couldn't find; the invoice is checked again. |
 | `GET /v1/payouts`, `POST /v1/payouts/:id/review` | owner | Every payout; allow or block a held agent payout. |
 | `GET /v1/payouts/:id/proof` | free | What Sayso can prove about a payout: the order, the owner's mandate, the approval, the Metal payment, the transfer, the receipt. No bank details. |
-| `POST /v1/payouts/:id/disputes` | free | `{ claim, note }`: a dispute settled from the proof. Denied answers are anchored on Metal; upheld ones are refunded. |
+| `POST /v1/payouts/:id/disputes` | payer only | `{ claim, note, issued_at, signature }`: a dispute settled from the proof. Only the owner (signed in) or the agent that paid can file one: the paying key signs `Sayso dispute\npayout: <id>\nclaim: <claim>\nissued_at: <iso>` (EIP-191, checked on chain, so smart accounts work too). Denied answers are anchored on Metal. Upheld ones are refunded, and only where Sayso's own record is at fault; a claim against a delivered payment goes to the owner. |
 | `POST /v1/payouts/:id/dispute` | owner | Refund an agent's payout yourself (passkey): the agent is refunded in full under the refund mandate. |
 | `POST /v1/payouts/:id/dispute/deny` | owner | Keep a payout whose dispute the proof couldn't settle. |
 | `POST /v1/payouts/:id/what-if` | owner, sandbox only | Re-run the decision with one input changed (rate, budget, risk). Moves nothing. |

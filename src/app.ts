@@ -46,6 +46,7 @@ import type { Payout, PayoutBook } from "./payouts/book.js";
 import { booksBefore, flowsFromBooks, rampSince, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
 import { FakeAirwallex, FakeMandate, FakeRefunder } from "./sim/offline.js";
 import { buildProof, CLAIMS, Disputes, judge, type Claim } from "./payouts/proof.js";
+import { chainPayerCheck, disputeMessage, simPayerCheck, type PayerCheck } from "./payouts/dispute-auth.js";
 import { Store } from "./store.js";
 import { fmt, toMinor } from "./treasury/money.js";
 
@@ -114,6 +115,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   let anchorer: Anchorer;
   let anchorAddress: Address | undefined;
   let simMandates: SimMandates | undefined;
+  let payerCheck: PayerCheck;
   const policy = mandatePolicy();
 
   if (opts.offline || opts.simMetal) {
@@ -126,6 +128,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     heist = (to, cents) => sweepMandate.attemptAndRecordRefusal(to, cents);
     simMandates = new SimMandates(SIM_PAY_TO);
     mode = { kind: "sim", mandates: simMandates };
+    const sims = simMandates;
+    payerCheck = simPayerCheck((ref) => sims.principalOf(ref));
     earningsFor = (svc) => new BookEarnings(svc.book, ledger);
     anchorer = new SimAnchorer();
   } else {
@@ -135,6 +139,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     const sweep = MetalMandate.fromEnv();
     const principal = (process.env.METAL_PRINCIPAL as Address | undefined) ?? (await sweep.account());
     refunder = MandateRefunder.fromEnv();
+    payerCheck = chainPayerCheck(rpc);
     verifier = new MandateSweepVerifier(sweep, store, principal, rpc);
     heist = (to, cents) => sweep.attemptAndRecordRefusal(to as Address, cents);
     const token = process.env.METAL_SELLER_TOKEN;
@@ -259,34 +264,6 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     if (!p) return void res.status(404).json({ error: "no such payout" });
     res.json({ ...(await proofOf(p)), disputes: disputes.for(p.id), claims: CLAIMS });
   });
-  // A dispute names what it says went wrong; judge() settles it from the proof, in code.
-  app.post("/v1/payouts/:id/disputes", express.json(), async (req, res) => {
-    const p = svc.book.get(String(req.params.id));
-    if (!p) return void res.status(404).json({ error: "no such payout" });
-    const claim = String(req.body?.claim ?? "") as Claim;
-    if (!(claim in CLAIMS)) return void res.status(400).json({ error: `claim must be one of ${Object.keys(CLAIMS).join(", ")}` });
-    if (p.status !== "paid") return void res.status(409).json({ error: `only a delivered payout can be disputed; this one is ${p.status}` });
-    if (!p.buyer || p.buyer.startsWith("internal:")) return void res.status(409).json({ error: "only an agent's payout can be disputed" });
-    if (disputes.open(p.id)) return void res.status(409).json({ error: "a dispute on this payout is already waiting for the owner" });
-    const note = String(req.body?.note ?? "").trim().slice(0, 200);
-    const by = String(req.body?.by ?? "the paying agent").trim().slice(0, 60);
-    const proof = await proofOf(p);
-    const j = judge(claim, proof);
-    const d = disputes.add({ payout: p.id, claim, note, by, verdict: j.verdict, reason: j.reason, cites: j.cites, proof_hash: proof.hash });
-    trail.add(p.id, "decide", `Disputed by ${by} (${CLAIMS[claim].toLowerCase()}): ${j.verdict}. ${j.reason}`, { claim, note, cites: j.cites, proof_hash: proof.hash });
-    try {
-      if (j.verdict === "upheld") await svc.dispute(p.id, "Sayso's dispute rules", `${CLAIMS[claim].toLowerCase()}; upheld from the proof`);
-      else if (j.verdict === "review") emit("escalate", `A dispute on ${p.payeeName}'s payout needs you: ${CLAIMS[claim]}. ${j.reason}`, { payout: p.id });
-      else {
-        // Denied: the proof it rests on is anchored on Metal, so the answer can't be rewritten later.
-        const a = await anchorer.anchor(proof.hash as `0x${string}`).catch(() => undefined);
-        if (a) disputes.anchored(d.id, a.tx);
-        emit("refuse", `Dispute on ${p.payeeName}'s payout denied: ${j.reason}`, { payout: p.id }, a?.explorer);
-      }
-    } catch (err) { return void fail(res, err); }
-    res.status(201).json({ dispute: disputes.for(p.id).find((x) => x.id === d.id), proof, payout: publicView(svc.book.get(p.id)!) });
-  });
-
   const webDir = fileURLToPath(new URL("./web", import.meta.url));
   // The app itself: static files under a strict CSP, since it renders text from strangers' emails.
   app.use((_req, res, next) => {
@@ -373,6 +350,40 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     res.json({ ok: true });
   });
   const fail = (res: express.Response, err: unknown) => res.status(err instanceof PayoutError ? err.status : 500).json({ error: String((err as Error).message) });
+
+  // A dispute names what it says went wrong; judge() settles it from the proof, in code.
+  app.post("/v1/payouts/:id/disputes", express.json(), async (req, res) => {
+    const p = svc.book.get(String(req.params.id));
+    if (!p) return void res.status(404).json({ error: "no such payout" });
+    const claim = String(req.body?.claim ?? "") as Claim;
+    if (!(claim in CLAIMS)) return void res.status(400).json({ error: `claim must be one of ${Object.keys(CLAIMS).join(", ")}` });
+    if (p.status !== "paid") return void res.status(409).json({ error: `only a delivered payout can be disputed; this one is ${p.status}` });
+    if (!p.buyer || p.buyer.startsWith("internal:")) return void res.status(409).json({ error: "only an agent's payout can be disputed" });
+    if (disputes.open(p.id)) return void res.status(409).json({ error: "a dispute on this payout is already waiting for the owner" });
+    // Only the owner, signed in, or the agent that paid: a payout id alone is public, so it can't be enough.
+    const owner = auth.isOwner(req);
+    if (!owner) {
+      const why = await payerCheck({ buyer: p.buyer, payoutId: p.id, claim, body: req.body ?? {}, header: (n) => req.header(n) });
+      if (why) return void res.status(401).json({ error: why, sign: { message: disputeMessage(p.id, claim, "<issued_at>"), address: p.buyer } });
+    }
+    const note = String(req.body?.note ?? "").trim().slice(0, 200);
+    const by = owner ? "you" : `the paying agent (${p.buyer.slice(0, 8)}…${p.buyer.slice(-4)})`;
+    const proof = await proofOf(p);
+    const j = judge(claim, proof);
+    const d = disputes.add({ payout: p.id, claim, note, by, verdict: j.verdict, reason: j.reason, cites: j.cites, proof_hash: proof.hash });
+    trail.add(p.id, "decide", `Disputed by ${by} (${CLAIMS[claim].toLowerCase()}): ${j.verdict}. ${j.reason}`, { claim, note, cites: j.cites, proof_hash: proof.hash });
+    try {
+      if (j.verdict === "upheld") await svc.dispute(p.id, "Sayso's dispute rules", `${CLAIMS[claim].toLowerCase()}; upheld from the proof`);
+      else if (j.verdict === "review") emit("escalate", `A dispute on ${p.payeeName}'s payout needs you: ${CLAIMS[claim]}. ${j.reason}`, { payout: p.id });
+      else {
+        // Denied: the proof it rests on is anchored on Metal, so the answer can't be rewritten later.
+        const a = await anchorer.anchor(proof.hash as `0x${string}`).catch(() => undefined);
+        if (a) disputes.anchored(d.id, a.tx);
+        emit("refuse", `Dispute on ${p.payeeName}'s payout denied: ${j.reason}`, { payout: p.id }, a?.explorer);
+      }
+    } catch (err) { return void fail(res, err); }
+    res.status(201).json({ dispute: disputes.for(p.id).find((x) => x.id === d.id), proof, payout: publicView(svc.book.get(p.id)!) });
+  });
 
   // The inbox: forward an invoice here (from the app, or a mail hook holding INBOX_SECRET).
   app.post("/v1/inbox", auth.requireOwnerOrInboxSecret, express.json({ limit: "256kb" }), async (req, res) => {

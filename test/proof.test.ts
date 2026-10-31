@@ -16,8 +16,9 @@ const proofWith = (s: Partial<Record<Evidence["id"], Evidence["status"]>>): Proo
 describe("judge: a dispute settled from the proof", () => {
   const cases: Array<[Claim, Partial<Record<Evidence["id"], Evidence["status"]>>, string]> = [
     ["not_authorized", {}, "denied"],
-    ["not_authorized", { mandate: "missing" }, "upheld"],
-    ["not_authorized", { mandate: "against" }, "upheld"],
+    // The payee already has the money: never refunded on the agent's word alone.
+    ["not_authorized", { mandate: "missing" }, "review"],
+    ["not_authorized", { mandate: "against" }, "review"],
     ["wrong_amount", {}, "denied"],
     ["wrong_amount", { funding: "missing" }, "review"],
     ["not_delivered", {}, "denied"],
@@ -64,7 +65,10 @@ describe("prove it: what Sayso shows when an agent's purchase is questioned", ()
       expect(proof.body.evidence[0].detail).toMatch(/signed this exact order/);
       expect(JSON.stringify(proof.body)).not.toMatch(/ES9121/); // no bank details
 
-      const d = await call("POST", `/v1/payouts/${q.body.id}/disputes`, { claim: "not_authorized", note: "I never allowed this" });
+      // A stranger with the payout id can't dispute it; the owner of the mandate's account can.
+      const stranger = await call("POST", `/v1/payouts/${q.body.id}/disputes`, { claim: "not_authorized" });
+      expect(stranger.status).toBe(401);
+      const d = await call("POST", `/v1/payouts/${q.body.id}/disputes`, { claim: "not_authorized", note: "I never allowed this" }, { "x-sim-mandate": "0xm" });
       expect(d.status).toBe(201);
       expect(d.body.dispute.verdict).toBe("denied");
       expect(d.body.dispute.reason).toMatch(/mandate allowed/);
@@ -75,7 +79,7 @@ describe("prove it: what Sayso shows when an agent's purchase is questioned", ()
     }
   });
 
-  it("refunds when the proof contradicts the payout, and leaves an unsettled claim to the owner", async () => {
+  it("sends a claim against a delivered payment to the owner, never refunds it on the agent's word, and refuses strangers", async () => {
     const { cs, server, call, owner } = await start("verify");
     try {
       cs.simMandates!.bind("0xm", { principal: "0xOwner", capCents: 40_000, budgetCents: 200_000 });
@@ -85,22 +89,33 @@ describe("prove it: what Sayso shows when an agent's purchase is questioned", ()
         for (let i = 0; i < 3; i++) await cs.tick();
         return q.body.id as string;
       };
-      const a = await pay({ "x-sim-payer": "0xBareAgent" }); // paid from a bare key, under no mandate
+      const bare = { "x-sim-payer": "0xBareAgent" };
+      const a = await pay(bare); // paid from a bare key, under no mandate
       const b = await pay({ "x-sim-mandate": "0xm" });
 
+      // The hole the audit found: anyone with the payout id could get a delivered payout refunded.
+      for (const headers of [{}, { "x-sim-payer": "0xSomeoneElse" }] as Array<Record<string, string>>) {
+        const r = await call("POST", `/v1/payouts/${a}/disputes`, { claim: "not_authorized", by: "the paying agent" }, headers);
+        expect(r.status).toBe(401);
+      }
+      expect(cs.svc.book.get(a)!.status).toBe("paid");
+
       // Something the proof doesn't cover goes to the owner, who can still refund it with their passkey.
-      const other = await call("POST", `/v1/payouts/${b}/disputes`, { claim: "other", note: "duplicate job" });
+      const other = await call("POST", `/v1/payouts/${b}/disputes`, { claim: "other", note: "duplicate job" }, owner);
       expect(other.body.dispute.verdict).toBe("review");
-      expect((await call("POST", `/v1/payouts/${b}/disputes`, { claim: "other" })).status).toBe(409);
+      expect(other.body.dispute.by).toBe("you");
+      expect((await call("POST", `/v1/payouts/${b}/disputes`, { claim: "other" }, owner)).status).toBe(409);
       const kept = await call("POST", `/v1/payouts/${b}/dispute/deny`, {}, owner);
       expect(kept.body.dispute.verdict).toBe("denied_by_owner");
 
-      // No mandate on record: Sayso can't show the agent was allowed, so it refunds.
-      const upheld = await call("POST", `/v1/payouts/${a}/disputes`, { claim: "not_authorized" });
-      expect(upheld.body.dispute.verdict).toBe("upheld");
+      // The real payer, under no mandate: the payee has the money, so it waits for the owner, unrefunded.
+      const claimed = await call("POST", `/v1/payouts/${a}/disputes`, { claim: "not_authorized" }, bare);
+      expect(claimed.status).toBe(201);
+      expect(claimed.body.dispute.verdict).toBe("review");
+      expect(claimed.body.dispute.by).toMatch(/^the paying agent/);
       await new Promise((r) => setTimeout(r, 30));
-      expect(cs.svc.book.get(a)!.status).toBe("refunded");
-      expect((await call("POST", `/v1/payouts/${a}/disputes`, { claim: "not_authorized" })).status).toBe(409);
+      expect(cs.svc.book.get(a)!.status).toBe("paid");
+      expect((await call("POST", `/v1/payouts/${a}/disputes`, { claim: "not_authorized" }, bare)).status).toBe(409);
     } finally {
       server.close();
     }
