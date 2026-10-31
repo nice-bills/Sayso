@@ -765,7 +765,7 @@ function homeView() {
       ? h("main", { class: "sh-main sh-listen" }, r ? null : live, h("div", { class: "wave", "aria-hidden": "true" }, Array.from({ length: 18 }, (_, i) => h("i", { style: `animation-delay:-${(i * 0.137) % 1}s` }))), replyLine(null))
       : h("main", { class: "sh-main" },
         h("div", { class: "sh-label" }, "Available"),
-        h("div", { class: "sh-amount" }, bal != null ? money(bal / 100, "USD") : "…"),
+        h("div", { class: "sh-amount", style: `--n:${bal != null ? money(bal / 100, "USD").length : 6}` }, bal != null ? money(bal / 100, "USD") : "…"),
         queue.length ? [h("div", { class: "sh-row" }, h("span", { class: "sh-label" }, queue.length === 1 ? "Needs you" : `${queue.length} need you`), queue.length > 1 ? h("span", { class: "sh-label" }, "Swipe for the next") : null), deck(queue)]
           : h("div", { class: "sh-clear" }, h("span", { class: "tick big-tick", "aria-hidden": "true" }, icon("check", 26)), h("b", {}, "Nothing needs you"), h("span", {}, "Say a payment, or forward an invoice to Sayso.")),
       ),
