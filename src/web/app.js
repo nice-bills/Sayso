@@ -1100,6 +1100,7 @@ function activityFeed() {
 function proof(p) {
   if (!p || p.startsWith("sim:")) return null;
   if (/^https?:\/\//.test(p)) return h("a", { href: p, target: "_blank", rel: "noopener noreferrer", class: "proof" }, "Proof", icon("ext", 12));
+  if (/^0x[0-9a-f]{64}$/i.test(p)) return h("a", { href: `https://testnet.metalntwx.com/tx/${p}`, target: "_blank", rel: "noopener noreferrer", class: "proof", title: p }, `${p.slice(0, 10)}…${p.slice(-4)}`, icon("ext", 12));
   return h("code", { class: "proof", title: p }, p.length > 18 ? `${p.slice(0, 10)}…${p.slice(-4)}` : p);
 }
 

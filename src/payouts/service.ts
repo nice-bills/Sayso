@@ -93,7 +93,7 @@ const isAmbiguous = (err: unknown) => !(err instanceof AirwallexError) || err.st
 
 export class PayoutService {
   readonly book: PayoutBook;
-  private readonly pricing: PricingConfig;
+  private readonly basePricing: PricingConfig;
   private readonly previewRates = new Map<string, { rate: number; at: number }>();
   private readonly risk: RiskConfig;
   private readonly ttl: number;
@@ -101,12 +101,33 @@ export class PayoutService {
 
   constructor(private readonly d: PayoutDeps) {
     this.book = new PayoutBook(d.store);
-    this.pricing = d.pricing ?? DEFAULT_PRICING;
+    this.basePricing = d.pricing ?? DEFAULT_PRICING;
     this.risk = d.risk ?? DEFAULT_RISK;
     this.ttl = d.quoteTtlMs ?? 120_000;
     this.read = d.read ?? readAuto;
     // A split's second part, once quoted: one per split, so it can't be quoted (or paid) twice.
     d.store.db.exec("CREATE TABLE IF NOT EXISTS split_parts (parent TEXT PRIMARY KEY, child TEXT NOT NULL UNIQUE)");
+    // The fee Airwallex last charged per method and currency, read off its own transfers.
+    d.store.db.exec("CREATE TABLE IF NOT EXISTS observed_fees (method TEXT NOT NULL, currency TEXT NOT NULL, fee_minor INTEGER NOT NULL, transfer_id TEXT, at TEXT NOT NULL, PRIMARY KEY (method, currency))");
+  }
+
+  /** Pricing, with each transfer fee replaced by the one Airwallex actually charged last, once seen. */
+  get pricing(): PricingConfig {
+    const rows = this.d.store.db.prepare("SELECT method, currency, fee_minor FROM observed_fees").all() as Array<{ method: string; currency: string; fee_minor: number }>;
+    if (!rows.length) return this.basePricing;
+    const swift = { ...this.basePricing.swiftFeeMinor }, local = { ...this.basePricing.localFeeMinor };
+    for (const r of rows) (r.method === "SWIFT" ? swift : local)[r.currency] = r.fee_minor;
+    return { ...this.basePricing, swiftFeeMinor: swift, localFeeMinor: local };
+  }
+
+  /** Remembers what Airwallex charged for a transfer, so the next quote prices that fee, not a guess. */
+  private observeFee(method: string, currency: string, t: Pick<Transfer, "id" | "fee_amount" | "fee_currency">) {
+    if (t.fee_currency !== currency || typeof t.fee_amount !== "number" || !Number.isFinite(t.fee_amount)) return;
+    const fee = Math.round(t.fee_amount * 100);
+    const before = transferFee(method as "LOCAL" | "SWIFT", currency, this.pricing);
+    this.d.store.db.prepare("INSERT INTO observed_fees (method, currency, fee_minor, transfer_id, at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (method, currency) DO UPDATE SET fee_minor = excluded.fee_minor, transfer_id = excluded.transfer_id, at = excluded.at")
+      .run(method, currency, fee, t.id, new Date().toISOString());
+    if (fee !== before) emit("observe", `Airwallex charged ${fmt(fee, currency)} for a ${method} ${currency} transfer (priced at ${fmt(before, currency)}); quotes now use what it charged`, { method, currency, fee_minor: fee }, t.id);
   }
 
   // ---------- a split's second part ----------
@@ -470,6 +491,7 @@ export class PayoutService {
     }
     // Record the fee Airwallex actually charged, so reconciliation uses its number, not our estimate.
     this.d.store.updateOp(p.id, "submitted", t.id, chargedFeeDetail(t, p.currency));
+    this.observeFee(p.method, p.currency, t);
     this.book.transition(p.id, ["funded"], "submitted", { transferId: t.id });
     emit("act", `Paying ${fmt(p.amountMinor, p.currency)} to ${p.payeeName} via ${p.method}`, { payout: p.id, status: t.status }, t.id);
     return this.book.get(p.id)!;

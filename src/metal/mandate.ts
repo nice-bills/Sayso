@@ -194,6 +194,7 @@ export class MandateRefunder {
     // The payout id names the payment, so a retried refund pays at most once.
     const r = await this.mandate.pull(to as Address, amountMinor, false, `refund-${payoutId}`);
     if (r.outcome !== "paid") throw new Error(`refund mandate refused ${payoutId}: ${r.reason}`);
-    return { tx: r.explorer ?? r.tx };
+    // The hash, not an explorer link: it goes into the payout and its receipt.
+    return { tx: r.tx };
   }
 }

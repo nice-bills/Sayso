@@ -1,7 +1,7 @@
 {
   "name": "sayso",
   "version": "0.1.0",
-  "description": "An AI agent that sells its service per call on Metal, banks it with Airwallex, and pays its own bills.",
+  "description": "Agents pay invoices in USDZ on Metal; Sayso decides pay, wait, split or hold, and pays the payee in their currency through Airwallex.",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
