@@ -41,8 +41,11 @@ const check = (name: string, expectedMinor: number, actualMinor: number): Check 
 export function reconcile(i: ReconcileInput): { ok: boolean; checks: Check[] } {
   const checks = [
     check(`ramp credited == Metal swept (${i.rampCurrency})`, i.metalSweptMinor, i.rampCreditedMinor),
-    check(`Airwallex deposits == ramp credited (${i.rampCurrency})`, i.rampCreditedMinor, i.airwallexDepositsMinor),
-    ...Object.entries(i.currencies).map(([ccy, f]) =>
+    // Each credit is a deposit Airwallex answered with an id; whether it reached the balance is the
+    // per-currency check below, which reads the balance from Airwallex.
+    check(`Airwallex deposit ids == ramp credited (${i.rampCurrency})`, i.rampCreditedMinor, i.airwallexDepositsMinor),
+    // A currency that held nothing and moved nothing proves nothing, so it isn't counted as a check.
+    ...Object.entries(i.currencies).filter(([, f]) => Object.values(f).some((v) => v !== 0)).map(([ccy, f]) =>
       check(`${ccy} balance explained`, f.openingMinor + f.depositsMinor + f.boughtMinor - f.soldMinor - f.payoutsMinor - f.feesMinor - f.cardSpendMinor, f.closingMinor)),
   ];
   return { ok: checks.every((c) => c.ok), checks };
@@ -103,5 +106,6 @@ export function reportReconcile(r: { ok: boolean; checks: Check[] }): void {
   for (const c of r.checks) {
     if (!c.ok) emit("escalate", `Reconciliation break: ${c.name} off by ${(c.diffMinor / 100).toFixed(2)}`, { expected: c.expectedMinor, actual: c.actualMinor });
   }
-  emit("reconcile", r.ok ? `Books reconcile to the cent (${r.checks.length} checks)` : `Reconciliation FAILED (${r.checks.filter((c) => !c.ok).length} breaks)`, { checks: r.checks });
+  const moved = r.checks.filter((c) => c.name.endsWith("balance explained") && (c.expectedMinor !== 0 || c.actualMinor !== 0)).length;
+  emit("reconcile", r.ok ? `Books reconcile to the cent: the ramp, and ${moved} ${moved === 1 ? "currency" : "currencies"} with money in them` : `Reconciliation FAILED (${r.checks.filter((c) => !c.ok).length} breaks)`, { checks: r.checks });
 }

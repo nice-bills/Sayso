@@ -27,7 +27,7 @@ describe("reconcile", () => {
     expect(r.ok).toBe(false);
     expect(r.checks.filter((c) => !c.ok).map((c) => c.name)).toEqual([
       "ramp credited == Metal swept (USD)",
-      "Airwallex deposits == ramp credited (USD)",
+      "Airwallex deposit ids == ramp credited (USD)",
       "EUR balance explained",
     ]);
     expect(r.checks.find((c) => c.name === "EUR balance explained")?.diffMinor).toBe(-1285);
@@ -59,5 +59,13 @@ describe("reconcile", () => {
     store.insertOp({ requestId: "r2", obligationId: "o2", kind: "pay", attempt: 1, status: "submitted", currency: "EUR", amountMinor: 4000 });
     store.updateOp("r2", "failed", "tfr2", JSON.stringify({ fee_minor: 268, failure: "Account closed" }));
     expect(flowsFromBooks(store, ledger, "USD").EUR).toEqual({ depositsMinor: 0, boughtMinor: 0, soldMinor: 0, payoutsMinor: 6000, feesMinor: 536, cardSpendMinor: 0 });
+  });
+});
+
+describe("what counts as a check", () => {
+  it("doesn't count a currency that held nothing and moved nothing", () => {
+    const zero = { openingMinor: 0, closingMinor: 0, depositsMinor: 0, boughtMinor: 0, soldMinor: 0, payoutsMinor: 0, feesMinor: 0, cardSpendMinor: 0 };
+    const r = reconcile({ rampCurrency: "USD", metalSweptMinor: 0, rampCreditedMinor: 0, airwallexDepositsMinor: 0, currencies: { USD: { ...zero, openingMinor: 500, closingMinor: 500 }, JPY: zero, NOK: zero } });
+    expect(r.checks.map((c) => c.name)).toEqual(["ramp credited == Metal swept (USD)", "Airwallex deposit ids == ramp credited (USD)", "USD balance explained"]);
   });
 });
