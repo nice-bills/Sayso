@@ -18,6 +18,7 @@ import type { Store } from "../store.js";
 import type { TrailStep } from "../trail.js";
 import { toMajor } from "../treasury/money.js";
 import type { Payout } from "./book.js";
+import type { SignedOffer } from "./offer.js";
 
 export type EvidenceId = "order" | "mandate" | "approval" | "funding" | "delivery" | "receipt";
 
@@ -57,7 +58,7 @@ const usdz = (minor: number) => `${toMajor(minor).toFixed(2)} USDZ`;
 const txLink = (tx: string | null | undefined) => (tx && tx.startsWith("0x") ? `${EXPLORER}${tx}` : undefined);
 
 /** The evidence for one payout, from the book, its trail, its receipts and (when known) the transfer's status now. */
-export function buildProof(p: Payout, steps: TrailStep[], anchors: Anchored[], transferStatus?: string): Proof {
+export function buildProof(p: Payout, steps: TrailStep[], anchors: Anchored[], transferStatus?: string, offer?: SignedOffer): Proof {
   const mandate = steps.filter((s) => s.kind === "mandate").at(-1)?.detail as MandateProof | undefined;
   const held = steps.some((s) => s.kind === "escalate" && s.title.startsWith("Held"));
   const cleared = steps.filter((s) => s.kind === "decide" && /cleared .* after review/.test(s.title)).at(-1);
@@ -67,7 +68,7 @@ export function buildProof(p: Payout, steps: TrailStep[], anchors: Anchored[], t
   evidence.push({
     id: "order", title: "The order the agent placed",
     status: "proven",
-    detail: `${toMajor(p.amountMinor).toFixed(2)} ${p.currency} to ${p.payeeName} (${p.reference}), quoted at ${usdz(p.totalMinor)} on ${p.createdAt.slice(0, 16).replace("T", " ")} UTC${mandate?.signed_order ? "; the agent's key signed this exact order" : ""}.`,
+    detail: `${toMajor(p.amountMinor).toFixed(2)} ${p.currency} to ${p.payeeName} (${p.reference}), quoted at ${usdz(p.totalMinor)} on ${p.createdAt.slice(0, 16).replace("T", " ")} UTC${offer ? `; Sayso's quote key ${short(offer.signer)} signed this offer (EIP-712), so the price and payee can't be changed later` : ""}${mandate?.signed_order ? "; the agent's key signed this exact order" : ""}.`,
   });
 
   if (!mandate) evidence.push({ id: "mandate", title: "The owner's Metal mandate", status: "missing", detail: "No mandate was verified for this payment." });
@@ -112,7 +113,7 @@ export function judge(claim: Claim, proof: Proof): Judgement {
         ? "Metal couldn't verify the mandate behind this payment, but the payee has been paid. The owner decides whether to refund it."
         : "The agent's own key paid, under no mandate, and the payee has been paid. Sayso won't refund that on its own; the owner decides.", cites: ["mandate", "funding", "delivery"] };
     case "wrong_amount":
-      if (is("funding", "proven")) return { verdict: "denied", reason: "The agent paid exactly the quoted price; the 402 response told it that price before it paid.", cites: ["order", "funding"] };
+      if (is("funding", "proven")) return { verdict: "denied", reason: "The agent paid exactly the quoted price: Sayso's signed offer and the 402 response both named it before the agent paid.", cites: ["order", "funding"] };
       return { verdict: "review", reason: "No Metal payment is on record to compare with the quote.", cites: ["funding"] };
     case "not_delivered":
       if (is("delivery", "proven")) return { verdict: "denied", reason: "Airwallex reports the transfer reached the payee's bank, and the receipt on chain says so too.", cites: ["delivery", "receipt"] };

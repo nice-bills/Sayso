@@ -46,6 +46,7 @@ import type { Payout, PayoutBook } from "./payouts/book.js";
 import { booksBefore, flowsFromBooks, rampSince, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
 import { FakeAirwallex, FakeMandate, FakeRefunder } from "./sim/offline.js";
 import { buildProof, CLAIMS, Disputes, judge, type Claim } from "./payouts/proof.js";
+import { OfferSigner } from "./payouts/offer.js";
 import { chainPayerCheck, disputeMessage, simPayerCheck, type PayerCheck } from "./payouts/dispute-auth.js";
 import { Store } from "./store.js";
 import { fmt, toMinor } from "./treasury/money.js";
@@ -65,7 +66,7 @@ class BookEarnings implements EarningsSource {
 }
 
 /** Sayso's own Metal address in offline mode, where agents' payments and mandates name it as payee. */
-export const SIM_PAY_TO = "0x5a7505a7505a7505a7505a7505a7505a7505a75";
+export const SIM_PAY_TO = "0x5a7505a7505a7505a7505a7505a7505a7505a750";
 
 export interface Sayso {
   offline: boolean;
@@ -229,7 +230,11 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   // ---------- HTTP ----------
   const app = express();
   // pay_to is Sayso's Metal address: what an owner names as the only payee of an agent's mandate.
-  app.get("/healthz", (_req, res) => res.json({ ok: true, offline: opts.offline, pay_to: mode.kind === "x402" ? mode.payTo : SIM_PAY_TO, agent_mandates: policy }));
+  const payTo = (mode.kind === "x402" ? mode.payTo : SIM_PAY_TO) as Address;
+  // Sayso's quote key signs every payable quote; agents check offers against this address.
+  const offers = new OfferSigner(store);
+  const signOffer = (p: Payout) => offers.sign(p, payTo);
+  app.get("/healthz", (_req, res) => res.json({ ok: true, offline: opts.offline, pay_to: payTo, quote_signer: offers.address, agent_mandates: policy }));
   if (!opts.offline && process.env.AWX_WEBHOOK_SECRET) {
     app.use("/webhooks/airwallex", webhookRouter(process.env.AWX_WEBHOOK_SECRET, store, async (e) => {
       if (e.name.startsWith("payout.transfer.")) await svc.onTransfer(e.data.object as unknown as Transfer);
@@ -237,7 +242,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   }
   if (process.env.AGENTMAIL_WEBHOOK_SECRET) app.use(agentMailRouter(process.env.AGENTMAIL_WEBHOOK_SECRET, (e) => inbox.receive(e)));
   const batches = new BatchBook(store, svc);
-  app.use(payoutApi(svc, mode, batches, { policy, record: (ids, proof) => ids.forEach((id) => trail.add(id, "mandate", describeMandate(proof), proof as unknown as Record<string, unknown>)) }));
+  app.use(payoutApi(svc, mode, batches, { policy, record: (ids, proof) => ids.forEach((id) => trail.add(id, "mandate", describeMandate(proof), proof as unknown as Record<string, unknown>)) }, signOffer));
 
   // A payout's receipt, and the Metal transaction that anchors its hash. Public, like the payout itself:
   // it holds no bank details, and anyone can check it against the chain.
@@ -257,7 +262,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const disputes = new Disputes(store);
   const proofOf = async (p: Payout) => {
     const t = p.transferId ? await awx.transferByRequestId(p.id).catch(() => undefined) : undefined;
-    return buildProof(p, trail.for(p.id), receipts.get(p.id), t?.status);
+    return buildProof(p, trail.for(p.id), receipts.get(p.id), t?.status, p.fundingTx ? await signOffer(p) : undefined);
   };
   app.get("/v1/payouts/:id/proof", async (req, res) => {
     const p = svc.book.get(String(req.params.id));

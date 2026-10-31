@@ -69,6 +69,7 @@ Metal refuses any payment above the cap, past the budget, after the expiry, or t
 | Call | Price | What it does |
 | --- | --- | --- |
 | `POST /v1/quotes` | free | Price, payee check, risk. Returns a quote, `needs_review` or `rejected`, with reasons. |
+| (every quote) | | A payable quote carries `offer`: Sayso's EIP-712 signature (domain `Sayso` v1, chain 63825) over the quote id, amount, currency, payee hash, reference, USDZ price, pay-to address and expiry, from the key `GET /healthz` publishes as `quote_signer`. The MCP agent checks it before paying and refuses an offer that doesn't verify or doesn't match its invoice; the proof cites it. Batch quotes aren't signed yet. |
 | `POST /v1/payouts/:id/pay` | x402: the quote total | Locks the quote. The payout runs once the payment settles. |
 | `GET /v1/payouts/:id` | free | Status, Airwallex transfer id, refund tx. Never returns bank details. |
 | `GET /v1/payouts/:id/receipt` | free | The final payout's receipt, its hash, and the Metal anchor transaction. |

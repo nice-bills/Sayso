@@ -20,6 +20,13 @@ import { emit } from "../events.js";
 import type { MandateChecker, MandatePolicy, MandateProof, SimMandates } from "../metal/agent-mandate.js";
 import { PayoutError, publicView, type PayoutService } from "./service.js";
 import type { BatchBook } from "./batch.js";
+import type { Payout } from "./book.js";
+import type { SignedOffer } from "./offer.js";
+
+/** Signs what a quote promises (see offer.ts). */
+export type SignOffer = (p: Payout) => Promise<SignedOffer>;
+/** A quote that ever became payable carries Sayso's signed offer; held, rejected ones never had one. */
+const SIGNED = new Set(["quoted", "accepted", "funded", "waiting", "submitted", "paid", "failed", "refunded", "refund_failed", "expired"]);
 
 export type PaymentMode =
   | { kind: "x402"; server: x402ResourceServer; network: string; payTo: string; mandates?: MandateChecker }
@@ -36,8 +43,9 @@ export interface MandateOptions {
 const PAY = /^\/v1\/payouts\/([0-9a-f-]{36})\/pay$/;
 const PAY_BATCH = /^\/v1\/batches\/([0-9a-f-]{36})\/pay$/;
 
-export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchBook, mandates: MandateOptions = { policy: "verify", record: () => {} }): Router {
+export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchBook, mandates: MandateOptions = { policy: "verify", record: () => {} }, signOffer?: SignOffer): Router {
   const r = express.Router();
+  const withOffer = async (p: Payout) => ({ ...publicView(p), offer: signOffer && SIGNED.has(p.status) ? await signOffer(p) : null });
   const linesOf = (x: { kind: "payout" | "batch"; id: string }) => (x.kind === "payout" ? [x.id] : batches.get(x.id)?.payoutIds ?? []);
   r.use(express.json({ limit: "1mb" }));
 
@@ -64,16 +72,16 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
   r.post("/v1/quotes", async (req, res) => {
     try {
       const p = await svc.quote(req.body);
-      res.status(p.status === "rejected" ? 422 : 201).json({ ...publicView(p), pay_url: p.status === "quoted" ? `/v1/payouts/${p.id}/pay` : null });
+      res.status(p.status === "rejected" ? 422 : 201).json({ ...(await withOffer(p)), pay_url: p.status === "quoted" ? `/v1/payouts/${p.id}/pay` : null });
     } catch (err) {
       sendError(res, err);
     }
   });
 
-  r.get("/v1/payouts/:id", (req, res) => {
+  r.get("/v1/payouts/:id", async (req, res) => {
     const p = svc.book.get(req.params.id);
     if (!p) return void res.status(404).json({ error: "no such payout" });
-    res.json(publicView(p));
+    res.json(await withOffer(p));
   });
 
   // Only a payable quote ever gets a 402; anything else is answered before payment is asked for.

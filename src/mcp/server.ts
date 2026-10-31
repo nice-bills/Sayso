@@ -18,6 +18,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
 import { invoiceShape, toRequest, type Invoice } from "./tools.js";
 import { disputeMessage } from "../payouts/dispute-auth.js";
+import { verifyOffer, type SignedOffer } from "../payouts/offer.js";
 
 const base = process.env.SAYSO_URL ?? "http://127.0.0.1:4021";
 const maxUsdz = process.env.SAYSO_MAX_USDZ ?? "250";
@@ -57,9 +58,29 @@ const text = (o: unknown) => ({ content: [{ type: "text" as const, text: JSON.st
 
 type Decision = { verdict: "pay" | "wait" | "split" | "hold" | "reject"; decided_by: string; reason: string };
 
+type Quote = { id: string; status: string; amount: string; currency: string; reference: string; price_usdz: string; pay_url: string | null; reasons: string[]; decision?: Decision | null; offer?: SignedOffer | null };
+
 async function quote(i: Invoice, limits: { max_usdz?: string; spendable_usdz?: string } = {}) {
   const res = await fetch(`${base}/v1/quotes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...toRequest(i), ...limits }) });
-  return (await res.json()) as { id: string; status: string; price_usdz: string; pay_url: string | null; reasons: string[]; decision?: Decision | null };
+  return (await res.json()) as Quote;
+}
+
+// Sayso's published quote key and payee address, read once.
+let published: Promise<{ quote_signer: `0x${string}`; pay_to: string }> | undefined;
+const healthz = () => (published ??= fetch(`${base}/healthz`).then((r) => r.json() as Promise<{ quote_signer: `0x${string}`; pay_to: string }>));
+
+/** Before paying: Sayso's own key signed exactly this invoice, at this price, payable to its published address. Returns why not. */
+async function checkOffer(q: Quote, i: Invoice): Promise<string | undefined> {
+  if (!q.offer) return "Sayso sent no signed offer with this quote";
+  const h = await healthz();
+  if (!(await verifyOffer(q.offer, h.quote_signer))) return "the offer is not signed by Sayso's published quote key";
+  const t = q.offer.terms;
+  if (t.quote !== q.id) return "the signed offer is for another quote";
+  if ((Number(t.priceUsdzMinor) / 100).toFixed(2) !== q.price_usdz) return `the signed price (${t.priceUsdzMinor} cents) is not the quoted price ${q.price_usdz}`;
+  if (t.payTo.toLowerCase() !== h.pay_to.toLowerCase()) return "the signed offer pays an address Sayso doesn't publish";
+  if (t.currency !== i.currency.toUpperCase() || (q.decision?.verdict !== "split" && Number(t.amountMinor) !== Math.round(Number(i.amount) * 100))) return "the signed offer is for a different amount or currency than this invoice";
+  if (Number(t.expiresAt) * 1000 < Date.now()) return "the signed offer has expired";
+  return undefined;
 }
 
 async function pay(id: string) {
@@ -92,6 +113,8 @@ server.registerTool("pay_invoice", {
   // Waiting for funds means there is nothing to pay with yet; ask again after the next top-up.
   if (q.decision?.verdict === "wait" && q.decision.decided_by === "balance") return text({ paid: false, decision: q.decision, quote: q });
   if (Number(q.price_usdz) > Number(i.max_usdz)) return text({ paid: false, reason: `price ${q.price_usdz} USDZ is above max_usdz ${i.max_usdz}`, quote: q });
+  const bad = await checkOffer(q, i as Invoice);
+  if (bad) return text({ paid: false, reason: `Not paying: ${bad}`, quote: q });
   // A price wait is still paid now: the USDZ waits in escrow at this price and Airwallex pays once the rate is back in band.
   const r = await pay(q.id);
   return text({ paid: r.http_status < 400, quote_id: q.id, decision: q.decision, ...r });
