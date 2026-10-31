@@ -752,7 +752,7 @@ function homeView() {
     : r ? cardSheet("said", said ?? null, h("div", {}, live, replyLine(r)), said ? itemCard(said, r) : null)
     : open ? cardSheet(open.key, open.item ?? null, null, open.item ? itemCard(open.item) : h("div", { class: "card-x" }, payoutRow(open.payout, { open: true })))
     : null;
-  return h("div", { class: `say-home${listening ? " listening" : ""}${firstShow("home") ? " enter" : ""}` },
+  return h("div", { class: "home-split" }, h("div", { class: `say-home${listening ? " listening" : ""}${firstShow("home") ? " enter" : ""}` },
     h("header", { class: "sh-top" },
       h("span", { class: "sh-mark" }, "sayso"),
       h("div", { class: "sh-icons" },
@@ -784,6 +784,35 @@ function homeView() {
         h("button", { class: "linkish", type: "button", onclick: () => { s.typing = !s.typing; render(); if (s.typing) setTimeout(() => document.querySelector(".say-field")?.focus(), 0); } }, s.typing ? "hide keyboard" : "type instead")),
     ),
     sheet,
+  ), decisionsPane());
+}
+
+// On a wide screen, home is not a phone column: beside it, everything Sayso decided, newest first,
+// with the latest decision as big as the landing's verdict.
+function decisionsPane() {
+  const ps = state.payouts.filter((p) => p.decision?.verdict);
+  const latest = ps[0];
+  const count = (f) => state.payouts.filter(f).length;
+  const stat = (n, label) => h("div", { class: "dp-stat" }, h("b", {}, String(n)), h("span", {}, label));
+  const openRow = (p) => { state.tab = "payments"; sessionSet("tab", "payments"); state.rows.add(p.id); render(); window.scrollTo(0, 0); };
+  const tone = latest ? FLAP_TONE[latest.decision.verdict] : "";
+  return h("aside", { class: "dpane", "aria-label": "What Sayso decided" },
+    h("div", { class: "dp-head" }, h("span", {}, "What Sayso decided"), h("span", { class: "dp-mode" }, state.summary?.offline ? "Offline demo" : state.summary?.sandbox ? "Airwallex sandbox · Metal testnet" : "Live")),
+    h("div", { class: "dp-stats" },
+      stat(count((p) => p.status === "paid"), "Delivered"),
+      stat(count((p) => ["accepted", "funded", "submitted"].includes(p.status)), "On the way"),
+      stat(count((p) => p.status === "waiting" || p.decision?.verdict === "wait"), "Waiting"),
+      stat(count((p) => ["needs_review", "rejected"].includes(p.status)), "Held or blocked")),
+    latest ? h("button", { type: "button", class: "dp-latest", "data-tone": tone, onclick: () => openRow(latest) },
+      h("span", { class: "dp-k" }, `Latest · ${latest.source === "agent" ? "from an agent" : "from the inbox"} · ${ago(latest.created_at)}`),
+      h("span", { class: "dp-word" }, VERDICT[latest.decision.verdict].toUpperCase()),
+      h("span", { class: "dp-what" }, `${money(latest.amount, latest.currency)} to ${latest.payee}`),
+      h("span", { class: "dp-why" }, latest.decision.reason)) : h("div", { class: "dp-empty" }, "Decisions show up here as agents and invoices ask Sayso to pay."),
+    ps.length > 1 ? h("ol", { class: "dp-list" }, ps.slice(1, 9).map((p) => h("li", {},
+      h("button", { type: "button", onclick: () => openRow(p) },
+        h("span", { class: "rh-chip", "data-tone": FLAP_TONE[p.decision.verdict] }, VERDICT[p.decision.verdict].toUpperCase()),
+        h("span", { class: "dp-who" }, h("b", {}, p.payee), h("small", {}, `${p.source === "agent" ? "Agent" : "Inbox"} · ${ago(p.created_at)}`)),
+        h("span", { class: "dp-amt" }, money(p.amount, p.currency), h("small", {}, (PAYOUT_PILL[p.status] ?? [p.status])[0])))))) : null,
   );
 }
 
@@ -1132,7 +1161,7 @@ function inboxView() {
       h("button", { class: "btn small add-btn", onclick: () => { state.showAdd = !state.showAdd; render(); } }, state.showAdd ? "Close" : [icon("plus", 16), "Add"]),
     ),
     state.showAdd ? addSheet() : null,
-    h("div", { class: "list" },
+    h("div", { class: "list inbox-grid" },
       active.length ? active.map(invoiceCard) : h("div", { class: "empty" }, icon("check", 22), h("div", {}, "You're all caught up. Forward an invoice, or add one here.")),
     ),
     done.length ? [h("h3", { class: "group" }, "Done", h("span", {}, done.length)), h("div", { class: "list rows" }, done.map(invoiceCard))] : null,

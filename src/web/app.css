@@ -1153,3 +1153,45 @@ h1, h2, h3, h4 { font-weight: 500; }
   .eyebrow { font-size: 13px; margin-bottom: 16px; }
 }
 .v-hero .v-source { font-size: clamp(13px, .8vw, 17px); line-height: 1.5; }
+
+/* Home on a wide screen: the say column, and beside it what Sayso decided */
+.dpane { display: none; }
+@media (min-width: 1100px) {
+  .home-split { display: grid; grid-template-columns: minmax(440px, 560px) minmax(0, 1fr); min-height: 100dvh; background: var(--bg); }
+  .home-split .say-home { max-width: none; width: 100%; padding: 0 clamp(24px, 3vw, 56px); position: sticky; top: 0; }
+  .dpane { display: flex; flex-direction: column; gap: clamp(20px, 2vw, 32px); background: var(--board); color: var(--board-text); padding: clamp(24px, 3vw, 56px); min-height: 100dvh; }
+  .dp-head { display: flex; justify-content: space-between; gap: 16px; font-size: 15px; font-weight: 500; }
+  .dp-mode { font-family: var(--mono); font-stretch: 87.5%; font-size: 12px; color: var(--board-mute); }
+  .dp-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--board-line); border-radius: 12px; overflow: hidden; }
+  .dp-stat { background: var(--board-2); padding: 16px 18px; display: grid; gap: 4px; }
+  .dp-stat b { font-family: var(--mono); font-stretch: 87.5%; font-size: clamp(24px, 2vw, 36px); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .dp-stat span { font-size: 13px; color: var(--board-2nd); }
+  .dp-latest { --vb: var(--board-3); --vf: var(--board-text); all: unset; box-sizing: border-box; cursor: pointer; display: grid; gap: 10px; padding: clamp(20px, 2.2vw, 36px); border-radius: 16px; background: var(--vb); color: var(--vf); transition: transform .2s var(--ease-out); }
+  .dp-latest:hover { transform: translateY(-2px); } .dp-latest:focus-visible { outline: 2px solid var(--board-text); outline-offset: 3px; }
+  .dp-latest[data-tone="pay"] { --vb: #2fd873; --vf: #03200e; } .dp-latest[data-tone="wait"] { --vb: #ffb21e; --vf: #1a1100; }
+  .dp-latest[data-tone="hold"] { --vb: #ff4a36; --vf: #1f0503; } .dp-latest[data-tone="split"] { --vb: #6fd6ff; --vf: #021a26; }
+  .dp-k { font-family: var(--mono); font-stretch: 87.5%; font-size: 12px; opacity: .7; }
+  .dp-word { font-weight: 800; font-stretch: 72%; font-size: clamp(96px, 10vw, 220px); line-height: .82; letter-spacing: -.04em; }
+  .dp-what { font-size: clamp(20px, 1.6vw, 30px); font-weight: 600; letter-spacing: -.015em; margin-top: 6px; }
+  .dp-why { font-size: clamp(15px, 1vw, 18px); line-height: 1.45; opacity: .8; max-width: 60ch; }
+  .dp-empty { color: var(--board-2nd); font-size: 16px; padding: 40px 0; }
+  .dp-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--board-line); }
+  .dp-list li { border-bottom: 1px solid var(--board-line); }
+  .dp-list button { all: unset; box-sizing: border-box; width: 100%; cursor: pointer; display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 14px 4px; border-radius: 8px; }
+  .dp-list button:hover { background: var(--board-2); } .dp-list button:focus-visible { outline: 2px solid var(--board-text); }
+  .dp-list .rh-chip { background: var(--board-3); }
+  .dp-who, .dp-amt { display: grid; gap: 2px; min-width: 0; }
+  .dp-who b { font-weight: 500; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dp-who small, .dp-amt small { font-size: 13px; color: var(--board-mute); }
+  .dp-amt { text-align: right; font-family: var(--mono); font-stretch: 87.5%; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .dp-amt small { font-family: "Archivo", system-ui, sans-serif; font-stretch: 100%; }
+}
+
+/* The app's other tabs on a wide screen: wider page, inbox cards side by side */
+@media (min-width: 1300px) {
+  .shell .wrap { max-width: 1680px; }
+  .shell .page { max-width: none; }
+  .inbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(560px, 1fr)); gap: 16px; align-items: start; }
+  .inbox-grid > .empty { grid-column: 1 / -1; }
+  .agents-page > * { max-width: 1100px; }
+}
