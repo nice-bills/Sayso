@@ -112,6 +112,7 @@ Agents sign themselves up through [auth.md](https://github.com/workos/auth.md): 
 cp .env.example .env            # AWX_CLIENT_ID, AWX_API_KEY, METAL_RPC_URL
 npm run smoke:airwallex         # read-only check of the Airwallex keys
 npm run setup:metal             # keys, owner account, sweep and refund mandates bound on chain, faucet funds
+npm run setup:receipts          # just the receipt key: creates and funds it, prints METAL_RECEIPT_KEY (binds no mandates)
 npm run setup:airwallex         # USD global account and opening float
 # paste the printed lines into .env, then:
 npm run demo                    # or: npm run serve

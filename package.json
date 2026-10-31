@@ -8,6 +8,7 @@
     "demo:offline": "tsx src/demo.ts --offline",
     "demo": "tsx --env-file-if-exists=.env src/demo.ts",
     "setup:metal": "tsx --env-file-if-exists=.env scripts/setup-metal.ts",
+    "setup:receipts": "tsx --env-file-if-exists=.env scripts/setup-receipts.ts",
     "setup:airwallex": "tsx --env-file-if-exists=.env scripts/setup-airwallex.ts",
     "smoke:airwallex": "tsx --env-file-if-exists=.env src/airwallex/smoke.ts",
     "fetch-fx": "tsx scripts/fetch-fx.ts",
