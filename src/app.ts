@@ -168,6 +168,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const sandbox = (process.env.AWX_BASE_URL ?? "https://api.sandbox.airwallex.com").includes("sandbox");
   const nameCheck = opts.offline || process.env.AWX_NAME_CHECK === "on" || (!sandbox && process.env.AWX_NAME_CHECK !== "off");
   if (!nameCheck) emit("observe", "Airwallex sandbox: payee name matching is off (the sandbox answers NOT_MATCHED for every name); account existence is still checked");
+  if (!process.env.ANTHROPIC_API_KEY) emit("observe", "No ANTHROPIC_API_KEY: invoices and speech are read by keyword rules, not Claude, and every trail says so");
   const trail = new Trail(store);
   trail.follow();
   const receipts = new Receipts(store, anchorer, anchorAddress);

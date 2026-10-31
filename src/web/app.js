@@ -1055,7 +1055,7 @@ function understand(text) {
 const SAID = { payee: "Pay", amount: "Amount", reference: "Reference", bank: "Into" };
 
 // ---------- why: every step behind a payment, with its proof ----------
-const WHY = { heard: "You said", read: "Claude read", risk: "Rules", payee: "Bank", mandate: "Mandate", observe: "Seen", decide: "Decided", act: "Moved", reconcile: "Settled", escalate: "Flagged", refuse: "Refused", receipt: "Receipt" };
+const WHY = { heard: "You said", read: "Read", risk: "Rules", payee: "Bank", mandate: "Mandate", observe: "Seen", decide: "Decided", act: "Moved", reconcile: "Settled", escalate: "Flagged", refuse: "Refused", receipt: "Receipt" };
 function whyButton(id) {
   const open = Boolean(state.why[id]);
   return h("button", { class: "btn quiet small why-btn", type: "button", disabled: state.busy[`why:${id}`], onclick: () => open ? (delete state.why[id], render()) : act(`why:${id}`, async () => { state.why[id] = await api(`/v1/payouts/${encodeURIComponent(id)}/why`); }) }, open ? "Hide why" : "Why?");

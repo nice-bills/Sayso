@@ -19,7 +19,8 @@
     "bundle:metal": "tar czf - .metal | base64 -w0",
     "start": "sh scripts/start.sh",
     "setup:agent-budget": "tsx --env-file-if-exists=.env scripts/setup-agent-budget.ts",
-    "setup:buyers": "tsx --env-file-if-exists=.env scripts/fund-buyers.ts"
+    "setup:buyers": "tsx --env-file-if-exists=.env scripts/fund-buyers.ts",
+    "agent": "tsx --env-file-if-exists=.env scripts/claude-agent.ts"
   },
   "license": "MIT",
   "dependencies": {

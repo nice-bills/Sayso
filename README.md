@@ -32,6 +32,11 @@ npm run test:e2e         # the app's flows in a real browser (needs Node 22.22.3
 
 Offline mode swaps Airwallex and Metal for simulators. They follow the rules our code depends on: `request_id` dedupe, a required transfer `reason`, `FAILED` as the failure state, and the mandate's payee checks. Every proof they produce starts with `sim:`.
 
+
+### A real Claude agent
+
+`npm run agent` gives Claude (`claude-opus-5-5`) an invoice email and Sayso's MCP tools as the server lists them, and lets it decide every call: it reads the invoice, calls `pay_invoice` within its limit, and reports Sayso's decision (`src/agent/claude-payer.ts`). It needs `ANTHROPIC_API_KEY` and a paying identity (`SAYSO_BUYER_KEY`, `SAYSO_MANDATE`, or `SAYSO_SIM_PAYER` against `npm run serve:offline`); without a key it refuses to run rather than fake it. The demo's first beat runs it too when a key is set. The demo's three other agents are scripted MCP clients with fixed arguments, and say so. Without a key, invoices and speech are read by keyword rules instead of Claude, and each payout's trail names the reader.
+
 ## Use it from an agent (MCP)
 
 Any agent can connect: Claude Code (also as a plugin), claude.ai, ChatGPT, Cursor, OpenClaw, or the assistant you text from iMessage. See [docs/CONNECT.md](docs/CONNECT.md). Agents forward invoices; only the owner approves, from a one-tap link.

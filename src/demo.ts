@@ -1,6 +1,8 @@
 // The demo, driven the way real users drive Sayso: AI agents through the MCP tools, a business
 // through its invoice inbox. Runs against the live sandboxes, or fully offline with --offline.
-//   1. Three agents pay real-world invoices through Sayso's MCP tool (x402 on Metal -> Airwallex).
+//   1. Three scripted agents (fixed arguments, no model) pay invoices through Sayso's MCP tool
+//      (x402 on Metal -> Airwallex); then, with ANTHROPIC_API_KEY set, Claude itself reads an
+//      invoice email and pays it through the same tools, deciding each call on its own.
 //   2. A marketplace agent pays four sellers with one x402 payment (batch payouts).
 //   3. A business forwards invoices; one tap pays them. A fake "landlord" asking for new bank details is held.
 //   4. A payout bounces (closed account): the agent is refunded in full under a Metal refund mandate.
@@ -12,7 +14,9 @@
 //   9. A compromised agent tries to drain the earnings to an attacker: Metal refuses it on chain.
 //  10. Reconciliation: every cent explained.
 
+import Anthropic from "@anthropic-ai/sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { hasClaudeCredentials, runClaudePayer } from "./agent/claude-payer.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { existsSync, readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
@@ -62,7 +66,7 @@ const payee = (name: string, iban: string, city: string) => ({
 });
 
 // ---- 1. agents pay invoices over MCP ----
-await beat(1, "three AI agents pay real-world invoices through Sayso's MCP tool");
+await beat(1, "three scripted agents pay real-world invoices through Sayso's MCP tool, then Claude pays one on its own");
 const buyers = simPayers
   ? ["0xA9e0000000000000000000000000000000000001", "0xA9e0000000000000000000000000000000000002", "0xA9e0000000000000000000000000000000000003"]
   : (process.env.METAL_BUYER_KEYS ?? "").split(",").filter(Boolean);
@@ -76,6 +80,17 @@ for (const [i, a] of agents.entries()) {
   const r = result(await a.callTool({ name: "pay_invoice", arguments: { ...jobs[i]!, max_usdz: "400" } }));
   emit("observe", `buyer-agent-${i + 1}: ${r.paid ? `paid quote ${String(r.quote_id).slice(0, 8)}, HTTP ${r.http_status}` : `not paid: ${r.reason ?? r.status}`}`);
 }
+// Claude, not a script: it gets an invoice email and Sayso's tools, and decides what to call.
+if (hasClaudeCredentials() && buyers[2]) {
+  const claude = await agent("claude-payer", buyers[2]);
+  const run = await runClaudePayer({
+    client: new Anthropic(), mcp: claude,
+    task: `Pay this invoice. Your limit is 200 USDZ.\n\n<invoice>\nFrom: Etiqueta SL <facturas@etiqueta.example>\nInvoice 2026-311, data labelling. Amount due: EUR ${amt("42.00")}. Etiqueta SL, Calle de Alcala 1, 28014 Madrid, Spain. IBAN ES91 2100 0418 4502 0005 1332.\n</invoice>`,
+    onStep: (s) => emit("observe", `Claude called ${s.tool}: ${s.result.replace(/\s+/g, " ").slice(0, 160)}`),
+  }).catch((e) => ({ summary: `Claude run failed: ${String(e).slice(0, 200)}`, steps: [], model: "", turns: 0, stopReason: "error" }));
+  emit("observe", `Claude (${run.model || "no answer"}): ${run.summary}`);
+  await claude.close();
+} else emit("observe", "No ANTHROPIC_API_KEY: skipping the Claude agent. The three agents above are scripted MCP clients with fixed arguments.");
 await settle();
 
 // ---- 2. batch payouts ----

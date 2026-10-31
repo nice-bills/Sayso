@@ -160,7 +160,9 @@ export class PayoutService {
     const id = randomUUID();
     const findings = r.invoice_text ? await this.read(r.invoice_text) : undefined;
     if (findings) {
-      this.d.trail?.add(id, "read", `Claude read the invoice: ${findings.summary}`, {
+      // Say which reader it was: without ANTHROPIC_API_KEY the keyword rules stand in for Claude.
+      const byClaude = (findings as { reader?: string }).reader !== "keywords";
+      this.d.trail?.add(id, "read", `${byClaude ? "Claude" : "The keyword reader (no Claude key)"} read the invoice: ${findings.summary}`, {
         kind: findings.kind, asks_for_new_bank_details: findings.requestsNewBankDetails, pressure_tactics: findings.pressureTactics, citations: findings.citations,
       }, undefined, now);
     }
