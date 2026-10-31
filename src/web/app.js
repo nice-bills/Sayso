@@ -263,12 +263,14 @@ function stage() {
   if (stageEl) return stageEl;
   const st = { rate_drift_pct: 0.3, spendable_usdz: 820, risk: "allow", due_in_days: 6 };
   const COLORS = { pay: "pay", wait: "wait", split: "split", hold: "hold", reject: "hold" };
-  const reason = h("p", { class: "b-reason", "aria-live": "polite" });
+  const word = h("div", { class: "v-word", "aria-hidden": "true" });
+  const verdictSr = h("span", { class: "sr", "aria-live": "polite" });
+  const reason = h("p", { class: "b-reason" });
   const mode = h("span", { class: "b-live" }, "Playing a run");
-  const val = {}, sub = {}, dial = {};
-  const mk = (key, label, control, note) => {
-    val[key] = h("div", { class: "d-val" }); sub[key] = h("div", { class: "d-sub" }, note ?? "");
-    return (dial[key] = h("div", { class: "dial" }, h("div", { class: "d-label" }, h("span", {}, label), h("i", {}, "Decided it")), val[key], control, sub[key]));
+  const val = {}, dial = {};
+  const mk = (key, label, control) => {
+    val[key] = h("div", { class: "d-val" });
+    return (dial[key] = h("div", { class: "dial" }, h("div", { class: "d-label" }, h("span", {}, label), h("i", {}, "Decided it")), val[key], control));
   };
   const drift = h("input", { type: "range", id: "b-drift", min: -1, max: 4, step: 0.1, value: st.rate_drift_pct, "aria-label": "EUR rate against this week's median, percent", oninput: (e) => change({ rate_drift_pct: Number(e.target.value) }) });
   const spend = h("input", { type: "range", id: "b-spend", min: 0, max: 1000, step: 10, value: st.spendable_usdz, "aria-label": "USDZ the agent can spend", oninput: (e) => change({ spendable_usdz: Number(e.target.value) }) });
@@ -276,70 +278,70 @@ function stage() {
   const risk = seg("risk", [["allow", "Paid before"], ["newbank", "New bank details"], ["mismatch", "Name mismatch"]]);
   const due = seg("due_in_days", [[6, "In 6 days"], [1, "Tomorrow"]]);
   const dials = h("div", { class: "dials" },
-    mk("price", "Price", drift), mk("balance", "Balance", spend), mk("risk", "Risk", risk),
-    mk("deadline", "Due", due, "A bill due within 2 days stops waiting for a better rate."));
+    mk("price", "Price", drift), mk("balance", "Balance", spend), mk("risk", "Payee", risk), mk("deadline", "Due", due));
 
-  // where the money is: the agent's USDZ, escrow on Metal, the Airwallex payout, the payee's bank
-  const POS = [6, 35, 65, 94];
-  const nodes = POS.map((x) => h("span", { class: "node", style: `left:${x}%` }));
-  const names = [["Metal", "Agent's USDZ"], ["Metal", "Escrow"], ["Airwallex", "EUR payout"], ["SEPA", "Payee's bank"]].map(([k, n], i) => h("span", { class: "node-l", style: `left:${POS[i]}%` }, h("small", {}, k), n));
+  // The wire: Claude asks, Sayso decides, Metal holds the USDZ, Airwallex pays out, the payee is paid.
+  const POS = [2, 26, 51, 76, 98];
+  const STATIONS = [["Claude", "asks"], ["Sayso", "decides"], ["Metal", "USDZ"], ["Airwallex", "EUR"], ["Kreuzberg", "paid"]];
+  const nodes = POS.map((x, i) => h("span", { class: `node${i === 1 ? " v-gate" : ""}`, style: `left:${x}%` }));
+  const names = STATIONS.map(([k, n], i) => h("span", { class: `node-l${i === 0 ? " first" : i === POS.length - 1 ? " last" : ""}`, style: `left:${POS[i]}%` }, k, h("small", {}, n)));
   const coin = h("span", { class: "coin" }, h("span", { class: "tag" })), coin2 = h("span", { class: "coin hidden" }, h("span", { class: "tag" }));
-  const track = h("div", { class: "track" }, h("span", { class: "line" }), nodes, names, coin, coin2);
+  const line = h("span", { class: "line" }), lit = h("span", { class: "line lit" });
+  const track = h("div", { class: "track" }, line, lit, nodes, names, coin, coin2);
   const railNote = h("p", { class: "rail-note" });
   let railTok = 0;
   const place = (c, x) => { c.style.left = `${x}%`; };
+  const reach = (x) => { lit.style.width = `${Math.max(0, x - POS[0])}%`; };
   const travel = (c, stops, tok) => stops.reduce((p, to) => p.then(() => new Promise((done) => {
     if (tok !== railTok) return done();
     const from = parseFloat(c.style.left) || POS[0];
-    if (stillMotion) { place(c, to); nodes[POS.indexOf(to)].classList.add("lit"); return done(); }
+    if (stillMotion) { place(c, to); reach(to); return done(); }
     const t0 = performance.now();
     const step = (t) => {
       if (tok !== railTok) return done();
-      const k = Math.min(1, (t - t0) / 650);
-      place(c, from + (to - from) * (1 - (1 - k) ** 3));
-      if (k < 1) requestAnimationFrame(step); else { nodes[POS.indexOf(to)].classList.add("lit"); done(); }
+      const k = Math.min(1, (t - t0) / 700), x = from + (to - from) * (1 - (1 - k) ** 3);
+      place(c, x); if (c === coin) reach(x);
+      if (k < 1) requestAnimationFrame(step); else done();
     };
     requestAnimationFrame(step);
   })), Promise.resolve());
   const tag = (c, t) => { c.firstChild.textContent = t; };
   function rail(d) {
     const tok = ++railTok, i = d.inputs;
-    nodes.forEach((n) => n.classList.remove("lit", "shut"));
+    track.classList.remove("cut");
     coin.classList.remove("parked"); coin2.classList.remove("parked"); coin2.classList.add("hidden");
-    place(coin, POS[0]); nodes[0].classList.add("lit"); tag(coin, `${i.price_usdz} USDZ`);
+    place(coin, POS[0]); reach(POS[0]); tag(coin, `${i.price_usdz} USDZ`);
     if (d.verdict === "pay") {
-      railNote.textContent = "Paid over x402 on Metal. It sits in escrow until Airwallex delivers, then it's released.";
-      travel(coin, [POS[1]], tok).then(() => { if (tok === railTok) tag(coin, "€480.00"); return travel(coin, [POS[2], POS[3]], tok); })
-        .then(() => { if (tok === railTok) railNote.textContent = "Delivered €480.00 by SEPA. The escrow is released to the ramp."; });
+      railNote.textContent = "Paid over x402 on Metal, held in escrow until Airwallex delivers, then released.";
+      travel(coin, [POS[1], POS[2]], tok).then(() => { if (tok === railTok) tag(coin, "€480.00"); return travel(coin, [POS[3], POS[4]], tok); })
+        .then(() => { if (tok === railTok) railNote.textContent = "Delivered €480.00 to Kreuzberg Studio by SEPA. The escrow is released."; });
     } else if (d.verdict === "wait" && d.until?.rate_within_pct !== undefined) {
-      railNote.textContent = `Paid into escrow on Metal. It stays there until the rate is back within ${d.until.rate_within_pct}%, or until ${new Date(d.until.by).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}.`;
-      travel(coin, [POS[1]], tok).then(() => { if (tok === railTok) coin.classList.add("parked"); });
+      railNote.textContent = `The USDZ waits in escrow on Metal until EUR is back within ${d.until.rate_within_pct}%, or until ${new Date(d.until.by).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}.`;
+      travel(coin, [POS[1], POS[2]], tok).then(() => { if (tok === railTok) coin.classList.add("parked"); });
     } else if (d.verdict === "wait") {
-      coin.classList.add("parked"); tag(coin, `${i.spendable_usdz} USDZ`);
-      railNote.textContent = "Nothing moves until the next earnings sweep tops the budget up.";
+      tag(coin, `${i.spendable_usdz} USDZ`);
+      railNote.textContent = "Not enough budget yet. Nothing moves until the next earnings sweep tops it up.";
+      travel(coin, [POS[1] - 6], tok).then(() => { if (tok === railTok) coin.classList.add("parked"); });
     } else if (d.verdict === "split") {
       const [now, later] = d.tranches;
-      coin2.classList.remove("hidden"); place(coin2, POS[0]); tag(coin2, `€${later.amount} later`); coin2.classList.add("parked");
-      tag(coin, `€${now.amount}`);
+      coin2.classList.remove("hidden"); place(coin2, POS[1] - 6); tag(coin2, `€${later.amount} later`); coin2.classList.add("parked");
+      tag(coin, `€${now.amount} now`);
       railNote.textContent = `€${now.amount} goes now. €${later.amount} follows the next earnings sweep.`;
-      travel(coin, [POS[1], POS[2], POS[3]], tok);
+      travel(coin, [POS[1], POS[2], POS[3], POS[4]], tok);
     } else {
-      nodes[2].classList.add("shut"); coin.classList.add("parked");
-      railNote.textContent = "Nothing is paid. It waits for the owner's call.";
+      track.classList.add("cut");
+      railNote.textContent = "Stopped at the gate. Nothing is paid until you make the call.";
+      travel(coin, [POS[1] - 4], tok).then(() => { if (tok === railTok) coin.classList.add("parked"); });
     }
   }
 
-  const boardEl = h("div", { class: "board", role: "group", "aria-label": "What the agent decides" },
-    h("div", { class: "b-head" }, h("span", {}, "INV-2026-114 · Kreuzberg Studio GmbH · €480.00 · forwarded by Claude"), mode),
-    h("div", { class: "b-main" },
-      h("div", { class: "b-verdict" }, flaps("land:verdict", "", { len: 5, size: "xl" })),
-      h("div", { class: "b-why" },
-        h("div", { class: "b-row" }, h("span", { class: "b-k" }, "Decided by"), flaps("land:by", "", { len: 8, size: "sm" })),
-        h("div", { class: "b-row" }, h("span", { class: "b-k" }, "Costs"), flaps("land:cost", "", { len: 11, size: "sm" })),
-        reason)),
-    dials,
-    h("div", { class: "rail" }, h("div", { class: "b-head" }, h("span", {}, "Where the money is"), h("button", { type: "button", class: "b-replay", onclick: () => play() }, "Replay")), track, railNote),
-  );
+  // The word: each letter drops in, so a change of verdict reads from across a room.
+  let shownWord = "";
+  function setWord(w) {
+    if (w === shownWord) return;
+    shownWord = w;
+    word.replaceChildren(...[...w].map((ch, i) => h("span", { style: `--i:${i}` }, ch)));
+  }
 
   let lastVerdict = null, seq = 0;
   async function decideNow() {
@@ -348,20 +350,15 @@ function stage() {
     try { r = await api("/v1/decide/preview", st); } catch { return; }
     if (mine !== seq) return;
     const d = r.decision, i = d.inputs, tone = COLORS[d.verdict];
-    boardEl.dataset.tone = tone;
-    flaps("land:verdict", VERDICT[d.verdict] ?? d.verdict, { len: 5, size: "xl", tone });
-    flaps("land:by", d.decided_by === "deadline" ? "DUE DATE" : d.decided_by, { len: 8, size: "sm" });
-    flaps("land:cost", `${i.price_usdz} USDZ`, { len: 11, size: "sm" });
+    stageEl.dataset.tone = tone;
+    setWord((VERDICT[d.verdict] ?? d.verdict).toUpperCase());
+    verdictSr.textContent = VERDICT[d.verdict] ?? d.verdict;
     const [lead, ...rest] = d.reason.split(":");
     reason.replaceChildren(h("b", {}, `${lead}:`), rest.join(":"));
-    const decider = d.decided_by;
-    for (const [k, el] of Object.entries(dial)) el.classList.toggle("decider", k === decider);
-    val.price.textContent = `${r.rate.toFixed(4)} USD/EUR`;
-    sub.price.textContent = `${st.rate_drift_pct >= 0 ? "+" : ""}${st.rate_drift_pct.toFixed(1)}% against this week's median of ${r.median}. Over +1.5% waits.`;
-    val.balance.textContent = `${st.spendable_usdz} USDZ`;
-    sub.balance.textContent = `What the agent can spend now. This bill costs ${i.price_usdz}.`;
+    for (const [k, el] of Object.entries(dial)) el.classList.toggle("decider", k === d.decided_by);
+    val.price.textContent = `${st.rate_drift_pct >= 0 ? "+" : ""}${st.rate_drift_pct.toFixed(1)}% on the median`;
+    val.balance.textContent = `${st.spendable_usdz} of ${i.price_usdz} USDZ`;
     val.risk.textContent = st.risk === "allow" ? "Checks out" : "Held";
-    sub.risk.textContent = st.risk === "allow" ? "The same account as the last paid invoice." : st.risk === "newbank" ? "The invoice asks to pay new bank details." : "The bank says the account is Mark Lehmann's.";
     val.deadline.textContent = st.due_in_days <= 1 ? "Tomorrow" : `In ${st.due_in_days} days`;
     for (const b of risk.children) b.setAttribute("aria-pressed", String(b.dataset.v === st.risk));
     for (const b of due.children) b.setAttribute("aria-pressed", String(Number(b.dataset.v) === st.due_in_days));
@@ -370,36 +367,37 @@ function stage() {
     if (key !== lastVerdict) { lastVerdict = key; rail(d); }
   }
   // The run: each beat changes one input, the way someone trying it would.
-  const BEATS = [{ rate_drift_pct: 0.3, spendable_usdz: 820, risk: "allow", due_in_days: 6 }, { rate_drift_pct: 2.4 }, { due_in_days: 1 }, { rate_drift_pct: 0.3, due_in_days: 6, spendable_usdz: 310 }, { spendable_usdz: 820, risk: "newbank" }];
+  const BEATS = [{ rate_drift_pct: 0.3, spendable_usdz: 820, risk: "allow", due_in_days: 6 }, { rate_drift_pct: 2.4 }, { due_in_days: 1 }, { rate_drift_pct: 0.3, due_in_days: 6, spendable_usdz: 310 }, { spendable_usdz: 820, risk: "mismatch" }];
   let beat = 0, timer = null;
   function play() {
     clearTimeout(timer); beat = 0; mode.textContent = "Playing a run"; mode.classList.remove("you");
-    const tick = () => { Object.assign(st, BEATS[beat]); decideNow(); beat = (beat + 1) % BEATS.length; timer = setTimeout(tick, 3800); };
+    const tick = () => { Object.assign(st, BEATS[beat]); decideNow(); beat = (beat + 1) % BEATS.length; timer = setTimeout(tick, 4200); };
     tick();
   }
   function change(c) {
     if (timer) { clearTimeout(timer); timer = null; mode.textContent = "You're driving"; mode.classList.add("you"); }
     Object.assign(st, c); decideNow();
   }
-  play();
 
-  stageEl = h("section", { class: "l-stage", id: "board" },
+  stageEl = h("section", { class: "l-stage v-hero", id: "board", "aria-label": "What Sayso decides" },
     h("div", { class: "stage-in" },
       h("header", { class: "l-top" }, brand(),
         h("nav", { class: "l-nav", "aria-label": "Sections" },
           h("a", { href: "#prove" }, "Prove it"), h("a", { href: "#refuses" }, "What it holds"),
           h("a", { class: "l-signin", href: "#signin", onclick: toToken }, "Sign in"))),
-      h("div", { class: "l-hero-copy" },
-        h("h1", {}, "Your agent wants to pay €480", h("br"), h("span", { class: "soft" }, "Sayso decides how")),
-        h("div", { class: "l-side" },
-          h("p", { class: "l-lede" }, "Price, balance and risk go in. Pay, wait, split or hold comes out, decided in code before a cent moves on Metal or Airwallex."),
+      h("div", { class: "v-main" },
+        h("h1", { class: "sr" }, "Sayso decides how your agent pays: pay, wait, split or hold"),
+        word, verdictSr,
+        h("div", { class: "v-why" },
+          h("p", { class: "v-ask" }, "Claude wants to pay Kreuzberg Studio €480"),
+          reason,
           h("div", { class: "l-actions" },
             h("a", { class: "l-btn", href: "#signin", onclick: toToken }, "Open the demo"),
-            h("a", { class: "l-btn quiet", href: "#prove" }, "See the proof"))),
-      ),
-      boardEl,
-      h("p", { class: "l-rails" }, "Settles in USDZ on Metal testnet. Pays out in EUR, GBP and USD through the Airwallex sandbox. Asked from Claude, ChatGPT or any MCP agent."),
+            h("a", { class: "l-btn quiet", href: "#prove" }, "See the proof")))),
+      h("div", { class: "rail" }, track, h("div", { class: "rail-foot" }, railNote, h("span", { class: "rail-ctl" }, mode, h("button", { type: "button", class: "b-replay", onclick: () => play() }, "Replay")))),
+      dials,
     ));
+  play();
   return stageEl;
 }
 const toToken = () => setTimeout(() => document.getElementById("token")?.focus({ preventScroll: true }), 600);
@@ -442,9 +440,14 @@ function proveSection() {
     : String(v))]);
   return (proveEl = h("section", { id: "prove", class: "l-sheet" },
     h("div", { class: "sheet-in" },
-      h("span", { class: "eyebrow" }, "Prove it"),
-      h("h2", {}, "When an agent’s payment is questioned, Sayso shows its work"),
-      h("p", { class: "lede" }, "For disputes and merchant checks. Every payout keeps a chain of proof anyone can check without trusting Sayso. Change a line of the receipt, then hash it again."),
+      h("div", { class: "scene" },
+        h("div", { class: "scene-copy" },
+          h("span", { class: "eyebrow" }, "Prove it"),
+          h("h2", { class: "serif" }, "Claude tried to pay. ", h("em", {}, "Sayso said no.")),
+          h("p", { class: "lede" }, "The invoice looked right. The bank said the account belonged to someone else, so the €480 never left. When a payment is questioned later, by you, a merchant or a dispute, Sayso can show exactly why it paid or didn't.")),
+        stampedInvoice()),
+      h("h3", { class: "sub-h" }, "And every payout that does go through carries proof anyone can check"),
+      h("p", { class: "lede" }, "No need to trust Sayso. Change a line of the receipt, then hash it again."),
       h("div", { class: "l-prove" },
         h("div", {},
           h("ol", { class: "chain" }, CHAIN.map(([t, p, who]) => h("li", { class: "link ok" }, h("span", { class: "tick" }, "✓"), h("div", {}, h("h3", {}, t), h("p", {}, p)), h("span", { class: "who" }, who))), last),
@@ -456,6 +459,28 @@ function proveSection() {
           h("p", { class: "r-hint" }, "The amount and reference are editable. In the app, every paid payout has its own receipt and anchor.")),
       ),
     )));
+}
+
+// The held invoice, stamped. The stamp lands when the section scrolls into view.
+function stampedInvoice() {
+  const line = (k, v, cls = "") => h("div", { class: "iv-l" }, h("span", {}, k), h("span", { class: cls }, v));
+  const el = h("div", { class: "iv-wrap" },
+    h("div", { class: "iv-chat" }, h("small", {}, "Claude · 09:41"), "Paying Kreuzberg Studio €480 for INV-2026-114 now."),
+    h("div", { class: "iv" },
+      h("span", { class: "iv-k" }, "Invoice · INV-2026-114"),
+      h("div", { class: "iv-who" }, "Kreuzberg Studio GmbH"),
+      line("Brand refresh, phase 2", "€480.00"),
+      line("Pay to", "DE44 5001 0517 5407 3249 31", "iv-mark"),
+      line("Due", "5 Nov 2026"),
+      line("Note", "“Our bank changed”"),
+      h("div", { class: "iv-tot" }, "€480.00")),
+    h("div", { class: "iv-stamp", "aria-hidden": "true" }, "HELD", h("small", {}, "Name does not match")),
+    h("p", { class: "iv-note" }, "Bank says this account is Mark Lehmann’s, not Kreuzberg’s"));
+  if ("IntersectionObserver" in window && !stillMotion) {
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { el.classList.add("stamped"); io.disconnect(); } }, { threshold: 0.45 });
+    io.observe(el);
+  } else el.classList.add("stamped");
+  return el;
 }
 
 function refusesSection() {
