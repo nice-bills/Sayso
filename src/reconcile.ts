@@ -54,7 +54,7 @@ export type BookFlows = Omit<CurrencyFlows, "openingMinor" | "closingMinor">;
  * Builds the recorded flows from our own books (settled ops and credited sweeps).
  * Opening/closing balances and observed deposits come from Airwallex.
  */
-export function flowsFromBooks(store: Store, ledger: RampLedger, rampCurrency: string, before?: BooksBefore): Record<string, BookFlows> {
+export function flowsFromBooks(store: Store, ledger: RampLedger, rampCurrency: string, before?: BooksBefore, opts: { cardOnAirwallex?: boolean } = {}): Record<string, BookFlows> {
   const out: Record<string, BookFlows> = {};
   const f = (ccy: string) => (out[ccy] ??= { depositsMinor: 0, boughtMinor: 0, soldMinor: 0, payoutsMinor: 0, feesMinor: 0, cardSpendMinor: 0 });
   f(rampCurrency).depositsMinor += rampSince(ledger, rampCurrency, before).creditedMinor;
@@ -73,7 +73,8 @@ export function flowsFromBooks(store: Store, ledger: RampLedger, rampCurrency: s
       continue;
     }
     if (op.status !== "settled") continue;
-    if (op.kind === "card_spend") f(op.currency).cardSpendMinor += op.amountMinor;
+    // A card running on the simulator (the sandbox wouldn't issue one) never touches the Airwallex balance.
+    if (op.kind === "card_spend" && opts.cardOnAirwallex !== false) f(op.currency).cardSpendMinor += op.amountMinor;
     if (op.kind === "convert") {
       f(op.currency).boughtMinor += op.amountMinor;
       const sell = op.detail ? (JSON.parse(op.detail) as { sell_currency?: string; sell_minor?: number }) : {};

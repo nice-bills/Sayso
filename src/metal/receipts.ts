@@ -74,7 +74,15 @@ export class MetalAnchorer implements Anchorer {
     return METAL_RECEIPT_KEY && METAL_RPC_URL ? new MetalAnchorer(METAL_RECEIPT_KEY as Hex, METAL_RPC_URL) : undefined;
   }
 
-  async anchor(hash: Hex) {
+  // One anchor at a time: two sent together from the same key race for the same nonce.
+  private queue: Promise<unknown> = Promise.resolve();
+  anchor(hash: Hex): Promise<{ tx: string; explorer?: string }> {
+    const next = this.queue.then(() => this.send(hash));
+    this.queue = next.catch(() => undefined);
+    return next;
+  }
+
+  private async send(hash: Hex) {
     const { sendMip20Call } = await import("@metalntwx/metal-ts");
     const tx = await sendMip20Call({ walletClient: this.wallet, publicClient: this.client, to: this.address, data: anchorData(hash), gasToken: USDZ, gasFallback: 80_000n });
     const receipt = await this.client.waitForTransactionReceipt({ hash: tx });

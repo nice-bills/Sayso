@@ -109,7 +109,9 @@ export class Airwallex {
       body: body ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();
-    const parsed = text ? JSON.parse(text) : {};
+    let parsed: unknown = {};
+    // A gateway in front of Airwallex can answer with plain text (an upstream timeout): treat it as a 5xx.
+    try { parsed = text ? JSON.parse(text) : {}; } catch { throw new AirwallexError(res.ok ? 502 : res.status, undefined, text.slice(0, 200), path); }
     if (!res.ok) throw new AirwallexError(res.status, (parsed as { code?: string }).code, parsed, path);
     return parsed as T;
   }

@@ -8,8 +8,9 @@
 //   6. Sayso runs its own treasury: an email lowers the earnings forecast, the policy re-plans
 //      hold / convert / pay for its bills, and the backtest over real ECB rates is shown.
 //   7. The agent pays its compute bill with its own Airwallex card; a bad charge freezes the card.
-//   8. A compromised agent tries to drain the earnings to an attacker: Metal refuses it on chain.
-//   9. Reconciliation: every cent explained.
+//   8. Prove it: an agent disputes two of its payouts and Sayso answers each from the proof.
+//   9. A compromised agent tries to drain the earnings to an attacker: Metal refuses it on chain.
+//  10. Reconciliation: every cent explained.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -130,7 +131,7 @@ await settle(1);
 await beat(6, "Sayso plans its own bills: hold, convert or pay, and an email changes the plan");
 const treasury = cs.treasury();
 treasury.inbox.push(churnEmail);
-await treasury.tick();
+await treasury.tick().catch((err) => emit("escalate", `Treasury tick failed: ${String(err).slice(0, 160)}`));
 if (existsSync("results/backtest.json")) {
   const bt = JSON.parse(readFileSync("results/backtest.json", "utf8")) as { seeds: number; data: { from: string; to: string }; meanPerRun: Record<"policy" | "baseline", { missedBills: number; reserveBreaches: number; spreadPaidMinor: number }> };
   const p = bt.meanPerRun.policy, b = bt.meanPerRun.baseline;
@@ -145,14 +146,46 @@ if (await cs.cardReady()) {
   await cs.card.simulateBill("GPU RESELLER LTD", "7372", 9_000); // allowed category, unknown merchant: Sayso freezes the card
 }
 
-// ---- 8. heist ----
-await beat(8, "a compromised agent tries to drain the earnings to an attacker");
+// ---- 8. prove it ----
+await beat(8, "an agent questions two of its payouts; Sayso answers each from the proof");
+{
+  const ofAgent = (reference: string) => cs.svc.book.list(500).find((p) => p.reference === reference && p.buyer && !p.buyer.startsWith("internal:"));
+  // Live sandbox: transfers sit in PROCESSING until the simulation moves them, so deliver these two first.
+  if (!offline && "simulateTransfer" in cs.awx) {
+    for (const ref of ["Translation Oct", "Data labelling"]) {
+      const t = ofAgent(ref)?.transferId;
+      if (!t || ofAgent(ref)?.status !== "submitted") continue;
+      await (cs.awx as Airwallex).simulateTransfer(t, { next_status: "SENT" }).catch(() => undefined);
+      await (cs.awx as Airwallex).simulateTransfer(t, { next_status: "PAID" }).catch((e) => emit("observe", `Could not mark ${t.slice(0, 8)} paid: ${String(e).slice(0, 120)}`));
+    }
+    await settle(2);
+  }
+  const paidFor = (reference: string) => { const p = ofAgent(reference); return p?.status === "paid" ? p : undefined; };
+  // buyer-agent-3: "never arrived", against a transfer Airwallex reports as paid. Denied, and the answer is anchored on Metal.
+  const labelling = paidFor("Data labelling");
+  if (labelling && agents[2]) {
+    const proof = result(await agents[2].callTool({ name: "prove_payout", arguments: { payout_id: labelling.id } }));
+    emit("observe", `Proof for ${labelling.payeeName}: ${proof.evidence?.map((e: { id: string; status: string }) => `${e.id} ${e.status}`).join(", ")}`);
+    const d = result(await agents[2].callTool({ name: "dispute_payout", arguments: { payout_id: labelling.id, claim: "not_delivered", note: "the payee says nothing arrived" } }));
+    emit("observe", `buyer-agent-3 disputed ${labelling.payeeName} (never arrived): ${d.dispute?.verdict}. ${d.dispute?.reason ?? d.error}`);
+  }
+  // buyer-agent-1's owner: "wasn't allowed", against a payment from a bare key under no mandate. Upheld, refunded on Metal.
+  const translation = paidFor("Translation Oct");
+  if (translation && agents[0]) {
+    const d = result(await agents[0].callTool({ name: "dispute_payout", arguments: { payout_id: translation.id, claim: "not_authorized", note: "the owner never allowed this" } }));
+    emit("observe", `buyer-agent-1 disputed ${translation.payeeName} (wasn't allowed): ${d.dispute?.verdict}. ${d.dispute?.reason ?? d.error}`);
+    await settle(1);
+  }
+}
+
+// ---- 9. heist ----
+await beat(9, "a compromised agent tries to drain the earnings to an attacker");
 await cs.attemptHeist(getAddress("0x9f3a6c0b9a2b9e3d7f1c5ae4b2d8c6e0f1a2b3c4"), 25_000);
 
-// ---- 9. reconcile ----
-await beat(9, "reconcile every cent");
-// Live: a simulated Airwallex deposit sits PENDING for a second or two before the balance shows it.
-if (!offline) await sleep(5000);
+// ---- 10. reconcile ----
+await beat(10, "reconcile every cent");
+// Live: a simulated Airwallex deposit, or a bounced transfer's return, takes a few seconds to reach the balance.
+if (!offline) await sleep(15_000);
 await cs.reconcileNow();
 
 for (const a of agents) await a.close();

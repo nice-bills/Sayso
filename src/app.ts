@@ -187,9 +187,11 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     else if (r.outcome === "rejected") emit("refuse", `Sweep ${e.epoch} not credited: ${r.sweep.reason}`);
   }
 
+  // Set once the live sandbox refuses to issue a card and the simulator stands in for it.
+  let cardSimulated = false;
   async function reconcileNow() {
     lastBalances = await balances();
-    const books = flowsFromBooks(store, ledger, "USD", before);
+    const books = flowsFromBooks(store, ledger, "USD", before, { cardOnAirwallex: !cardSimulated });
     const currencies: Record<string, CurrencyFlows> = {};
     for (const ccy of new Set([...Object.keys(opening), ...Object.keys(lastBalances), ...Object.keys(books)])) {
       const b = books[ccy] ?? { depositsMinor: 0, boughtMinor: 0, soldMinor: 0, payoutsMinor: 0, feesMinor: 0, cardSpendMinor: 0 };
@@ -517,6 +519,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
       // same category and amount rules; its ids start with sim: so nobody mistakes them for Airwallex's.
       emit("observe", `Airwallex would not issue the agent card (${String(err).slice(0, 120)}); using the simulated card, which applies the same limits`);
       card = new AgentCard(new FakeAirwallex({}) as unknown as CardPort, store);
+      cardSimulated = true;
       return card.issue("agent@sayso.example", "Sayso Agent");
     }
   }
