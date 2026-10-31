@@ -440,7 +440,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     res.json({ payout: publicView(p), steps: trail.for(p.id), receipts: receipts.get(p.id), disputes: disputes.for(p.id) });
   });
   // What the agent would decide with one input changed. Sandbox and offline only; nothing moves.
-  app.post("/v1/payouts/:id/what-if", auth.requireOwner, express.json(), (req, res) => {
+  app.post("/v1/payouts/:id/what-if", auth.requireOwnerOrViewer, express.json(), (req, res) => {
     if (!sandbox && !opts.offline) return void res.status(404).json({ error: "what-if is only on the sandbox" });
     const p = svc.book.get(String(req.params.id));
     if (!p?.decision) return void res.status(404).json({ error: "no decision for this payout" });

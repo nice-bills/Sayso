@@ -524,9 +524,13 @@ function signinDialog() {
   });
   const mail = run(async () => { note.textContent = (await api("/auth/email", { email })).message; });
   const tokenIn = run(async () => { await api("/auth/login", { token }); await signedIn(); });
+  const look = run(async () => { await api("/auth/viewer", {}); await signedIn(); });
   const or = (t) => h("div", { class: "or" }, h("span", {}, t));
   return h("div", { class: "dialog", "data-ui": "" },
     h("h3", {}, state.claim || state.connect ? "Sign in to connect your agent" : "Sign in to Sayso"),
+    m.viewer && !state.claim && !state.connect ? h("button", { class: "btn wide look", type: "button", onclick: look }, "Look around, read-only") : null,
+    m.viewer && !state.claim && !state.connect ? h("p", { class: "small muted" }, "Judging, or just curious? See everything the owner sees, on ", m.demo ? "the offline demo" : "the live Airwallex sandbox and Metal testnet", ". Nothing you do can pay or change anything.") : null,
+    m.viewer && !state.claim && !state.connect ? or("or, if you're the owner") : null,
     m.passkey && canPasskey() ? h("button", { class: "btn pay wide", type: "button", onclick: passkey }, icon("face", 18), "Use Face ID or a passkey") : null,
     m.email ? h("form", { class: "row-form", onsubmit: mail },
       h("label", { class: "sr", for: "email" }, "Email"),
@@ -639,7 +643,7 @@ function connectView() {
 /** Offered once signed in, until there's a passkey: Face ID becomes the way in and the way to pay. */
 /** A small header button until the owner has a passkey: approving with a face or fingerprint is something an agent can't fake. */
 function passkeyButton(iconOnly = false) {
-  if (!state.me || state.me.passkeys || !canPasskey()) return null;
+  if (!state.me || state.me.viewer || state.me.passkeys || !canPasskey()) return null;
   return h("button", { class: "btn quiet small faceid", title: "Sign in and approve payments with your face or fingerprint. An agent can't fake it.", disabled: state.busy.passkey, onclick: () => act("passkey", addPasskey, "Face ID is on. You'll use it to sign in and to pay.") },
     icon("face", iconOnly ? 20 : 16), iconOnly ? null : h("span", { class: "tab-label" }, "Turn on Face ID"));
 }
@@ -682,6 +686,7 @@ function appView() {
       h("div", { class: "top-right" },
         passkeyButton(),
         s?.balances?.USD ? h("span", { class: "bal" }, "Available ", h("b", {}, money(s.balances.USD / 100, "USD"))) : null,
+        state.me?.viewer ? h("span", { class: "mode read-only", title: "You can look, but nothing you do pays or changes anything" }, "Read-only") : null,
         s ? h("span", { class: "mode", title: s.offline ? "Airwallex and Metal are simulated" : "Real Airwallex and Metal APIs" }, h("span", { class: `dot${s.offline ? "" : " live"}` }), s.offline ? "Offline demo" : s.sandbox ? "Sandbox" : "Live") : null,
         h("a", { class: "btn quiet icon-btn", href: "/ops/", target: "_blank", rel: "noopener", title: "Back office", "aria-label": "Back office" }, icon("ledger", 18)),
         h("button", { class: "btn quiet icon-btn", title: "Sign out", "aria-label": "Sign out", onclick: async () => { await api("/auth/logout", {}); state.me = await api("/auth/me").catch(() => state.me); state.signedIn = false; render(); } }, icon("out", 18)),
@@ -1601,8 +1606,8 @@ function connectAgents(origin) {
   try {
     const me = await api("/auth/me");
     state.me = me;
-    state.signedIn = me.owner;
-    if (me.owner) { await load(); goLive(); }
+    state.signedIn = me.owner || me.viewer;
+    if (state.signedIn) { await load(); goLive(); }
   } catch { state.signedIn = false; }
   render();
 })();

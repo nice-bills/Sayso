@@ -3,6 +3,9 @@
 //   a one-time link emailed to OWNER_EMAIL through AgentMail, for a new device;
 //   Google, when GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set and the account is OWNER_EMAIL;
 //   the owner token (OWNER_TOKEN), for scripts and the offline demo.
+// With SAYSO_VIEWER=on (and always offline), anyone can also look around read-only: every view
+// the owner has, but nothing that pays, approves or changes anything. That is how judges see the
+// live sandbox without the owner's passkey.
 // The browser keeps a signed, httpOnly, SameSite=Lax session cookie (Lax so an emailed link or a
 // phone notification opens signed in; writes still need JSON, which no cross-site form can send). Once a passkey exists,
 // approving a payment also needs a fresh passkey check bound to that payment, so a stolen session
@@ -17,6 +20,8 @@ import {
 import type { Store } from "./store.js";
 
 const COOKIE = "cs_session";
+const VIEWER_COOKIE = "cs_viewer";
+const READ_ONLY = "This is a read-only look around. Only the owner can pay, approve or change anything.";
 /** A week, so the approval links on the owner's phone open signed in. */
 const SESSION_MS = 7 * 24 * 3_600_000;
 const CHALLENGE_MS = 5 * 60_000;
@@ -29,6 +34,8 @@ export interface Auth {
   router: express.Router;
   requireOwner: (req: Request, res: Response, next: NextFunction) => void;
   isOwner: (req: Request) => boolean;
+  /** Owner, or a read-only viewer: for pure POSTs that move nothing (a what-if). */
+  requireOwnerOrViewer: (req: Request, res: Response, next: NextFunction) => void;
   /** For the inbox forwarding endpoint: owner, or a mail hook holding INBOX_SECRET. */
   requireOwnerOrInboxSecret: (req: Request, res: Response, next: NextFunction) => void;
   /** Whether the owner has set up a passkey (then approvals need one). */
@@ -66,7 +73,8 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
   const ownerEmail = (process.env.OWNER_EMAIL ?? (opts.offline ? "owner@sayso.example" : "")).trim().toLowerCase();
   const google = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? { id: process.env.GOOGLE_CLIENT_ID, secret: process.env.GOOGLE_CLIENT_SECRET } : undefined;
   const key = process.env.SESSION_SECRET ? Buffer.from(process.env.SESSION_SECRET) : randomBytes(32);
-  const sign = (expires: number) => createHmac("sha256", key).update(String(expires)).digest("base64url");
+  const sign = (expires: number, role = "") => createHmac("sha256", key).update(`${role}${expires}`).digest("base64url");
+  const viewerOn = opts.offline || process.env.SAYSO_VIEWER === "on";
 
   const db = opts.store.db;
   db.exec(`CREATE TABLE IF NOT EXISTS owner_passkeys (
@@ -104,17 +112,33 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
     return Boolean(exp && sig && Number(exp) > Date.now() && same(sig, sign(Number(exp))));
   };
 
-  const startSession = (req: Request, res: Response) => {
+  const isViewer = (req: Request) => {
+    if (!viewerOn) return false;
+    const [exp, sig] = (cookies(req)[VIEWER_COOKIE] ?? "").split(".");
+    return Boolean(exp && sig && Number(exp) > Date.now() && same(sig, sign(Number(exp), "viewer:")));
+  };
+
+  const startSession = (req: Request, res: Response, role: "owner" | "viewer" = "owner") => {
     const expires = Date.now() + SESSION_MS;
     const secure = req.secure || req.header("x-forwarded-proto") === "https";
-    res.setHeader("set-cookie", `${COOKIE}=${expires}.${sign(expires)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_MS / 1000}${secure ? "; Secure" : ""}`);
+    const [name, sig] = role === "owner" ? [COOKIE, sign(expires)] : [VIEWER_COOKIE, sign(expires, "viewer:")];
+    res.setHeader("set-cookie", `${name}=${expires}.${sig}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_MS / 1000}${secure ? "; Secure" : ""}`);
   };
 
   const requireOwner = (req: Request, res: Response, next: NextFunction) => {
-    if (!isOwner(req)) return void res.status(401).json({ error: "sign in first" });
+    if (!isOwner(req)) {
+      // A viewer sees what the owner sees, and does nothing.
+      if (isViewer(req) && (req.method === "GET" || req.method === "HEAD")) return next();
+      return void res.status(isViewer(req) ? 403 : 401).json(isViewer(req) ? { error: READ_ONLY, read_only: true } : { error: "sign in first" });
+    }
     // A cross-site form can't send JSON without a CORS preflight we never answer.
     if (req.method !== "GET" && req.method !== "HEAD" && !req.is("application/json") && !req.header("authorization")) return void res.status(415).json({ error: "send JSON" });
     next();
+  };
+
+  const requireOwnerOrViewer = (req: Request, res: Response, next: NextFunction) => {
+    if (isViewer(req) && !isOwner(req)) return next();
+    requireOwner(req, res, next);
   };
 
   const requireOwnerOrInboxSecret = (req: Request, res: Response, next: NextFunction) => {
@@ -154,14 +178,20 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
     startSession(req, res);
     res.json({ ok: true });
   });
+  router.post("/auth/viewer", (req, res) => {
+    if (!viewerOn) return void res.status(404).json({ error: "read-only viewing is off here" });
+    startSession(req, res, "viewer");
+    res.json({ ok: true, read_only: true });
+  });
   router.post("/auth/logout", (_req, res) => {
-    res.setHeader("set-cookie", `${COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+    res.setHeader("set-cookie", [`${COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`, `${VIEWER_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`]);
     res.json({ ok: true });
   });
   router.get("/auth/me", (req, res) => res.json({
     owner: isOwner(req),
+    viewer: !isOwner(req) && isViewer(req),
     passkeys: hasPasskey(),
-    methods: { passkey: hasPasskey(), email: Boolean(ownerEmail && (opts.send || opts.offline)), google: Boolean(google && ownerEmail), demo: opts.offline },
+    methods: { passkey: hasPasskey(), email: Boolean(ownerEmail && (opts.send || opts.offline)), google: Boolean(google && ownerEmail), demo: opts.offline, viewer: viewerOn },
   }));
 
   // ---------- passkeys ----------
@@ -262,5 +292,5 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
     }
   });
 
-  return { ownerToken, router, requireOwner, isOwner, requireOwnerOrInboxSecret, hasPasskey, confirmed, base: baseUrl };
+  return { ownerToken, router, requireOwner, requireOwnerOrViewer, isOwner, requireOwnerOrInboxSecret, hasPasskey, confirmed, base: baseUrl };
 }
