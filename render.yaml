@@ -28,6 +28,9 @@ services:
       - { key: METAL_MANDATE, value: .metal/mandate.json }
       - { key: METAL_REFUND_MANDATE, value: .metal/refund.json }
       - { key: METAL_BUNDLE, sync: false }
+      - { key: METAL_RECEIPT_KEY, sync: false }
+      - { key: ANTHROPIC_API_KEY, sync: false }
+      - { key: CLAUDE_MODEL, value: claude-haiku-5-5 }
       - { key: AGENTMAIL_WEBHOOK_SECRET, sync: false }
       - { key: AGENTMAIL_INBOX_ID, sync: false }
       - { key: AGENTMAIL_API_KEY, sync: false }

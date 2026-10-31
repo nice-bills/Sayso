@@ -36,7 +36,7 @@ Offline mode swaps Airwallex and Metal for simulators. They follow the rules our
 
 ### A real Claude agent
 
-`npm run agent` gives Claude (`claude-opus-5-5`) an invoice email and Sayso's MCP tools as the server lists them, and lets it decide every call: it reads the invoice, calls `pay_invoice` within its limit, and reports Sayso's decision (`src/agent/claude-payer.ts`). It needs `ANTHROPIC_API_KEY` and a paying identity (`SAYSO_BUYER_KEY`, `SAYSO_MANDATE`, or `SAYSO_SIM_PAYER` against `npm run serve:offline`); without a key it refuses to run rather than fake it. The demo's first beat runs it too when a key is set. The demo's three other agents are scripted MCP clients with fixed arguments, and say so. Without a key, invoices and speech are read by keyword rules instead of Claude, and each payout's trail names the reader.
+`npm run agent` gives Claude (`claude-haiku-5-5` by default; `CLAUDE_MODEL` changes it, for Sayso's reader too) an invoice email and Sayso's MCP tools as the server lists them, and lets it decide every call: it reads the invoice, calls `pay_invoice` within its limit, and reports Sayso's decision (`src/agent/claude-payer.ts`). It needs `ANTHROPIC_API_KEY` and a paying identity (`SAYSO_BUYER_KEY`, `SAYSO_MANDATE`, or `SAYSO_SIM_PAYER` against `npm run serve:offline`); without a key it refuses to run rather than fake it. The demo's first beat runs it too when a key is set. The demo's three other agents are scripted MCP clients with fixed arguments, and say so. Without a key, invoices and speech are read by keyword rules instead of Claude, and each payout's trail names the reader.
 
 ## Use it from an agent (MCP)
 

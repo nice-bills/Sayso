@@ -5,6 +5,7 @@
 // checks both and confirms, with their passkey, exactly as for a forwarded invoice.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { CLAUDE_MODEL, fallbackOptions } from "../agent/model.js";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import type { Inbox, InboxItem } from "./inbox.js";
@@ -44,10 +45,9 @@ Never invent bank details, amounts or payees. action is "pay" only when the spea
 export async function readSpoken(transcript: string): Promise<Intent & { reader: "claude" | "patterns" }> {
   if (!process.env.ANTHROPIC_API_KEY) return { ...parseSpoken(transcript), reader: "patterns" };
   const response = await new Anthropic().beta.messages.parse({
-    model: "claude-opus-5-5",
+    model: CLAUDE_MODEL,
     max_tokens: 4000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    ...fallbackOptions(),
     output_config: { effort: "low", format: betaZodOutputFormat(Intent) },
     system: SYSTEM,
     messages: [{ role: "user", content: `<said>${transcript}</said>` }],

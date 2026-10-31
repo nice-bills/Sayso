@@ -4,6 +4,7 @@
 // contradicts the earnings forecast only ever lowers confidence.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { CLAUDE_MODEL, fallbackOptions } from "./model.js";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 import type { Forecast } from "../treasury/policy.js";
@@ -32,10 +33,9 @@ You do not decide payments or amounts.`;
 
 export async function readMessage(client: Anthropic, message: string): Promise<Findings> {
   const response = await client.beta.messages.parse({
-    model: "claude-opus-5-5",
+    model: CLAUDE_MODEL,
     max_tokens: 16000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    ...fallbackOptions(),
     output_config: { effort: "medium", format: betaZodOutputFormat(Findings) },
     system: SYSTEM,
     messages: [{ role: "user", content: `<message>\n${message}\n</message>` }],

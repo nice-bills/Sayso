@@ -3,6 +3,7 @@
 // to approve, Airwallex validates the bank details, and the risk rules read the same text.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { CLAUDE_MODEL, fallbackOptions } from "../agent/model.js";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { z } from "zod";
 
@@ -81,10 +82,9 @@ amount is the total due in major units with two decimals.`;
 
 export async function extractWithClaude(client: Anthropic, e: InboundEmail): Promise<InvoiceFields> {
   const response = await client.beta.messages.parse({
-    model: "claude-opus-5-5",
+    model: CLAUDE_MODEL,
     max_tokens: 16000,
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    ...fallbackOptions(),
     output_config: { effort: "low", format: betaZodOutputFormat(InvoiceFields) },
     system: SYSTEM,
     messages: [{ role: "user", content: `<email>\nFrom: ${e.from}\nSubject: ${e.subject}\n\n${e.body}\n</email>` }],
