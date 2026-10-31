@@ -63,18 +63,21 @@ export async function verifyOffer(o: SignedOffer, signer: Address): Promise<bool
  * Sayso's quote key: SAYSO_QUOTE_KEY, or one made on first start and kept in the database, so the
  * published signer stays the same across restarts. It holds no funds; it only signs offers.
  */
+/** A private key Sayso made for itself and keeps in its database, made on first use. */
+export function storedKey(store: Store, name: string): Hex {
+  store.db.exec("CREATE TABLE IF NOT EXISTS signing_keys (name TEXT PRIMARY KEY, private_key TEXT NOT NULL)");
+  const row = store.db.prepare("SELECT private_key FROM signing_keys WHERE name = ?").get(name) as { private_key: string } | undefined;
+  if (row) return row.private_key as Hex;
+  const k = `0x${randomBytes(32).toString("hex")}` as Hex;
+  store.db.prepare("INSERT INTO signing_keys (name, private_key) VALUES (?, ?)").run(name, k);
+  return k;
+}
+
 export class OfferSigner {
   private readonly account: PrivateKeyAccount;
 
   constructor(store: Store, key = process.env.SAYSO_QUOTE_KEY as Hex | undefined) {
-    store.db.exec("CREATE TABLE IF NOT EXISTS signing_keys (name TEXT PRIMARY KEY, private_key TEXT NOT NULL)");
-    let k = key;
-    if (!k) {
-      const row = store.db.prepare("SELECT private_key FROM signing_keys WHERE name = 'quote'").get() as { private_key: string } | undefined;
-      k = (row?.private_key as Hex | undefined) ?? (`0x${randomBytes(32).toString("hex")}` as Hex);
-      if (!row) store.db.prepare("INSERT INTO signing_keys (name, private_key) VALUES ('quote', ?)").run(k);
-    }
-    this.account = privateKeyToAccount(k);
+    this.account = privateKeyToAccount(key ?? storedKey(store, "quote"));
   }
 
   get address(): Address { return this.account.address; }

@@ -46,7 +46,7 @@ import type { Payout, PayoutBook } from "./payouts/book.js";
 import { booksBefore, flowsFromBooks, rampSince, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
 import { FakeAirwallex, FakeMandate, FakeRefunder } from "./sim/offline.js";
 import { buildProof, CLAIMS, Disputes, judge, type Claim } from "./payouts/proof.js";
-import { OfferSigner } from "./payouts/offer.js";
+import { OfferSigner, storedKey } from "./payouts/offer.js";
 import { chainPayerCheck, disputeMessage, simPayerCheck, type PayerCheck } from "./payouts/dispute-auth.js";
 import { Store } from "./store.js";
 import { fmt, toMinor } from "./treasury/money.js";
@@ -158,8 +158,17 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
         return e && amountMinor > 0 ? { ...e, amountMinor } : undefined;
       } };
     };
-    const live = MetalAnchorer.fromEnv();
-    if (!live) emit("observe", "No METAL_RECEIPT_KEY: payout receipts are kept but anchored by the simulator (sim:)");
+    let live = MetalAnchorer.fromEnv();
+    if (!live && process.env.METAL_RECEIPT_KEY !== "off") {
+      // No key given: Sayso makes its own, keeps it in its database, and asks the testnet faucet for gas.
+      live = new MetalAnchorer(storedKey(store, "receipts"), rpc);
+      const address = live.address;
+      emit("observe", `No METAL_RECEIPT_KEY: receipts are anchored on Metal by Sayso's own key ${address}`);
+      void sweep.cli(["fund", address])
+        .then(() => emit("observe", `Testnet faucet funded the receipt key ${address}`))
+        .catch((err) => emit("observe", `Faucet didn't fund the receipt key ${address} (it may already have gas): ${String(err).slice(0, 160)}`));
+    }
+    if (!live) emit("observe", "METAL_RECEIPT_KEY=off: payout receipts are kept but anchored by the simulator (sim:)");
     anchorer = live ?? new SimAnchorer();
     anchorAddress = live?.address;
   }
