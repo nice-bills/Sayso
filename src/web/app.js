@@ -338,7 +338,7 @@ function stage() {
         h("div", { class: "b-row" }, h("span", { class: "b-k" }, "Costs"), flaps("land:cost", "", { len: 11, size: "sm" })),
         reason)),
     dials,
-    h("div", { class: "rail" }, h("div", { class: "b-head" }, h("span", {}, "Where the money is"), h("button", { type: "button", class: "b-replay", onclick: () => play() }, "Replay the run")), track, railNote),
+    h("div", { class: "rail" }, h("div", { class: "b-head" }, h("span", {}, "Where the money is"), h("button", { type: "button", class: "b-replay", onclick: () => play() }, "Replay")), track, railNote),
   );
 
   let lastVerdict = null, seq = 0;
@@ -387,14 +387,18 @@ function stage() {
     h("div", { class: "stage-in" },
       h("header", { class: "l-top" }, brand(),
         h("nav", { class: "l-nav", "aria-label": "Sections" },
-          h("a", { href: "#prove" }, "Prove it"), h("a", { href: "#refuses" }, "What it won't pay"),
-          h("a", { class: "l-btn small", href: "#signin", onclick: toToken }, "Sign in"))),
+          h("a", { href: "#prove" }, "Prove it"), h("a", { href: "#refuses" }, "What it holds"),
+          h("a", { class: "l-signin", href: "#signin", onclick: toToken }, "Sign in"))),
       h("div", { class: "l-hero-copy" },
-        h("h1", {}, "Your agent wants to pay ", h("em", {}, "€480."), " Sayso decides how."),
-        h("p", { class: "l-lede" }, "Price, balance and risk go in. Pay, wait, split or hold comes out, in code, before a cent moves on Metal or Airwallex. Grab any control and watch it flip."),
+        h("h1", {}, "Your agent wants to pay €480", h("br"), h("span", { class: "soft" }, "Sayso decides how")),
+        h("div", { class: "l-side" },
+          h("p", { class: "l-lede" }, "Price, balance and risk go in. Pay, wait, split or hold comes out, decided in code before a cent moves on Metal or Airwallex."),
+          h("div", { class: "l-actions" },
+            h("a", { class: "l-btn", href: "#signin", onclick: toToken }, "Open the demo"),
+            h("a", { class: "l-btn quiet", href: "#prove" }, "See the proof"))),
       ),
       boardEl,
-      h("div", { class: "l-rails" }, h("span", {}, "Settles on"), h("b", {}, "Metal"), h("span", {}, "Pays out through"), h("b", {}, "Airwallex"), h("span", {}, "Asked from"), h("b", {}, "Claude"), h("b", {}, "ChatGPT")),
+      h("p", { class: "l-rails" }, "Settles in USDZ on Metal testnet. Pays out in EUR, GBP and USD through the Airwallex sandbox. Asked from Claude, ChatGPT or any MCP agent."),
     ));
   return stageEl;
 }
@@ -436,17 +440,17 @@ function proveSection() {
   const rows = Object.entries(r).map(([k, v]) => [h("dt", {}, k), h("dd", {}, ["amount", "reference"].includes(k)
     ? h("input", { id: `r-${k}`, value: v, "aria-label": `Receipt ${k}`, oninput: (e) => { r[k] = e.target.value; rehash(); } })
     : String(v))]);
-  return (proveEl = h("section", { id: "prove", class: "sheet" },
+  return (proveEl = h("section", { id: "prove", class: "l-sheet" },
     h("div", { class: "sheet-in" },
-      h("span", { class: "eyebrow" }, "Prove it · disputes and merchant checks"),
-      h("h2", {}, "When an agent's payment is questioned, Sayso shows its work."),
-      h("p", { class: "lede" }, "Every payout keeps a chain of proof anyone can check without trusting Sayso. Change a line of the receipt, then hash it again."),
+      h("span", { class: "eyebrow" }, "Prove it"),
+      h("h2", {}, "When an agent’s payment is questioned, Sayso shows its work"),
+      h("p", { class: "lede" }, "For disputes and merchant checks. Every payout keeps a chain of proof anyone can check without trusting Sayso. Change a line of the receipt, then hash it again."),
       h("div", { class: "l-prove" },
         h("div", {},
           h("ol", { class: "chain" }, CHAIN.map(([t, p, who]) => h("li", { class: "link ok" }, h("span", { class: "tick" }, "✓"), h("div", {}, h("h3", {}, t), h("p", {}, p)), h("span", { class: "who" }, who))), last),
           h("div", { class: "verify" }, h("button", { type: "button", class: "btn pay", onclick: check }, "Hash the receipt and compare"), verdict)),
         h("div", { class: "receipt" },
-          h("div", { class: "r-head" }, h("span", {}, "Receipt · v1"), h("span", {}, "Sample")),
+          h("div", { class: "r-head" }, h("span", {}, "Receipt v1"), h("span", {}, "Sample")),
           h("dl", {}, rows),
           h("div", { class: "r-sum" }, h("span", {}, "sha256(sorted keys) ="), hashOut),
           h("p", { class: "r-hint" }, "The amount and reference are editable. In the app, every paid payout has its own receipt and anchor.")),
@@ -463,11 +467,11 @@ function refusesSection() {
     ["The same invoice twice", "Airwallex dedupes every request, so a retry can't pay again."],
     ["Fees sent elsewhere", "Sayso's earnings sweep into its own Airwallex account only."],
   ];
-  return h("section", { id: "refuses", class: "sheet" },
+  return h("section", { id: "refuses", class: "l-sheet" },
     h("div", { class: "sheet-in" },
-      h("span", { class: "eyebrow" }, "Held, every time"),
+      h("span", { class: "eyebrow" }, "Held every time"),
       h("h2", {}, "What it won't pay"),
-      h("ul", { class: "refuse" }, refusals.map(([name, why]) => h("li", {}, flaps(`ref:${name}`, "HOLD", { size: "xs", tone: "hold" }), h("div", {}, h("h3", {}, name), h("p", {}, why))))),
+      h("ul", { class: "refuse" }, refusals.map(([name, why]) => h("li", {}, h("h3", {}, name), h("p", {}, why)))),
     ));
 }
 
@@ -517,11 +521,12 @@ function signinDialog() {
 
 function signinSection() {
   return h("section", { id: "signin", class: "cta" },
-    h("div", { class: "cta-copy", "data-reveal": "" },
-      h("h2", {}, "Your say,", h("br"), "one tap"),
+    h("div", { class: "cta-copy" },
+      h("span", { class: "eyebrow" }, "Your say"),
+      h("h2", {}, "Every held payment waits for one tap from you"),
       h("p", {}, "Sign in with Face ID or a fingerprint, then pay what your agents found, or hold it."),
     ),
-    h("div", { "data-reveal": "" }, signinDialog()),
+    h("div", {}, signinDialog()),
   );
 }
 
@@ -615,14 +620,11 @@ function passkeyButton(iconOnly = false) {
 }
 
 function footer() {
-  return h("footer", { class: "foot" },
-    h("div", { class: "ft ft-statement" }, h("p", {}, "Sayso lets AI agents pay real invoices, and keeps the final say with you."), h("span", { class: "small" }, "Built for the Airwallex and Metal hackathon.")),
-    h("nav", { class: "ft ft-nav", "aria-label": "Footer" }, h("a", { href: "#board" }, "The board"), h("a", { href: "#prove" }, "Prove it"), h("a", { href: "/ops/" }, "Back office"), h("a", { href: "https://github.com/nice-bills/Sayso", rel: "noopener" }, "Source")),
-    h("div", { class: "ft ft-rails" }, h("span", { class: "small muted" }, "Runs on"), h("p", {}, "Airwallex sandbox and Metal testnet")),
-    h("div", { class: "ft ft-mail" }, h("span", { class: "small muted" }, "Forward invoices to"), h("a", { href: "mailto:sayso-invoices@agentmail.to" }, "sayso-invoices@agentmail.to")),
-    h("div", { class: "ft ft-word", "aria-hidden": "true" }, "sayso"),
-    h("a", { class: "ft ft-go", href: "#signin", onclick: toToken }, h("span", {}, "Open your inbox"), h("span", { class: "arrow big", "aria-hidden": "true" }, "→")),
-  );
+  return h("footer", { class: "foot" }, h("div", { class: "foot-in" },
+    h("div", { class: "ft-id" }, brand(), h("p", {}, "Agents pay real invoices. You keep the final say. Built for the Airwallex Agentic Banking Hackathon")),
+    h("nav", { class: "ft-nav", "aria-label": "Footer" }, h("a", { href: "#board" }, "The board"), h("a", { href: "#prove" }, "Prove it"), h("a", { href: "/ops/" }, "Back office"), h("a", { href: "https://github.com/nice-bills/Sayso", rel: "noopener" }, "Source")),
+    h("div", { class: "ft-mail" }, h("span", {}, "Forward invoices to"), h("a", { href: "mailto:sayso-invoices@agentmail.to" }, "sayso-invoices@agentmail.to")),
+  ));
 }
 
 // Things marked data-reveal fade up as they enter the screen; html.js gates it so nothing hides without script.
@@ -1352,7 +1354,6 @@ function payoutRow(p, opts = {}) {
     h("span", { class: "rh-main" },
       h("b", { class: "rh-who" }, p.payee),
       h("span", { class: "rh-meta" },
-        v ? h("span", { class: `rh-v v-${v}` }, VERDICT[v]) : null,
         [from, p.created_at && ago(p.created_at)].filter(Boolean).map((x) => h("span", {}, x)))),
     h("span", { class: "rh-end" },
       h("span", { class: "amt" }, money(p.amount, p.currency)),

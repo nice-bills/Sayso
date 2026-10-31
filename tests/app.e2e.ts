@@ -145,5 +145,5 @@ test('the landing board asks decide() and flips to hold when the payee name does
   await expect(browser.locator('.b-reason')).toContainText('Holding EUR 480.00');
   await expect(browser.locator('.dial.decider .d-val')).toHaveText('Held');
   await screen.getByRole('button', 'Paid before').tap();
-  await expect(browser.locator('.b-live')).toHaveText("YOU'RE DRIVING");
+  await expect(browser.locator('.b-live')).toHaveText("You're driving");
 });

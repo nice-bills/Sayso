@@ -165,9 +165,9 @@ function money(a, c) {
   return sym ? sym + n : n + " " + (c || "");
 }
 var looks = {
-  awaiting_approval: { tag: "Ready", tagBg: "#10121c", tagFg: "#36e07e", bg: "#1832d6", fg: "#ffffff" },
+  awaiting_approval: { tag: "Awaiting you", tagBg: "#14161f", tagFg: "#ffffff", bg: "#f6f5f1", fg: "#14161f" },
   needs_verification: { tag: "Held", tagBg: "#10121c", tagFg: "#ff5a4a", bg: "#0d0f1a", fg: "#ffffff" },
-  needs_details: { tag: "Missing details", tagBg: "#10121c", tagFg: "#ffb21e", bg: "#dfe9f5", fg: "#0d0f1a" },
+  needs_details: { tag: "Missing details", tagBg: "#10121c", tagFg: "#ffb21e", bg: "#f6f5f1", fg: "#0d0f1a" },
   paying: { tag: "Paying", tagBg: "#10121c", tagFg: "#36e07e", bg: "#0b7a3d", fg: "#ffffff" },
 };
 function look(it) { return looks[it.status] || looks.needs_details; }
