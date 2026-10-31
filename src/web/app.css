@@ -1121,3 +1121,35 @@ h1, h2, h3, h4 { font-weight: 500; }
 
 .v-source { margin: 8px 0 0; opacity: .7; max-width: 40rem; }
 .link.missing .tick { background: var(--raised); color: var(--faint); }
+
+/* Big screens: the landing grows with the screen instead of sitting in a strip */
+.landing { --margin: clamp(16px, 5vw, 112px); --z: 1; }
+.v-hero .stage-in, .sheet-in, .cta, .foot-in { max-width: 2240px; padding-left: var(--margin); padding-right: var(--margin); }
+.sheet-in > *, .cta > *, .foot-in > * { zoom: var(--z); }
+.v-main { grid-template-columns: minmax(0, 1fr) clamp(300px, 27vw, 600px); }
+.v-word { font-size: min(29vw, 64vh, 720px); }
+.v-ask { font-size: clamp(13px, .8vw, 17px); line-height: 1.5; }
+.v-hero .b-reason { font-size: clamp(20px, 1.8vw, 40px); }
+.v-hero .l-btn { height: clamp(48px, 2.9vw, 60px); font-size: clamp(15px, .95vw, 18px); padding: 0 clamp(22px, 1.4vw, 30px); }
+.v-hero .d-val { font-size: clamp(18px, 1.2vw, 26px); }
+.d-label, .v-hero .node-l { font-size: clamp(14px, .85vw, 17px); }
+.v-hero .rail-note { font-size: clamp(14px, .85vw, 17px); line-height: 1.4; }
+.l-top { height: clamp(72px, 4.5vw, 96px); }
+.l-top .brand { font-size: clamp(18px, 1.15vw, 24px); }
+.l-nav { font-size: clamp(15px, .9vw, 18px); gap: clamp(24px, 1.8vw, 40px); }
+@media (min-width: 1600px) { .landing { --z: 1.12; } }
+@media (min-width: 1800px) { .landing { --z: 1.2; } }
+@media (min-width: 2200px) { .landing { --z: 1.36; } }
+@media (min-width: 2500px) { .landing { --z: 1.5; } }
+@media (max-width: 900px) { .v-main { grid-template-columns: minmax(0, 1fr); } .v-word { font-size: min(38vw, 300px); } }
+@media (min-width: 901px) {
+  .l-sheet h2:not(.serif), .cta-copy h2 { font-size: 56px; line-height: 1.05; letter-spacing: -.03em; max-width: 18ch; }
+  .l-sheet .lede, .cta-copy p { font-size: 18px; line-height: 1.55; max-width: 40rem; }
+  .sub-h { font-size: 40px; line-height: 1.1; letter-spacing: -.025em; max-width: 26ch; }
+  .refuse { gap: 0 48px; margin-top: 56px; }
+  .refuse li { padding: 28px 0 32px; }
+  .refuse h3 { font-size: 24px; letter-spacing: -.015em; line-height: 1.2; }
+  .refuse p { font-size: 17px; line-height: 1.5; margin-top: 8px; }
+  .eyebrow { font-size: 13px; margin-bottom: 16px; }
+}
+.v-hero .v-source { font-size: clamp(13px, .8vw, 17px); line-height: 1.5; }
