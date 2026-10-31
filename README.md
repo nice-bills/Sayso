@@ -28,6 +28,7 @@ npm install
 npm run demo:offline     # agents pay over MCP, a batch payout, the inbox, a refund, the heist, reconciliation
 npm run serve:offline    # or open the app on :4021 and sign in with sayso-demo
 npm run test:e2e         # the app's flows in a real browser (needs Node 22.22.3+ or 24; `npx -y node@24` works)
+APP_URL=https://sayso-mp5d.onrender.com npm run test:e2e   # read-only checks against the deployed site (tests/live.e2e.ts)
 ```
 
 Offline mode swaps Airwallex and Metal for simulators. They follow the rules our code depends on: `request_id` dedupe, a required transfer `reason`, `FAILED` as the failure state, and the mandate's payee checks. Every proof they produce starts with `sim:`.
