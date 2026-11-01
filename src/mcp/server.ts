@@ -185,9 +185,18 @@ server.registerTool("batch_status", {
 }, async ({ batch_id }) => text(await (await fetch(`${base}/v1/batches/${batch_id}`)).json()));
 
 server.registerTool("pay_quote", {
-  description: "Pay an existing Sayso quote by id.",
+  description: "Pay an existing Sayso quote by id, if Sayso signed it and its price is within this agent's limit.",
   inputSchema: { quote_id: z.string() },
-}, async ({ quote_id }) => text(await pay(quote_id)));
+}, async ({ quote_id }) => {
+  // A quote id can come from anywhere (an invoice, another agent), so it gets the same checks pay_invoice makes
+  // on its own quotes: Sayso's signature over exactly this quote, its published payee, and the agent's cap.
+  const q = (await (await fetch(`${base}/v1/payouts/${encodeURIComponent(quote_id)}`)).json()) as Quote & { error?: string };
+  if (!q.offer || q.status !== "quoted") return text({ paid: false, reason: q.error ?? `quote is ${q.status}`, quote: q });
+  if (Number(q.price_usdz) > Number(maxUsdz)) return text({ paid: false, reason: `price ${q.price_usdz} USDZ is above this agent's limit of ${maxUsdz}`, quote: q });
+  const bad = await checkOffer(q, { amount: (Number(q.offer.terms.amountMinor) / 100).toFixed(2), currency: q.currency } as Invoice);
+  if (bad) return text({ paid: false, reason: `Not paying: ${bad}`, quote: q });
+  return text(await pay(quote_id));
+});
 
 server.registerTool("payout_receipt", {
   description: "A final payout's receipt and the Metal transaction anchoring its hash, so the agent can prove the money was delivered (or refunded) without trusting Sayso.",
