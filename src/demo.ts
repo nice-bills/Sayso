@@ -191,14 +191,15 @@ await beat(8, "an agent questions two of its payouts; Sayso answers each from th
     const d = result(await agents[2].callTool({ name: "dispute_payout", arguments: { payout_id: labelling.id, claim: "not_delivered", note: "the payee says nothing arrived" } }));
     emit("observe", `buyer-agent-3 disputed ${labelling.payeeName} (never arrived): ${d.dispute?.verdict}. ${d.dispute?.reason ?? d.error}`);
   }
-  // buyer-agent-2, under its owner's mandate: "never agreed to that price". Denied by the agent's own signed order.
+  // buyer-agent-2's owner writes in: "my agent never agreed to that price". The seller files it, and the
+  // rules answer from the proof: the agent's own mandate key signed that exact order.
   const gpu = paidFor("GPU rental 44");
   if (gpu && agents[1]) {
     const proof = result(await agents[1].callTool({ name: "prove_payout", arguments: { payout_id: gpu.id } }));
     const mandate = proof.evidence?.find((e: { id: string }) => e.id === "mandate");
     emit("observe", `Proof for ${gpu.payeeName}: ${mandate?.status}. ${mandate?.detail}`);
-    const d = result(await agents[1].callTool({ name: "dispute_payout", arguments: { payout_id: gpu.id, claim: "wrong_amount", note: "my agent never agreed to that price" } }));
-    emit("observe", `buyer-agent-2 disputed ${gpu.payeeName} (never agreed to that price): ${d.dispute?.verdict}. ${d.dispute?.reason ?? d.error}`);
+    const d = await (await fetch(`${base}/v1/payouts/${gpu.id}/disputes`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${cs.ownerToken}` }, body: JSON.stringify({ claim: "wrong_amount", note: "my agent never agreed to that price", by: "buyer-agent-2's owner, by email" }) })).json() as { dispute?: { verdict: string; reason: string }; error?: string };
+    emit("observe", `buyer-agent-2's owner disputed ${gpu.payeeName} (never agreed to that price): ${d.dispute?.verdict}. ${d.dispute?.reason ?? d.error}`);
   }
   // buyer-agent-1: "wasn't allowed", against a payment its own bare key made under no mandate. The payee
   // already has the euros, so Sayso won't refund on the agent's word: it goes to the owner.

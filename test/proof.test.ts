@@ -127,7 +127,7 @@ describe("prove it: what Sayso shows when an agent's purchase is questioned", ()
   });
 
   it("checks the owner's signature when the agent shows the credential it was given", async () => {
-    const { cs, server, call } = await start();
+    const { cs, server, call, owner } = await start();
     try {
       cs.simMandates!.bind("0xm", { principal: "0xOwner", capCents: 40_000, budgetCents: 70_000 });
       const q = await call("POST", "/v1/quotes", quoteBody());
@@ -136,7 +136,7 @@ describe("prove it: what Sayso shows when an agent's purchase is questioned", ()
       const proof = await call("GET", `/v1/payouts/${q.body.id}/proof`);
       expect(proof.body.evidence[1].detail).toMatch(/owner's signature and the issuer's match/);
       expect(proof.body.signed).toEqual({ order: true, owner: true });
-      const d = await call("POST", `/v1/payouts/${q.body.id}/disputes`, { claim: "wrong_amount", note: "my agent never agreed to that price" });
+      const d = await call("POST", `/v1/payouts/${q.body.id}/disputes`, { claim: "wrong_amount", note: "my agent never agreed to that price" }, owner);
       expect(d.body.dispute.verdict).toBe("denied");
       expect(d.body.dispute.reason).toMatch(/signed this exact order, price included/);
     } finally {
