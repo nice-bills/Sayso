@@ -18,7 +18,7 @@ import { createMandatePaymentClient, p256DigestSigner, parseCredential, privateK
 import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
 import { invoiceShape, toRequest, type Invoice } from "./tools.js";
-import { disputeMessage } from "../payouts/dispute-auth.js";
+import { disputeDigest, disputeMessage } from "../payouts/dispute-auth.js";
 import { verifyOffer, type SignedOffer } from "../payouts/offer.js";
 
 const base = process.env.SAYSO_URL ?? "http://127.0.0.1:4021";
@@ -48,10 +48,18 @@ function payingFetch(): typeof fetch {
 const simHeaders = (): Record<string, string> => (simMandate ? { "x-sim-mandate": simMandate } : simPayer ? { "x-sim-payer": simPayer } : {});
 
 /** Live, the key that paid signs the dispute, so only the payer can start one. A mandate's payer is the owner's account, which signs in Sayso instead. */
-async function signDispute(payoutId: string, claim: string): Promise<{ signature?: string; issued_at?: string }> {
-  const key = process.env.SAYSO_BUYER_KEY as `0x${string}` | undefined;
-  if (!key || simPayer || simMandate) return {};
+async function signDispute(payoutId: string, claim: string): Promise<{ signature?: string; issued_at?: string; signer?: string }> {
+  if (simPayer || simMandate) return {};
   const issued_at = new Date().toISOString();
+  const mandate = process.env.SAYSO_MANDATE;
+  if (mandate) {
+    // Paid from the owner's account under a mandate: sign with the mandate key Metal has bound to it.
+    const agent = JSON.parse(readFileSync(process.env.SAYSO_MANDATE_AGENT_KEY ?? mandate.replace(/\.json$/, ".key.json"), "utf8")) as Es256Key;
+    const signature = await p256DigestSigner(privateKeyHex(agent))(disputeDigest(disputeMessage(payoutId, claim, issued_at)));
+    return { issued_at, signature, signer: "mandate_key" };
+  }
+  const key = process.env.SAYSO_BUYER_KEY as `0x${string}` | undefined;
+  if (!key) return {};
   return { issued_at, signature: await privateKeyToAccount(key).signMessage({ message: disputeMessage(payoutId, claim, issued_at) }) };
 }
 

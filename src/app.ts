@@ -434,7 +434,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     // Only the owner, signed in, or the agent that paid: a payout id alone is public, so it can't be enough.
     const owner = auth.isOwner(req);
     if (!owner) {
-      const why = await payerCheck({ buyer: p.buyer, payoutId: p.id, claim, body: req.body ?? {}, header: (n) => req.header(n) });
+      const mandateRef = (trail.last(p.id, "mandate")?.detail as { ref?: string } | undefined)?.ref;
+      const why = await payerCheck({ buyer: p.buyer, payoutId: p.id, claim, body: req.body ?? {}, header: (n) => req.header(n), mandateRef });
       if (why) return void res.status(401).json({ error: why, sign: { message: disputeMessage(p.id, claim, "<issued_at>"), address: p.buyer } });
     }
     const note = String(req.body?.note ?? "").trim().slice(0, 200);
