@@ -120,7 +120,8 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
       // Paid under the owner's mandate: check it from the chain and keep the proof on the payout.
       const ref = mandateRefOf(ctx.paymentPayload as never);
       if (ref && mode.mandates && mandates.policy !== "off") {
-        void mode.mandates.check({ tx: ctx.result.transaction, requirements: ctx.requirements, ref, checkoutMandate: signedOfferOf(ctx.paymentPayload as never) || undefined })
+        const body = (ctx.transportContext as { request?: { adapter?: { getBody?(): unknown } } } | undefined)?.request?.adapter?.getBody?.() as Record<string, unknown> | undefined;
+        void mode.mandates.check({ tx: ctx.result.transaction, requirements: ctx.requirements, ref, checkoutMandate: signedOfferOf(ctx.paymentPayload as never) || undefined, presented: { credential: body?.mandate_credential, issuer: body?.mandate_issuer } })
           .then((proof) => mandates.record(linesOf(x), proof))
           .catch((e) => emit("escalate", `Could not verify the mandate behind ${x.kind} ${x.id.slice(0, 8)}: ${String(e).slice(0, 200)}`));
       }
@@ -175,7 +176,7 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
       res.on("finish", () => {
         if (res.statusCode >= 400) return void (kind === "payout" ? svc.release(id) : batches.release(id));
         void (kind === "payout" ? svc.onFunded(id, payer!, tx) : batches.onFunded(id, payer!, tx));
-        if (ref && mode.mandates && mandates.policy !== "off") void mode.mandates.check({ tx, ref, checkoutMandate: req.header("x-sim-signed-order") }).then((proof) => mandates.record(linesOf({ kind, id }), proof));
+        if (ref && mode.mandates && mandates.policy !== "off") void mode.mandates.check({ tx, ref, checkoutMandate: req.header("x-sim-signed-order"), presented: { credential: req.body?.mandate_credential, issuer: req.body?.mandate_issuer } }).then((proof) => mandates.record(linesOf({ kind, id }), proof));
       });
       next();
     };

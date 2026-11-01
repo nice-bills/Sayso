@@ -50,9 +50,11 @@ emit("observe", `Sayso on ${base}; open it and sign in with ${cs.offline ? cs.ow
 const settle = async (n = 3) => { for (let i = 0; i < n; i++) await cs.tick(); };
 
 /** One buying agent: its own MCP connection to Sayso, paying with its own Metal identity. */
-async function agent(name: string, payerOrKey: string) {
+async function agent(name: string, payerOrKey: string, mandate?: string) {
   const env: Record<string, string> = { ...(process.env as Record<string, string>), SAYSO_URL: base, SAYSO_MAX_USDZ: "500" };
-  if (simPayers) env.SAYSO_SIM_PAYER = payerOrKey; else env.SAYSO_BUYER_KEY = payerOrKey;
+  // An agent with a mandate pays from its owner's account and shows the credential its owner signed.
+  if (mandate) env.SAYSO_MANDATE = mandate;
+  else if (simPayers) env.SAYSO_SIM_PAYER = payerOrKey; else env.SAYSO_BUYER_KEY = payerOrKey;
   const client = new Client({ name, version: "1.0.0" });
   await client.connect(new StdioClientTransport({ command: process.execPath, args: ["--import", "tsx", "src/mcp/server.ts"], env, stderr: "ignore" }));
   return client;
@@ -75,7 +77,9 @@ const jobs = [
   { amount: amt("95.50"), currency: "EUR", reference: "GPU rental 44", ...payee("Rechenzentrum Nord GmbH", "DE75512108001245126199", "Hamburg") },
   { amount: amt("240.00"), currency: "EUR", reference: "Data labelling", ...payee("Etiqueta SL", "ES9121000418450200051332", "Madrid") },
 ];
-const agents = await Promise.all(buyers.slice(0, 3).map((b, i) => agent(`buyer-agent-${i + 1}`, b)));
+// Live, buyer-agent-2 pays under the budget its owner bound on Metal (npm run setup:agent-budget).
+const ownerBudget = !simPayers && existsSync(".metal/agent-budget.json") ? ".metal/agent-budget.json" : undefined;
+const agents = await Promise.all(buyers.slice(0, 3).map((b, i) => agent(`buyer-agent-${i + 1}`, b, i === 1 ? ownerBudget : undefined)));
 for (const [i, a] of agents.entries()) {
   const r = result(await a.callTool({ name: "pay_invoice", arguments: { ...jobs[i]!, max_usdz: "400" } }));
   emit("observe", `buyer-agent-${i + 1}: ${r.paid ? `paid quote ${String(r.quote_id).slice(0, 8)}, HTTP ${r.http_status}` : `not paid: ${r.reason ?? r.status}`}`);
@@ -170,7 +174,7 @@ await beat(8, "an agent questions two of its payouts; Sayso answers each from th
   const ofAgent = (reference: string) => cs.svc.book.list(500).find((p) => p.reference === reference && p.buyer && !p.buyer.startsWith("internal:"));
   // Live sandbox: transfers sit in PROCESSING until the simulation moves them, so deliver these two first.
   if (!offline && "simulateTransfer" in cs.awx) {
-    for (const ref of ["Translation Oct", "Data labelling"]) {
+    for (const ref of ["Translation Oct", "GPU rental 44", "Data labelling"]) {
       const t = ofAgent(ref)?.transferId;
       if (!t || ofAgent(ref)?.status !== "submitted") continue;
       await (cs.awx as Airwallex).simulateTransfer(t, { next_status: "SENT" }).catch(() => undefined);
@@ -186,6 +190,15 @@ await beat(8, "an agent questions two of its payouts; Sayso answers each from th
     emit("observe", `Proof for ${labelling.payeeName}: ${proof.evidence?.map((e: { id: string; status: string }) => `${e.id} ${e.status}`).join(", ")}`);
     const d = result(await agents[2].callTool({ name: "dispute_payout", arguments: { payout_id: labelling.id, claim: "not_delivered", note: "the payee says nothing arrived" } }));
     emit("observe", `buyer-agent-3 disputed ${labelling.payeeName} (never arrived): ${d.dispute?.verdict}. ${d.dispute?.reason ?? d.error}`);
+  }
+  // buyer-agent-2, under its owner's mandate: "never agreed to that price". Denied by the agent's own signed order.
+  const gpu = paidFor("GPU rental 44");
+  if (gpu && agents[1]) {
+    const proof = result(await agents[1].callTool({ name: "prove_payout", arguments: { payout_id: gpu.id } }));
+    const mandate = proof.evidence?.find((e: { id: string }) => e.id === "mandate");
+    emit("observe", `Proof for ${gpu.payeeName}: ${mandate?.status}. ${mandate?.detail}`);
+    const d = result(await agents[1].callTool({ name: "dispute_payout", arguments: { payout_id: gpu.id, claim: "wrong_amount", note: "my agent never agreed to that price" } }));
+    emit("observe", `buyer-agent-2 disputed ${gpu.payeeName} (never agreed to that price): ${d.dispute?.verdict}. ${d.dispute?.reason ?? d.error}`);
   }
   // buyer-agent-1: "wasn't allowed", against a payment its own bare key made under no mandate. The payee
   // already has the euros, so Sayso won't refund on the agent's word: it goes to the owner.

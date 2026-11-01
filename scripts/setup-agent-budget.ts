@@ -30,8 +30,8 @@ const { values } = parseArgs({ options: {
 const replaced = values.replaces && values.replaces === values.out ? values.out.replace(/\.json$/, ".replaced.json") : values.replaces;
 if (values.replaces && replaced !== values.replaces) {
   copyFileSync(values.replaces, replaced!);
-  const oldKey = values.replaces.replace(/\.json$/, ".agent-key.json");
-  if (existsSync(oldKey)) copyFileSync(oldKey, replaced!.replace(/\.json$/, ".agent-key.json"));
+  const oldKey = values.replaces.replace(/\.json$/, ".key.json");
+  if (existsSync(oldKey)) copyFileSync(oldKey, replaced!.replace(/\.json$/, ".key.json"));
 }
 const payTo = process.env.SAYSO_PAY_TO as Address | undefined;
 if (!payTo) throw new Error("Set SAYSO_PAY_TO to Sayso's Metal address (pay_to in its GET /healthz)");
@@ -47,7 +47,7 @@ const { principal, reference, gasKeyAddress } = await owner.setup({
   capCents: toMinor(Number(values.cap)), budgetCents: toMinor(Number(values.budget)), expiresInSeconds: Number(values.days) * 86_400,
   payeeName: "Sayso", description: `Pay real-world invoices through Sayso: up to ${values.cap} USDZ each, ${values.budget} USDZ in total`,
   replaces: replaced,
-  mandateKeyFile: replaced && existsSync(values.out.replace(/\.json$/, ".agent-key.json")) ? values.out.replace(/\.json$/, ".agent-key.json") : undefined,
+  mandateKeyFile: replaced && existsSync(values.out.replace(/\.json$/, ".key.json")) ? values.out.replace(/\.json$/, ".key.json") : undefined,
 });
 if (replaced) {
   console.log(`\nReplaced on Metal: the agent may now pay Sayso up to ${values.cap} USDZ a payment, ${values.budget} USDZ in total. The old mandate is revoked.\n  mandate  ${reference}\n  old      ${replaced}`);
@@ -64,4 +64,4 @@ Bound on Metal: the agent may pay only Sayso (${payTo}), up to ${values.cap} USD
 
 Give the agent:
 SAYSO_MANDATE=${values.out}
-SAYSO_MANDATE_AGENT_KEY=${values.out.replace(/\.json$/, ".agent-key.json")}`);
+SAYSO_MANDATE_AGENT_KEY=${values.out.replace(/\.json$/, ".key.json")}`);

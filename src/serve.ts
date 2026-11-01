@@ -34,7 +34,9 @@ async function seed() {
   for (const [i, job] of jobs.entries()) {
     const q = (await (await fetch(`${base}/v1/quotes`, { method: "POST", headers: json, body: JSON.stringify(job) })).json()) as { pay_url?: string };
     const payer: Record<string, string> = i === 0 ? { "x-sim-payer": "0xA9e0000000000000000000000000000000000001" } : { "x-sim-mandate": "0x6d616e646174653a6f776e65722d616c6963650000000000000000000000001", "x-sim-signed-order": "sim" };
-    if (q.pay_url) await fetch(base + q.pay_url, { method: "POST", headers: payer });
+    // The mandate agent also shows the credential its owner signed, so its proof covers the owner's signature.
+    const shown = i === 0 ? {} : { body: JSON.stringify({ mandate_credential: "sim", mandate_issuer: "sim" }), headers: { ...payer, "content-type": "application/json" } };
+    if (q.pay_url) await fetch(base + q.pay_url, { method: "POST", headers: payer, ...shown });
   }
   emit("observe", "Seeded sample invoices and two agent payouts (offline)");
 }

@@ -8,8 +8,8 @@ const quoteBody = (iban = "ES9121000418450200051332") => ({
   payee: { name: "Etiqueta SL", address: { country_code: "ES", city: "Madrid", street_address: "Calle 1", postcode: "28001" }, bank: { iban }, bank_country_code: "ES" },
 });
 
-const proofWith = (s: Partial<Record<Evidence["id"], Evidence["status"]>>): Proof => ({
-  payout: "p", hash: "0x",
+const proofWith = (s: Partial<Record<Evidence["id"], Evidence["status"]>>, signed = { order: false, owner: false }): Proof => ({
+  payout: "p", hash: "0x", signed,
   evidence: (["order", "mandate", "approval", "funding", "delivery", "receipt"] as const).map((id) => ({ id, title: id, status: s[id] ?? "proven", detail: "" })),
 });
 
@@ -30,6 +30,10 @@ describe("judge: a dispute settled from the proof", () => {
   ];
   it.each(cases)("%s with %j is %s", (claim, evidence, verdict) => {
     expect(judge(claim, proofWith(evidence)).verdict).toBe(verdict);
+  });
+  it("answers 'never agreed to that price' with the agent's own signature, and 'not allowed' with the owner's", () => {
+    expect(judge("wrong_amount", proofWith({}, { order: true, owner: true })).reason).toMatch(/signed this exact order, price included/);
+    expect(judge("not_authorized", proofWith({}, { order: true, owner: true })).reason).toMatch(/owner signed the mandate/);
   });
 });
 
@@ -63,6 +67,7 @@ describe("prove it: what Sayso shows when an agent's purchase is questioned", ()
       expect(proof.status).toBe(200);
       expect(Object.fromEntries(proof.body.evidence.map((e: Evidence) => [e.id, e.status]))).toEqual({ order: "proven", mandate: "proven", approval: "proven", funding: "proven", delivery: "proven", receipt: "proven" });
       expect(proof.body.evidence[0].detail).toMatch(/signed this exact order/);
+      expect(proof.body.evidence[1].detail).toMatch(/showed no credential/);
       expect(JSON.stringify(proof.body)).not.toMatch(/ES9121/); // no bank details
 
       // A stranger with the payout id can't dispute it; the owner of the mandate's account can.
@@ -116,6 +121,24 @@ describe("prove it: what Sayso shows when an agent's purchase is questioned", ()
       await new Promise((r) => setTimeout(r, 30));
       expect(cs.svc.book.get(a)!.status).toBe("paid");
       expect((await call("POST", `/v1/payouts/${a}/disputes`, { claim: "not_authorized" }, bare)).status).toBe(409);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("checks the owner's signature when the agent shows the credential it was given", async () => {
+    const { cs, server, call } = await start();
+    try {
+      cs.simMandates!.bind("0xm", { principal: "0xOwner", capCents: 40_000, budgetCents: 70_000 });
+      const q = await call("POST", "/v1/quotes", quoteBody());
+      await call("POST", q.body.pay_url, { mandate_credential: { layer1: "x" }, mandate_issuer: { iss: "self", kid: "k", jwk: {} } }, { "x-sim-mandate": "0xm", "x-sim-signed-order": "sim" });
+      for (let i = 0; i < 3; i++) await cs.tick();
+      const proof = await call("GET", `/v1/payouts/${q.body.id}/proof`);
+      expect(proof.body.evidence[1].detail).toMatch(/owner's signature and the issuer's match/);
+      expect(proof.body.signed).toEqual({ order: true, owner: true });
+      const d = await call("POST", `/v1/payouts/${q.body.id}/disputes`, { claim: "wrong_amount", note: "my agent never agreed to that price" });
+      expect(d.body.dispute.verdict).toBe("denied");
+      expect(d.body.dispute.reason).toMatch(/signed this exact order, price included/);
     } finally {
       server.close();
     }

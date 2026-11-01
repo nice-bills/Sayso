@@ -133,10 +133,11 @@ test('an agent payout proves itself, and a dispute the proof answers is denied',
   const prove = browser.locator(`${row} .prove`);
   await expect(prove).toContainText("The owner's Metal mandate");
   await expect(prove).toContainText('signed this exact order');
+  await expect(prove).toContainText("the owner's signature and the issuer's match");
   await expect(browser.locator(`${row} .pv-proven`)).toHaveCount(6);
   await browser.locator(`${row} .prove button:has-text("Wasn't allowed")`).click();
   await expect(browser.locator(`${row} .pv-dispute`)).toContainText('Denied');
-  await expect(browser.locator(`${row} .pv-dispute`)).toContainText('mandate allowed this payment');
+  await expect(browser.locator(`${row} .pv-dispute`)).toContainText('owner signed the mandate');
 });
 
 test('the landing board asks decide() and flips to hold when the payee name does not match', async ({ app, screen, browser }) => {

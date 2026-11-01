@@ -36,6 +36,8 @@ export interface Proof {
   evidence: Evidence[];
   /** SHA-256 over the evidence, keys sorted: what a denied dispute anchors on chain. */
   hash: string;
+  /** The agent's mandate key signed this exact order, and the owner signed the mandate it paid under. */
+  signed: { order: boolean; owner: boolean };
 }
 
 export const CLAIMS = {
@@ -75,7 +77,7 @@ export function buildProof(p: Payout, steps: TrailStep[], anchors: Anchored[], t
   else if (!mandate.ok) evidence.push({ id: "mandate", title: "The owner's Metal mandate", status: "against", detail: `Metal could not verify it: ${mandate.problems.join("; ") || "a verification step failed"}.` });
   else evidence.push({
     id: "mandate", title: "The owner's Metal mandate", status: "proven",
-    detail: `Bound by ${short(mandate.principal)}: ${mandate.limits.payees.length ? "Sayso as the only payee" : "any payee"}, up to ${mandate.limits.cap_usdz} USDZ a payment, ${mandate.left_usdz} of ${mandate.limits.budget_usdz} USDZ left. Metal checked it on chain (${mandate.steps.filter((s) => s.outcome === "pass").length} of ${mandate.steps.length} steps passed, the rest need the agent's credential).`,
+    detail: `Bound by ${short(mandate.principal)}: ${mandate.limits.payees.length ? "Sayso as the only payee" : "any payee"}, up to ${mandate.limits.cap_usdz} USDZ a payment, ${mandate.left_usdz} of ${mandate.limits.budget_usdz} USDZ left. ${mandate.owner_signed ? "The agent showed the credential its owner signed, and the owner's signature and the issuer's match what is bound on chain" : "The agent showed no credential, so the owner's signature wasn't checked"}. ${mandate.steps.filter((s) => s.outcome === "pass").length} of ${mandate.steps.length} of Metal's checks passed.`,
   });
 
   if (cleared) evidence.push({ id: "approval", title: "The owner's approval", status: "proven", detail: `It was held, then cleared: "${cleared.title}" at ${cleared.at.slice(0, 16).replace("T", " ")} UTC.` });
@@ -97,7 +99,7 @@ export function buildProof(p: Payout, steps: TrailStep[], anchors: Anchored[], t
     ? { id: "receipt", title: "The receipt on chain", status: "proven", detail: `Receipt ${short(paid.hash)} anchored in ${short(paid.tx)}; anyone can rehash it and compare.`, link: paid.explorer ?? txLink(paid.tx) }
     : { id: "receipt", title: "The receipt on chain", status: "missing", detail: paid ? "The receipt is recorded but not yet anchored." : "No receipt has been issued." });
 
-  return { payout: p.id, evidence, hash: hashOf(evidence) };
+  return { payout: p.id, evidence, hash: hashOf(evidence), signed: { order: Boolean(mandate?.ok && mandate.signed_order), owner: Boolean(mandate?.ok && mandate.owner_signed) } };
 }
 
 /** Settles a claim from the evidence. Pure: the same proof and claim always give the same answer. */
@@ -107,12 +109,14 @@ export function judge(claim: Claim, proof: Proof): Judgement {
 
   switch (claim) {
     case "not_authorized":
+      if (is("mandate", "proven") && is("funding", "proven") && proof.signed.owner) return { verdict: "denied", reason: "The owner signed the mandate this payment was made under, the signature matches what is bound on chain, and Metal enforced its limits when it settled.", cites: ["mandate", "order", "funding"] };
       if (is("mandate", "proven") && is("funding", "proven")) return { verdict: "denied", reason: "The owner's Metal mandate allowed this payment, and Metal enforced its limits on chain when it settled.", cites: ["mandate", "order", "funding"] };
       // The payee already has the money, so a refund here would be Sayso paying twice. The owner decides.
       return { verdict: "review", reason: is("mandate", "against")
         ? "Metal couldn't verify the mandate behind this payment, but the payee has been paid. The owner decides whether to refund it."
         : "The agent's own key paid, under no mandate, and the payee has been paid. Sayso won't refund that on its own; the owner decides.", cites: ["mandate", "funding", "delivery"] };
     case "wrong_amount":
+      if (is("funding", "proven") && proof.signed.order) return { verdict: "denied", reason: "The agent's own mandate key signed this exact order, price included, before it paid, and it paid that price.", cites: ["order", "mandate", "funding"] };
       if (is("funding", "proven")) return { verdict: "denied", reason: "The agent paid exactly the quoted price: Sayso's signed offer and the 402 response both named it before the agent paid.", cites: ["order", "funding"] };
       return { verdict: "review", reason: "No Metal payment is on record to compare with the quote.", cites: ["funding"] };
     case "not_delivered":

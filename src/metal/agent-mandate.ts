@@ -8,7 +8,7 @@
 // mandate is refused before it settles, so no money moves.
 
 import { createPublicClient, http, type Hash, type Hex } from "viem";
-import { readMandateState, verifyMandatePayment, type VerifyStep } from "@metalntwx/metal-pay/mandates";
+import { parseCredential, readMandateState, verifyMandatePayment, type TrustedIssuer, type VerifyStep } from "@metalntwx/metal-pay/mandates";
 import { centsToUsdz, METAL_TESTNET_CHAIN_ID } from "./mandate.js";
 
 export type MandatePolicy = "off" | "verify" | "required";
@@ -28,11 +28,20 @@ export interface MandateProof {
   left_usdz: string;
   /** The agent's key signed this exact offer (amount, payee), not just "a payment". */
   signed_order: boolean;
+  /** The agent showed the credential its owner signed, and it matches what is bound on chain (steps 2 and 3). */
+  owner_signed: boolean;
   problems: string[];
 }
 
+/**
+ * What an agent may show with its payment: the credential its owner signed, and the key of the issuer
+ * that signed it. Sayso trusts that issuer only as far as the chain does: step 3 passes only when its
+ * key is the one recorded when the owner bound the mandate.
+ */
+export interface Presented { credential?: unknown; issuer?: unknown }
+
 export interface MandateChecker {
-  check(a: { tx: string; requirements: unknown; ref: string; checkoutMandate?: string }): Promise<MandateProof>;
+  check(a: { tx: string; requirements: unknown; ref: string; checkoutMandate?: string; presented?: Presented }): Promise<MandateProof>;
 }
 
 const UNITS_PER_CENT = 10n ** 16n;
@@ -46,9 +55,11 @@ export class ChainMandateChecker implements MandateChecker {
     this.client = createPublicClient({ transport: http(rpcUrl), chain: { id: chainId, name: "Metal", nativeCurrency: { name: "USDZ", symbol: "USDZ", decimals: 18 }, rpcUrls: { default: { http: [rpcUrl] } } } });
   }
 
-  async check(a: { tx: string; requirements: unknown; ref: string; checkoutMandate?: string }): Promise<MandateProof> {
+  async check(a: { tx: string; requirements: unknown; ref: string; checkoutMandate?: string; presented?: Presented }): Promise<MandateProof> {
+    const shown = presentedOf(a.presented);
     const v = await verifyMandatePayment(this.client, {
       tx: a.tx as Hash, ref: a.ref as Hex, requirements: a.requirements as never, ...(a.checkoutMandate ? { checkoutMandate: a.checkoutMandate } : {}),
+      ...(shown ? { credential: shown.credential, trustedIssuers: [shown.issuer] } : {}),
     });
     const m = v.mandate;
     if (!m) return { ...empty(a.ref), steps: v.steps.map(step), problems: ["no mandate is bound for this payment"] };
@@ -63,15 +74,28 @@ export class ChainMandateChecker implements MandateChecker {
       },
       spent_usdz: usdz(state.spent), left_usdz: usdz(c.budget > state.spent ? c.budget - state.spent : 0n),
       signed_order: Boolean(a.checkoutMandate) && v.ok,
+      owner_signed: v.ok && [2, 3].every((n) => v.steps.find((x) => x.step === n)?.outcome === "pass"),
       problems: [...(state.revoked ? ["the owner has revoked this mandate"] : []), ...v.payments.flatMap((p) => p.problems)],
     };
+  }
+}
+
+/** A presented credential and issuer key, if both parse; anything else is ignored, not trusted. */
+function presentedOf(p?: Presented) {
+  if (!p?.credential || !p.issuer) return undefined;
+  try {
+    const issuer = p.issuer as TrustedIssuer;
+    if (typeof issuer.iss !== "string" || typeof issuer.kid !== "string" || typeof issuer.jwk !== "object") return undefined;
+    return { credential: parseCredential(p.credential), issuer };
+  } catch {
+    return undefined;
   }
 }
 
 const step = (s: VerifyStep) => ({ step: s.step, title: s.title, outcome: s.outcome, detail: s.detail });
 const empty = (ref: string): MandateProof => ({
   ref, principal: "", ok: false, steps: [], limits: { cap_usdz: "0.00", budget_usdz: "0.00", payees: [], expires_at: null, max_payments: null },
-  spent_usdz: "0.00", left_usdz: "0.00", signed_order: false, problems: [],
+  spent_usdz: "0.00", left_usdz: "0.00", signed_order: false, owner_signed: false, problems: [],
 });
 
 /**
@@ -105,21 +129,22 @@ export class SimMandates implements MandateChecker {
     return this.bound.get(ref)?.principal;
   }
 
-  async check(a: { tx: string; ref: string; checkoutMandate?: string }): Promise<MandateProof> {
+  async check(a: { tx: string; ref: string; checkoutMandate?: string; presented?: Presented }): Promise<MandateProof> {
     const m = this.bound.get(a.ref);
+    const shown = Boolean(a.presented?.credential && a.presented.issuer);
     if (!m) return { ...empty(a.ref), problems: ["no mandate is bound for this payment"] };
     const pass = (n: 1 | 2 | 3 | 4, title: string) => ({ step: n, title, outcome: "pass" as const, detail: "sim" });
     return {
       ref: a.ref, principal: m.principal, ok: true,
       steps: [
         pass(1, "The mandate is bound on the principal's account"),
-        { step: 2, title: "The credential matches the binding", outcome: "skipped", detail: "Sayso holds no credential" },
-        { step: 3, title: "The credential's signatures", outcome: "skipped", detail: "Sayso holds no credential" },
+        shown ? pass(2, "The credential matches the binding") : { step: 2, title: "The credential matches the binding", outcome: "skipped", detail: "the agent showed no credential" },
+        shown ? pass(3, "The credential's signatures: the issuer's, and the owner's") : { step: 3, title: "The credential's signatures", outcome: "skipped", detail: "the agent showed no credential" },
         pass(4, "The payment is the agent key's per-payment mandate, inside the mandate"),
       ],
       limits: { cap_usdz: centsToUsdz(m.capCents), budget_usdz: centsToUsdz(m.budgetCents), payees: [m.payee], expires_at: m.expiresAt.toISOString(), max_payments: null },
       spent_usdz: centsToUsdz(m.spentCents), left_usdz: centsToUsdz(m.budgetCents - m.spentCents),
-      signed_order: Boolean(a.checkoutMandate), problems: [],
+      signed_order: Boolean(a.checkoutMandate), owner_signed: shown, problems: [],
     };
   }
 }
@@ -128,6 +153,6 @@ export class SimMandates implements MandateChecker {
 export function describeMandate(p: MandateProof): string {
   if (!p.ok) return `Metal could not verify the agent's mandate: ${[...p.problems, ...p.steps.filter((s) => s.outcome === "fail").map((s) => s.title)].join("; ") || "unknown"}`;
   const payees = p.limits.payees.length ? "Sayso only" : "any payee";
-  return `Paid under the owner's Metal mandate (${payees}, up to ${p.limits.cap_usdz} USDZ a payment, ${p.left_usdz} of ${p.limits.budget_usdz} USDZ left)${p.signed_order ? "; the agent signed this exact order" : ""}`;
+  return `Paid under the owner's Metal mandate (${payees}, up to ${p.limits.cap_usdz} USDZ a payment, ${p.left_usdz} of ${p.limits.budget_usdz} USDZ left)${p.owner_signed ? "; the owner's signature on it checks out" : ""}${p.signed_order ? "; the agent signed this exact order" : ""}`;
 }
 

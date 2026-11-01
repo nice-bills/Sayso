@@ -6,7 +6,8 @@
 //   env: SAYSO_URL, SAYSO_BUYER_KEY (a Metal testnet key), SAYSO_MAX_USDZ (spend cap per payout),
 //        SAYSO_SPENDABLE_USDZ (what the agent can spend now; a short budget waits or splits)
 //   or:  SAYSO_MANDATE (a credential from `npm run setup:agent-budget`): pay from the owner's account,
-//        within the limits the owner bound on Metal, signing each exact order with the mandate key
+//        within the limits the owner bound on Metal, signing each exact order with the mandate key,
+//        and showing the owner-signed credential (SAYSO_MANDATE_ISSUER: the issuer's public key file)
 //   offline: SAYSO_SIM_PAYER=0x... (or SAYSO_SIM_MANDATE=<ref>) against `npm run serve:offline`
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -32,7 +33,7 @@ function payingFetch(): typeof fetch {
   if (mandate) {
     // The owner's account pays; Metal refuses anything outside the mandate the owner bound, and the
     // agent's mandate key signs Sayso's exact offer, so a payment can't be replayed for another quote.
-    const agentKeyFile = process.env.SAYSO_MANDATE_AGENT_KEY ?? mandate.replace(/\.json$/, ".agent-key.json");
+    const agentKeyFile = process.env.SAYSO_MANDATE_AGENT_KEY ?? mandate.replace(/\.json$/, ".key.json");
     const agent = JSON.parse(readFileSync(agentKeyFile, "utf8")) as Es256Key;
     const credential = parseCredential(JSON.parse(readFileSync(mandate, "utf8")));
     return createMandatePaymentClient({ credential, signDigest: p256DigestSigner(privateKeyHex(agent)), network: "testnet", signedOffer: "always" }).fetchWithPayment as typeof fetch;
@@ -86,9 +87,26 @@ async function checkOffer(q: Quote, i: Invoice): Promise<string | undefined> {
   return undefined;
 }
 
+/**
+ * Paying under a mandate, the agent also shows the credential its owner signed and the issuer's
+ * public key, so Sayso can check the owner's signature against what is bound on chain.
+ */
+function presented(): string | undefined {
+  if (simMandate) return JSON.stringify({ mandate_credential: "sim", mandate_issuer: "sim" });
+  const mandate = process.env.SAYSO_MANDATE;
+  if (!mandate) return undefined;
+  const issuerFile = process.env.SAYSO_MANDATE_ISSUER ?? ".metal/agent-owner.issuer.public.json";
+  try {
+    return JSON.stringify({ mandate_credential: JSON.parse(readFileSync(mandate, "utf8")), mandate_issuer: JSON.parse(readFileSync(issuerFile, "utf8")) });
+  } catch {
+    return undefined;
+  }
+}
+
 async function pay(id: string) {
   try {
-    const res = await payingFetch()(`${base}/v1/payouts/${id}/pay`, { method: "POST", signal: AbortSignal.timeout(90_000) });
+    const body = presented();
+    const res = await payingFetch()(`${base}/v1/payouts/${id}/pay`, { method: "POST", signal: AbortSignal.timeout(90_000), ...(body ? { body, headers: { "content-type": "application/json" } } : {}) });
     return { http_status: res.status, ...((await res.json().catch(() => ({}))) as object) };
   } catch (err) {
     // A timeout is unconfirmed, not failed: the payment may have settled. Look it up before anyone pays again.
