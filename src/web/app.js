@@ -168,6 +168,10 @@ async function act(key, fn, done) {
 
 // ---------- render ----------
 let dirty = false;
+// The landing always lives at /, signed in or not; the app lives at /app.
+const inApp = () => location.pathname === "/app" || location.pathname.startsWith("/app/");
+function openApp(e) { e?.preventDefault?.(); if (!inApp()) history.pushState(null, "", "/app"); render(); window.scrollTo({ top: 0, behavior: "instant" }); }
+window.addEventListener("popstate", () => render());
 function render() {
   // Don't yank an input out from under someone typing; catch up when they leave it.
   const focused = document.activeElement;
@@ -175,7 +179,7 @@ function render() {
   dirty = false;
   staggered = 0;
   const y = window.scrollY;
-  $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn ? (state.claim ? claimView() : state.connect ? connectView() : appView()) : state.claim || state.connect ? claimGate() : landing(), state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].filter(Boolean));
+  $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn && (inApp() || state.claim || state.connect || state.focus) ? (state.claim ? claimView() : state.connect ? connectView() : appView()) : !state.signedIn && (state.claim || state.connect) ? claimGate() : landing(), state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].filter(Boolean));
   window.scrollTo(0, y);
   if (!state.signedIn) watchReveals();
 }
@@ -249,8 +253,10 @@ async function turn(c, target, tok) {
 // The board asks the server's own decide() (POST /v1/decide/preview) what an agent would do with a
 // sample €480 invoice, and plays a run of changes until a visitor grabs a control.
 function landing() {
+  const st = stage();
+  if (navSignin) navSignin.textContent = state.signedIn ? "Open the app" : "Sign in";
   return h("div", { class: "landing" },
-    stage(),
+    st,
     proveSection(),
     refusesSection(),
     signinSection(),
@@ -386,7 +392,7 @@ function stage() {
       h("header", { class: "l-top" }, brand(),
         h("nav", { class: "l-nav", "aria-label": "Sections" },
           h("a", { href: "#prove" }, "Prove it"), h("a", { href: "#refuses" }, "What it holds"),
-          h("a", { class: "l-signin", href: "#signin", onclick: toToken }, "Sign in"))),
+          (navSignin = h("a", { class: "l-signin", href: "#signin", onclick: toApp }, "Sign in")))),
       h("div", { class: "v-main" },
         h("h1", { class: "sr" }, "Sayso decides how your agent pays: pay, wait, split or hold"),
         word, verdictSr,
@@ -394,7 +400,7 @@ function stage() {
           h("p", { class: "v-ask" }, "Your agent wants to pay Kreuzberg Studio €480"),
           reason, source,
           h("div", { class: "l-actions" },
-            h("a", { class: "l-btn", href: "#signin", onclick: toToken }, "Open the demo"),
+            h("a", { class: "l-btn", href: "#signin", onclick: toApp }, "Open the demo"),
             h("a", { class: "l-btn quiet", href: "#prove" }, "See the proof")))),
       h("div", { class: "rail" }, track, h("div", { class: "rail-foot" }, railNote, h("span", { class: "rail-ctl" }, mode, h("button", { type: "button", class: "b-replay", onclick: () => play() }, "Replay")))),
       dials,
@@ -403,6 +409,9 @@ function stage() {
   return stageEl;
 }
 const toToken = () => setTimeout(() => document.getElementById("token")?.focus({ preventScroll: true }), 600);
+// Signed in already (as the owner, or looking around read-only)? The landing's way in opens the app.
+let navSignin;
+const toApp = (e) => (state.signedIn ? openApp(e) : toToken());
 
 // ---------- prove it: the chain of proof behind one payout ----------
 // The receipt is hashed here, in the browser, exactly as Sayso hashes it (sorted keys, SHA-256), and
@@ -534,7 +543,9 @@ const SIGNIN_NOTES = {
 async function signedIn() {
   state.me = await api("/auth/me");
   state.signedIn = true;
-  await load(); goLive(); render(); window.scrollTo({ top: 0, behavior: "instant" });
+  await load(); goLive();
+  if (!inApp() && !state.claim && !state.connect && !state.focus) history.pushState(null, "", "/app");
+  render(); window.scrollTo({ top: 0, behavior: "instant" });
 }
 
 /** Every way in, best first: a passkey, an emailed link, Google, then the owner token. */
@@ -582,7 +593,9 @@ function signinSection() {
       h("h2", {}, "Every held payment waits for one tap from you"),
       h("p", {}, "Sign in with Face ID or a fingerprint, then pay what your agents found, or hold it."),
     ),
-    h("div", {}, signinDialog()),
+    h("div", {}, state.signedIn
+      ? h("div", { class: "dialog signed", "data-ui": "" }, h("h3", {}, state.me?.viewer ? "You're looking around, read-only" : "You're signed in"), h("p", { class: "muted small" }, "Nothing on this page changed. The app is one tap away."), h("a", { class: "btn", href: "/app", onclick: openApp }, "Open the app"))
+      : signinDialog()),
   );
 }
 
@@ -591,7 +604,7 @@ function claimGate() {
   return h("div", { class: "gate" }, h("header", { class: "l-top" }, brand()), h("div", { class: "gate-body" }, signinDialog()));
 }
 
-function leaveClaim() { state.claim = null; state.claimInfo = null; history.replaceState(null, "", "/"); render(); }
+function leaveClaim() { state.claim = null; state.claimInfo = null; history.replaceState(null, "", state.signedIn ? "/app" : "/"); render(); }
 
 function claimView() {
   const info = state.claimInfo;
@@ -639,7 +652,7 @@ function connectView() {
     api(`/oauth2/requests/${encodeURIComponent(state.connect)}`).then((i) => { state.connectInfo = i; render(); }).catch((e) => { state.connectInfo = { error: e.message }; render(); });
     return h("div", { class: "gate ink" }, h("header", { class: "l-top" }, brand()));
   }
-  if (info.error) return gate(h("h2", {}, "This link has expired"), h("p", { class: "muted" }, info.error), h("button", { class: "btn", onclick: () => { state.connect = null; history.replaceState(null, "", "/"); render(); } }, "Open Sayso"));
+  if (info.error) return gate(h("h2", {}, "This link has expired"), h("p", { class: "muted" }, info.error), h("button", { class: "btn", onclick: () => { state.connect = null; history.replaceState(null, "", state.signedIn ? "/app" : "/"); render(); } }, "Open Sayso"));
   if (info.done) return gate(h("span", { class: "tick big-tick", "aria-hidden": "true" }, icon("check", 26)), h("h2", {}, `Going back to ${info.client_name}…`));
   const label = state.me?.passkeys ? "Allow with Face ID" : canPasskey() ? "Turn on Face ID and allow" : "Allow";
   const go = (path, confirm) => async () => {
@@ -716,7 +729,7 @@ function appView() {
         state.me?.viewer ? h("span", { class: "mode read-only", title: "You can look, but nothing you do pays or changes anything" }, "Read-only") : null,
         s ? h("span", { class: "mode", title: s.offline ? "Airwallex and Metal are simulated" : "Real Airwallex and Metal APIs" }, h("span", { class: `dot${s.offline ? "" : " live"}` }), s.offline ? "Offline demo" : s.sandbox ? "Sandbox" : "Live") : null,
         h("a", { class: "btn quiet icon-btn", href: "/ops/", target: "_blank", rel: "noopener", title: "Back office", "aria-label": "Back office" }, icon("ledger", 18)),
-        h("button", { class: "btn quiet icon-btn", title: "Sign out", "aria-label": "Sign out", onclick: async () => { await api("/auth/logout", {}); state.me = await api("/auth/me").catch(() => state.me); state.signedIn = false; render(); } }, icon("out", 18)),
+        h("button", { class: "btn quiet icon-btn", title: "Sign out", "aria-label": "Sign out", onclick: async () => { await api("/auth/logout", {}); state.me = await api("/auth/me").catch(() => state.me); state.signedIn = false; history.pushState(null, "", "/"); render(); } }, icon("out", 18)),
       ),
     )),
     h("div", { class: "wrap" },
@@ -1137,7 +1150,7 @@ function proof(p) {
 function leaveFocus() {
   if (!state.focus) return;
   state.focus = null;
-  history.replaceState(null, "", "/");
+  history.replaceState(null, "", "/app");
 }
 
 function focusView() {

@@ -360,6 +360,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   app.get("/approve/:id", (_req, res) => res.sendFile("index.html", { root: webDir }));
   // A chat app's "Sign in with Sayso" lands here: the app shows Allow or Not now.
   app.get("/connect/:id", (_req, res) => res.sendFile("index.html", { root: webDir }));
+  app.get("/app", (_req, res) => res.sendFile("index.html", { root: webDir }));
   // The short form agents send: /p/ and a hash of the invoice id.
   app.get("/p/:code", (req, res) => {
     const item = inbox.list().find((i) => shortCode(i.id) === req.params.code);

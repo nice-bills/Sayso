@@ -168,3 +168,13 @@ test('a visitor can look around read-only, and nothing they do pays', async ({ a
   const status = await browser.evaluate(async () => (await fetch('/v1/inbox', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ from: 'a@b.c', body: 'pay 10 EUR' }) })).status);
   expect(status).toBe(403);
 });
+
+test('the landing stays at / after signing in, and opens the app from there', async ({ app, screen, browser }) => {
+  await app.open('/');
+  await screen.getByRole('button', 'Look around, read-only').tap();
+  await expect(screen.getByRole('button', 'Hold to talk')).toBeVisible();
+  await app.open('/');
+  await expect(browser.locator('.v-hero')).toBeVisible();
+  await screen.getByRole('link', 'Open the app').first().tap();
+  await expect(screen.getByRole('button', 'Hold to talk')).toBeVisible();
+});

@@ -261,7 +261,7 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
     const r = t ? db.prepare("UPDATE owner_email_links SET used = 1 WHERE token_hash = ? AND used = 0 AND expires > ?").run(sha(t), Date.now()) : undefined;
     if (!r || Number(r.changes) !== 1) return void res.redirect(303, "/?signin=expired");
     startSession(req, res);
-    res.redirect(303, "/");
+    res.redirect(303, "/app");
   });
 
   // ---------- Google ----------
@@ -286,7 +286,7 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
       const claims = id_token ? (JSON.parse(Buffer.from(id_token.split(".")[1]!, "base64url").toString()) as { email?: string; email_verified?: boolean; aud?: string }) : {};
       if (claims.aud !== google.id || !claims.email_verified || claims.email?.toLowerCase() !== ownerEmail) return void res.redirect(303, "/?signin=google-not-owner");
       startSession(req, res);
-      res.redirect(303, "/");
+      res.redirect(303, "/app");
     } catch {
       res.redirect(303, "/?signin=google-failed");
     }
