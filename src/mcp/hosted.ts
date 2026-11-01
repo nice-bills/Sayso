@@ -175,14 +175,14 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
       description: "Sayso's own email address and the newest emails in it: invoices, suppliers' replies, and what Sayso sent. Use it to see if a supplier answered.",
       inputSchema: { limit: z.number().int().min(1).max(50).optional() },
     }, async ({ limit }) => {
-      try { return text({ ...mb.status(), messages: await mb.list(limit ?? 20) }); } catch (err) { return mailFail(err); }
+      try { return text({ ...mb.status(), messages: (await mb.list(limit ?? 20)).filter((m) => !mb.hiddenFromAgents(m)) }); } catch (err) { return mailFail(err); }
     });
 
     server.registerTool("read_email", {
       description: "One email in Sayso's inbox, with its full text.",
       inputSchema: { message_id: z.string() },
     }, async ({ message_id }) => {
-      try { const m = await mb.get(message_id); return m ? text(m) : fail("no such email"); } catch (err) { return mailFail(err); }
+      try { const m = await mb.get(message_id); return m && !mb.hiddenFromAgents(m) ? text(m) : fail("no such email"); } catch (err) { return mailFail(err); }
     });
 
     server.registerTool("send_email", {
@@ -203,6 +203,8 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
       inputSchema: { message_id: z.string(), text: z.string().min(1).max(10_000) },
     }, async ({ message_id, text: body }) => {
       try {
+        const original = await mb.get(message_id).catch(() => undefined);
+        if (!original || mb.hiddenFromAgents(original)) return fail("no such email");
         if (!spend(agent)) return fail(`This agent has sent its ${EMAILS_PER_DAY} emails for today.`);
         const r = await mb.reply(message_id, body);
         emit("observe", `${agent.name} replied from Sayso to email ${message_id.slice(0, 40)}`);

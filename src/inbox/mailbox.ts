@@ -152,6 +152,16 @@ export class Mailbox {
     };
   }
 
+  /**
+   * Mail agents must never see: what Sayso sent the owner (sign-in links) and the one-cent checks it
+   * sent payees (their confirm-or-deny links). Any agent key can read this inbox, so these stay out of it.
+   */
+  hiddenFromAgents(m: Pick<MailMessage, "to" | "subject">): boolean {
+    const owner = this.opts.ownerEmail?.toLowerCase();
+    if (owner && m.to.some((t) => addressOf(t) === owner)) return true;
+    return /^(Re: )?(Your Sayso sign-in link|Did .+ change its bank details\?)$/.test(m.subject);
+  }
+
   /** People an agent may write to: whoever emailed this address, or sent an invoice in by email. */
   async knows(address: string, invoiceSenders: string[] = []): Promise<boolean> {
     const a = addressOf(address);

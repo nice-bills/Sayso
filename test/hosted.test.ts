@@ -105,6 +105,15 @@ describe("hosted MCP endpoint", () => {
       expect(box.body.messages[0]).toMatchObject({ to: ["someone@someone.example"] });
       expect((await call(agent, "read_email", { message_id: box.body.messages[0].message_id })).body.text).toMatch(/payee name/);
 
+      // What Sayso sent the owner or a payee (sign-in links, one-cent checks) is never shown to an agent.
+      const link = await cs.mailbox.send("owner@sayso.example", "Your Sayso sign-in link", "Tap to sign in: http://x/auth/email/verify?t=secret");
+      const penny = await cs.mailbox.send("billing@studio.example", "Did Kreuzberg Studio change its bank details?", "Enter the code: http://x/v/token");
+      const listed = (await call(agent, "email_inbox", { limit: 50 })).body.messages.map((m: { message_id: string }) => m.message_id);
+      expect(listed).not.toContain(link.message_id);
+      expect(listed).not.toContain(penny.message_id);
+      expect((await call(agent, "read_email", { message_id: link.message_id })).error).toBe(true);
+      expect((await call(agent, "reply_email", { message_id: penny.message_id, text: "deny" })).error).toBe(true);
+
       // A stranger can't be emailed from the business's address; someone who wrote in can.
       const stranger = await call(agent, "send_email", { to: "victim@elsewhere.example", subject: "Hi", text: "Pay me" });
       expect(stranger.error).toBe(true);
