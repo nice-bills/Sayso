@@ -58,7 +58,7 @@ Payments: "Books reconcile to the cent." Then the repo link.
 
 ## If there is room
 
-- **Prove it (20s), for the Metal award.** Payments, Rechenzentrum Nord, **Prove it**: six pieces of evidence, all ticked, including "the owner's signature and the issuer's match what is bound on chain" and "the agent's key signed this exact order". Tap **Charged too much** ("my agent never agreed to that price"): Denied by the agent's own signature, and the answer is anchored on Metal. Then the same claim on Lingua Freelance, paid from a bare key: no mandate on record, so it's upheld and refunded on chain. *"Same claim, different proof, different answer."*
+- **Prove it (20s), for the Metal award.** Payments, Rechenzentrum Nord, **Prove it**: six pieces of evidence, all ticked, including "the owner's signature and the issuer's match what is bound on chain" and "the agent's key signed this exact order". Tap **Charged too much** ("my agent never agreed to that price"): Denied by the agent's own signature, and the answer is anchored on Metal. Then "Wasn't allowed" on Lingua Freelance, paid from a bare key: no mandate on record and the payee already paid, so it goes to the owner. *"Same claim, different proof, different answer."*
 - **Bounce and refund (20s).** An account that bounces: Bounced, then Refunded in full, with the refund on Metal under its own capped mandate.
 - **The heist (15s).** `npm run demo` beat 8: a compromised agent tries to send the earnings elsewhere and Metal refuses it on chain (`mandate_payee_not_listed`).
 - **A higher cap (15s).** A bill over the agent's cap and due tomorrow is held with the cap it needs; the owner approves it with one `mandate replace`.

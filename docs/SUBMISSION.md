@@ -38,12 +38,12 @@ A dispute (`POST /v1/payouts/:id/disputes`, or `dispute_payout`) names what went
 | The proof | Verdict | What moves |
 | --- | --- | --- |
 | Answers the claim (for example a verified mandate against "not authorized") | **Denied** | The proof's hash is anchored on Metal, so the answer can't be rewritten |
-| Contradicts the payout (no mandate on record, or the transfer came back) | **Upheld** | The agent's USDZ is refunded on Metal by `mandate pull --payment-id` |
-| Can't settle it | **Review** | The owner refunds it with their passkey, or keeps it |
+| Contradicts the payout (the transfer came back) | **Upheld** | The agent's USDZ is refunded on Metal by `mandate pull --payment-id` |
+| Can't settle it, or the payee already has the money and no mandate allowed the payment | **Review** | The owner refunds it with their passkey, or keeps it |
 
 **A mandate a real human signed.** An agent paying under its owner's mandate also shows the credential its owner signed (`mandate_credential` and `mandate_issuer` in the pay request's body; the MCP server sends them). Sayso runs all four of Metal's checks (`verifyMandatePayment` with the credential), so the owner's signature and the issuer's key are checked against what was bound on chain, and trusted only as far as the chain does. "My agent never agreed to that price" is then answered by the agent's own signed order, and "my agent wasn't allowed" by the owner's signature.
 
-In the seeded app, the Rechenzentrum Nord payout was made under an owner's mandate with a signed order and the owner's credential, so "Wasn't allowed" is denied. The Lingua Freelance payout came from a bare key, so the same claim is upheld and refunded.
+In the seeded app, the Rechenzentrum Nord payout was made under an owner's mandate with a signed order and the owner's credential, so "Wasn't allowed" is denied. The Lingua Freelance payout came from a bare key, so the same claim goes to the owner: the payee already has the money, and Sayso won't refund on the agent's word alone.
 
 ## Why it matters
 
@@ -79,7 +79,7 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 
 ## Proven live
 
-`npm run demo` runs end to end against the Airwallex sandbox and Metal testnet: x402 payments from three buyer agents, a batch payout, real Airwallex transfers, a bounce through Airwallex's transfer simulation refunded on chain, earnings swept under the ramp-only mandate and credited exactly once, an agent paying under an owner-signed mandate with all four of Metal's checks passing, three disputes settled from the proof (the owner's "my agent never agreed to that price" denied by the agent's signed order, [tx](https://testnet.metalntwx.com/tx/0xff64700a67ebd5bd5da155bfe33dc9b67d4a7f83678a7ad4740bbfc65fb3d7cc); a "never arrived" claim denied with its answer anchored on Metal, [tx](https://testnet.metalntwx.com/tx/0x0027d07614f64ccd007d05b426f84e5fa4f0d60a81b17842bd605061232a1cca), and a "wasn't allowed" claim on a bare-key payment upheld and refunded on chain, [tx](https://testnet.metalntwx.com/tx/0x9c7d5b39712ed895d53b52b1614cb4d0f02706df98b9437a9a524116f07be83c)), the heist refused on chain (`mandate_payee_not_listed`), and the books reconciled to the cent (48 checks). Last run: 1 Nov 2026, on `metal-agent` 0.3.3 and `metal-pay` 0.3.4.
+`npm run demo` runs end to end against the Airwallex sandbox and Metal testnet: x402 payments from three buyer agents, a batch payout, real Airwallex transfers, a bounce through Airwallex's transfer simulation refunded on chain, earnings swept under the ramp-only mandate and credited exactly once, an agent paying under an owner-signed mandate with all four of Metal's checks passing, three disputes settled from the proof (the owner's "my agent never agreed to that price" denied by the agent's signed order, [tx](https://testnet.metalntwx.com/tx/0xff64700a67ebd5bd5da155bfe33dc9b67d4a7f83678a7ad4740bbfc65fb3d7cc); a "never arrived" claim denied with its answer anchored on Metal, [tx](https://testnet.metalntwx.com/tx/0x0027d07614f64ccd007d05b426f84e5fa4f0d60a81b17842bd605061232a1cca), and and a "wasn't allowed" claim on a bare-key payment sent to the owner, since the payee already has the money), the heist refused on chain (`mandate_payee_not_listed`), and the books reconciled to the cent (48 checks). Last run: 1 Nov 2026, on `metal-agent` 0.3.3 and `metal-pay` 0.3.4.
 
 The live run found what offline tests couldn't: Airwallex quotes FX in market convention (EURUSD even when you sell USD, so rates had to be inverted or every EUR quote was 23% cheap), returns a new beneficiary as `id`, charges a fee on every LOCAL transfer and keeps it on a bounce, needs `address.state` for Spanish and US payees, and only fails a transfer from `SENT`. All of it is handled and tested.
 
