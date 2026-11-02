@@ -153,6 +153,9 @@ export class SimMandates implements MandateChecker {
 export function describeMandate(p: MandateProof): string {
   if (!p.ok) return `Metal could not verify the agent's mandate: ${[...p.problems, ...p.steps.filter((s) => s.outcome === "fail").map((s) => s.title)].join("; ") || "unknown"}`;
   const payees = p.limits.payees.length ? "Sayso only" : "any payee";
+  // Offline, the simulator passes every step for any credential shown: say so, never "checks out".
+  const sim = p.steps.some((s) => s.detail === "sim");
+  if (sim) return `Paid under a simulated Metal mandate (${payees}, up to ${p.limits.cap_usdz} USDZ a payment, ${p.left_usdz} of ${p.limits.budget_usdz} USDZ left${p.signed_order ? "; the agent signed this exact order" : ""}; offline, so no signature is checked)`;
   return `Paid under the owner's Metal mandate (${payees}, up to ${p.limits.cap_usdz} USDZ a payment, ${p.left_usdz} of ${p.limits.budget_usdz} USDZ left)${p.owner_signed ? "; the owner's signature on it checks out" : ""}${p.signed_order ? "; the agent signed this exact order" : ""}`;
 }
 

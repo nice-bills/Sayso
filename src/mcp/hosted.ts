@@ -4,6 +4,7 @@
 // the owner gets a link and taps it while signed in, so a hijacked agent can't pay anyone.
 // Agents with their own USDZ still pay quotes directly over x402 (pay_url), capped by Metal.
 
+import { baseUrl as sharedBaseUrl } from "../auth.js";
 import express, { type Request } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -25,7 +26,7 @@ const text = (o: unknown) => ({ content: [{ type: "text" as const, text: JSON.st
 const fail = (message: string) => ({ ...text({ error: message }), isError: true });
 
 /** Where people reach this server: PUBLIC_URL, or the host the agent called. */
-const baseUrl = (req: Request) => process.env.PUBLIC_URL ?? `${req.header("x-forwarded-proto") ?? req.protocol}://${req.header("host")}`;
+const baseUrl = (req: Request) => sharedBaseUrl(req);
 /** Points an agent without credentials at the auth.md discovery chain (RFC 9728). */
 const resourceMetadata = (req: Request) => `Bearer resource_metadata="${baseUrl(req)}/.well-known/oauth-protected-resource"`;
 /** Invoice ids are often whole email Message-IDs, so links carry a short hash of one instead. */

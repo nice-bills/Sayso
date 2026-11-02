@@ -12,10 +12,15 @@
 //   npm run setup:agent-budget -- --cap 400 --budget 1000 --days 30 --replaces .metal/agent-budget.json
 // The old mandate is revoked in the same transaction and its spending carries over; the agent keeps its
 // SAYSO_MANDATE path, which now holds the new credential (the old one is kept as .replaced.json).
-// The owner key (.metal/agent-owner.json) stays with the owner. Revoke any time:
-//   npx metal-agent mandate revoke --credential .metal/agent-budget.json --key .metal/agent-owner.json --network testnet --rpc-url $METAL_RPC_URL
+// The owner key stays with the owner, OUTSIDE the agent's folder: ~/.sayso-owner/agent-owner.json (0600) by
+// default. It signs the agent's credential, so an agent that could read it could write itself any budget;
+// and .metal/ ships to the host in METAL_BUNDLE, so it never goes there. Only the issuer's PUBLIC key is
+// copied to .metal/ for the agent to show. Revoke any time:
+//   npx metal-agent mandate revoke --credential .metal/agent-budget.json --key ~/.sayso-owner/agent-owner.json --network testnet --rpc-url $METAL_RPC_URL
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import type { Address } from "viem";
 import { MetalMandate } from "../src/metal/mandate.js";
@@ -23,7 +28,7 @@ import { toMinor } from "../src/treasury/money.js";
 
 const { values } = parseArgs({ options: {
   cap: { type: "string", default: "250" }, budget: { type: "string", default: "1000" }, days: { type: "string", default: "30" },
-  out: { type: "string", default: ".metal/agent-budget.json" }, owner: { type: "string", default: ".metal/agent-owner.json" },
+  out: { type: "string", default: ".metal/agent-budget.json" }, owner: { type: "string", default: join(process.env.SAYSO_OWNER_DIR ?? join(homedir(), ".sayso-owner"), "agent-owner.json") },
   replaces: { type: "string" },
 } });
 // Replacing in place: keep the old credential beside it, and write the new one where the agent already looks.
@@ -38,8 +43,22 @@ if (!payTo) throw new Error("Set SAYSO_PAY_TO to Sayso's Metal address (pay_to i
 if (!process.env.METAL_RPC_URL) throw new Error("Set METAL_RPC_URL (create an endpoint at https://console-testnet.metalntwx.com)");
 mkdirSync(".metal", { recursive: true });
 
+// The owner's keys never sit where the agent (or the host bundle) can read them.
+const ownerDir = resolve(dirname(values.owner));
+if (ownerDir === resolve(".metal") || ownerDir === resolve(dirname(values.out))) {
+  throw new Error(`--owner ${values.owner} is in the agent's folder. Keep the owner key elsewhere (default ~/.sayso-owner/).`);
+}
+mkdirSync(ownerDir, { recursive: true, mode: 0o700 });
+// Older runs wrote the owner key into .metal/; move it (and its issuer keys) out.
+for (const f of existsSync(".metal") ? readdirSync(".metal") : []) {
+  if (!f.startsWith("agent-owner.") || f === "agent-owner.issuer.public.json") continue;
+  const to = join(ownerDir, f);
+  if (!existsSync(to)) { renameSync(join(".metal", f), to); console.log(`Moved ${join(".metal", f)} to ${to}: the agent must not hold the owner's keys.`); }
+}
+
 const owner = new MetalMandate({ network: "testnet", rpcUrl: process.env.METAL_RPC_URL, ownerKey: values.owner, credential: values.out, rampAddress: payTo });
 if (!existsSync(values.owner)) await owner.cli(["key", "create", "--out", values.owner]);
+chmodSync(values.owner, 0o600);
 const ownerAddress = JSON.parse(readFileSync(values.owner, "utf8")).address as string;
 if (!replaced) await owner.cli(["fund", ownerAddress]).catch((e) => console.error(`fund owner: ${String(e).slice(0, 200)}`));
 
@@ -52,6 +71,11 @@ const { principal, reference, gasKeyAddress } = await owner.setup({
 if (replaced) {
   console.log(`\nReplaced on Metal: the agent may now pay Sayso up to ${values.cap} USDZ a payment, ${values.budget} USDZ in total. The old mandate is revoked.\n  mandate  ${reference}\n  old      ${replaced}`);
   process.exit(0);
+}
+// The agent shows the owner's issuer PUBLIC key with its credential; the private issuer key stays with the owner.
+for (const f of readdirSync(ownerDir)) {
+  if (f.endsWith(".issuer.public.json")) copyFileSync(join(ownerDir, f), join(".metal", "agent-owner.issuer.public.json"));
+  else if (f.includes(".issuer")) chmodSync(join(ownerDir, f), 0o600);
 }
 if (gasKeyAddress) await owner.cli(["fund", gasKeyAddress]).catch(() => undefined);
 // The agent pays from the owner's account, so that is where the budget's USDZ has to be.

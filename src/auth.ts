@@ -60,7 +60,13 @@ function cookies(req: Request): Record<string, string> {
   return Object.fromEntries((req.headers.cookie ?? "").split(";").map((c) => c.trim().split("=")).filter((kv) => kv.length === 2).map(([k, v]) => [k!, decodeURIComponent(v!)]));
 }
 
-export const baseUrl = (req: Request) => (process.env.PUBLIC_URL ?? `${req.header("x-forwarded-proto") ?? req.protocol}://${req.header("host")}`).replace(/\/$/, "");
+/**
+ * Where people reach this server. Sign-in links and the passkey domain come from here, so a live server
+ * must not take them from the caller's Host header: PUBLIC_URL, else Render's own RENDER_EXTERNAL_URL.
+ * Only a local server with neither falls back to the host it was called on.
+ */
+export const publicBase = () => (process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL)?.replace(/\/$/, "");
+export const baseUrl = (req: Request) => (publicBase() ?? `${req.header("x-forwarded-proto") ?? req.protocol}://${req.header("host")}`).replace(/\/$/, "");
 
 interface Challenge { challenge: string; purpose: string; subject: string; expires: number }
 
@@ -68,7 +74,8 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
   let ownerToken = process.env.OWNER_TOKEN ?? "";
   if (!ownerToken) {
     ownerToken = opts.offline ? "sayso-demo" : randomBytes(18).toString("base64url");
-    opts.log(`Owner token (set OWNER_TOKEN to choose your own): ${ownerToken}`);
+    // Live, host logs are read by more people than the owner: never print a token that moves money.
+    opts.log(opts.offline ? `Owner token (set OWNER_TOKEN to choose your own): ${ownerToken}` : "No OWNER_TOKEN set: token sign-in is off until you set one (email, Google and passkey sign-in still work)");
   }
   const ownerEmail = (process.env.OWNER_EMAIL ?? (opts.offline ? "owner@sayso.example" : "")).trim().toLowerCase();
   const google = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? { id: process.env.GOOGLE_CLIENT_ID, secret: process.env.GOOGLE_CLIENT_SECRET } : undefined;

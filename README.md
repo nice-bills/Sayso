@@ -6,7 +6,7 @@ The rails decide what is allowed, not the prompt:
 - **Fiat moves only after the agent's payment settles on Metal.** An unsettled or failed payment releases the quote, and nothing is paid.
 - **Every quote is single-use.** Each payout id doubles as Airwallex's `request_id`, so nothing is paid twice.
 - **Airwallex validates the payee before anyone pays, and asks the payee's bank whose account it is** (Verification of Payee in SEPA, Confirmation of Payee in the UK). A name mismatch waits for a person; a closed account is refused.
-- **The risk rules are code.** They cover blocked countries, caps, velocity and large first payouts. An invoice that asks to pay new bank details is held until a person confirms with the payee.
+- **The risk rules are code.** They cover blocked countries, caps, velocity and first payouts. An agent can pay only accounts the owner knows: its first payout to any other account waits for the owner's passkey tap, whatever the amount, so an injected invoice can't send money to fresh bank details. Approving it (or `POST /v1/payees/trust`) lets agents pay that account again. An invoice that asks to pay new bank details is held until a person confirms with the payee. Public routes are rate-limited per client.
 - **A bounced payout is refunded in full**, even when the bank returns it after Airwallex said `PAID`, under a Metal **refund mandate**. Metal caps each refund and the lifetime total.
 - **Earnings reach the Airwallex float only through a Metal sweep mandate whose only payee is the ramp.** A compromised agent trying to drain them is refused on chain.
 - **An agent can spend only what its owner allowed, on chain.** The owner binds a Metal mandate whose only payee is Sayso, with a cap per payment, a total budget and an expiry. The agent pays from the owner's account and signs Sayso's exact offer. Sayso checks every such payment with Metal's four verification steps and keeps the proof. With `SAYSO_AGENT_MANDATES=required`, any other payment is refused before it settles.
@@ -68,7 +68,7 @@ SAYSO_PAY_TO=<pay_to from GET /healthz> npm run setup:agent-budget -- --cap 250 
 claude mcp add sayso -e SAYSO_URL=... -e SAYSO_MANDATE=.metal/agent-budget.json -- npx tsx src/mcp/server.ts
 ```
 
-Metal refuses any payment above the cap, past the budget, after the expiry, or to anyone but Sayso. The owner can revoke it at any time with `metal-agent mandate revoke`.
+Metal refuses any payment above the cap, past the budget, after the expiry, or to anyone but Sayso. The owner can revoke it at any time with `metal-agent mandate revoke`. The owner's signing keys are written to `~/.sayso-owner/` (mode 0600), never into the agent's `.metal/` folder or the host bundle: the agent gets only its credential, its own mandate key and the issuer's public key, so it can't sign itself a bigger budget. The script refuses an owner key inside the agent's folder and moves one an older run left there.
 
 ## API
 
@@ -89,6 +89,7 @@ Metal refuses any payment above the cap, past the budget, after the expiry, or t
 | `POST /v1/inbox/:id/approve` | owner | The one tap. `verified_with_payee: true` is needed for held invoices. |
 | `POST /v1/inbox/:id/details` | owner | Fill in what the extractor couldn't find; the invoice is checked again. |
 | `GET /v1/payouts`, `POST /v1/payouts/:id/review` | owner | Every payout; allow or block a held agent payout. |
+| `GET /v1/payees/trusted`, `POST /v1/payees/trust` | owner (passkey) | Accounts agents may pay without a review: `{ name, currency, bank_country_code, bank }`. Approving a held agent payout adds its account. |
 | `GET /v1/payouts/:id/proof` | free | What Sayso can prove about a payout: the order, the owner's mandate, the approval, the Metal payment, the transfer, the receipt. No bank details. |
 | `POST /v1/payouts/:id/disputes` | payer only | `{ claim, note, issued_at, signature }`: a dispute settled from the proof. Only the owner (signed in) or the agent that paid can file one: the paying key signs `Sayso dispute\npayout: <id>\nclaim: <claim>\nissued_at: <iso>` (EIP-191, checked on chain, so smart accounts work too). Denied answers are anchored on Metal. Upheld ones are refunded, and only where Sayso's own record is at fault; a claim against a delivered payment goes to the owner. |
 | `POST /v1/payouts/:id/dispute` | owner | Refund an agent's payout yourself (passkey): the agent is refunded in full under the refund mandate. |

@@ -17,6 +17,9 @@ services:
       - { key: SESSION_SECRET, generateValue: true }
       # Anyone (judges) can look around read-only: every view, nothing that pays or changes anything.
       - { key: SAYSO_VIEWER, value: "on" }
+      # Agents paying over x402 must sign Sayso's exact offer under an owner-bound Metal mandate, checked before
+      # settlement. A bare agent key is refused. "verify" only records the mandate after the money has moved.
+      - { key: SAYSO_AGENT_MANDATES, value: required }
       - { key: AWX_CLIENT_ID, sync: false }
       - { key: AWX_API_KEY, sync: false }
       - { key: AWX_GLOBAL_ACCOUNT_ID, sync: false }

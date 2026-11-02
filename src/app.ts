@@ -48,7 +48,7 @@ import { booksBefore, flowsFromBooks, rampSince, reconcile, reportReconcile, typ
 import { FakeAirwallex, FakeMandate, FakeRefunder } from "./sim/offline.js";
 import { buildProof, CLAIMS, Disputes, judge, type Claim } from "./payouts/proof.js";
 import { OfferSigner, storedKey } from "./payouts/offer.js";
-import { chainPayerCheck, disputeMessage, simPayerCheck, type PayerCheck } from "./payouts/dispute-auth.js";
+import { chainPayerCheck, DISPUTE_SIGNATURE_TTL_MS, disputeMessage, simPayerCheck, type PayerCheck } from "./payouts/dispute-auth.js";
 import { Store } from "./store.js";
 import { fmt, toMinor } from "./treasury/money.js";
 
@@ -277,6 +277,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     }
   }
 
+  store.db.exec("CREATE TABLE IF NOT EXISTS used_dispute_signatures (signature TEXT PRIMARY KEY, used_at INTEGER NOT NULL)");
+
   // ---------- HTTP ----------
   const app = express();
   // pay_to is Sayso's Metal address: what an owner names as the only payee of an agent's mandate.
@@ -450,6 +452,13 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
       const mandateRef = (trail.last(p.id, "mandate")?.detail as { ref?: string } | undefined)?.ref;
       const why = await payerCheck({ buyer: p.buyer, payoutId: p.id, claim, body: req.body ?? {}, header: (n) => req.header(n), mandateRef });
       if (why) return void res.status(401).json({ error: why, sign: { message: disputeMessage(p.id, claim, "<issued_at>"), address: p.buyer } });
+      // A signed dispute counts once: replaying it inside its 10 minutes would re-run the judgment and re-anchor.
+      const sig = String(req.body?.signature ?? "");
+      if (sig) {
+        store.db.prepare("DELETE FROM used_dispute_signatures WHERE used_at < ?").run(Date.now() - 2 * DISPUTE_SIGNATURE_TTL_MS);
+        const fresh = store.db.prepare("INSERT OR IGNORE INTO used_dispute_signatures (signature, used_at) VALUES (?, ?)").run(sig.toLowerCase(), Date.now());
+        if (Number(fresh.changes) === 0) return void res.status(409).json({ error: "this signed dispute was already used; sign a new one" });
+      }
     }
     const note = String(req.body?.note ?? "").trim().slice(0, 200);
     const by = owner ? "you" : `the paying agent (${p.buyer.slice(0, 8)}…${p.buyer.slice(-4)})`;

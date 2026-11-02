@@ -29,6 +29,8 @@ async function seed() {
     { amount: "180.00", currency: "EUR", reference: "Translation Oct", payee: { name: "Lingua Freelance", address: { country_code: "FR", city: "Paris", street_address: "1 Rue de Rivoli", postcode: "75001" }, bank: { iban: "FR1420041010050500013M02606" }, bank_country_code: "FR" } },
     { amount: "95.50", currency: "EUR", reference: "GPU rental 44", payee: { name: "Rechenzentrum Nord GmbH", address: { country_code: "DE", city: "Hamburg", street_address: "Hafenstr. 2", postcode: "20359" }, bank: { iban: "DE75512108001245126199" }, bank_country_code: "DE" } },
   ];
+  // The owner allowed these suppliers once, so agents may pay them without a review of the first payout.
+  for (const j of jobs) cs.svc.trustPayee({ name: j.payee.name, currency: j.currency, bank_country_code: j.payee.bank_country_code, bank: j.payee.bank }, "owner");
   // The second agent pays from its owner's account, under a budget the owner bound on Metal.
   cs.simMandates?.bind("0x6d616e646174653a6f776e65722d616c6963650000000000000000000000001", { principal: "0x0a11ce0000000000000000000000000000000001", capCents: 25_000, budgetCents: 100_000 });
   for (const [i, job] of jobs.entries()) {
