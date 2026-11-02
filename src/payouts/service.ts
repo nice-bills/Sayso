@@ -20,7 +20,7 @@ import { fmt, toMajor, toMinor } from "../treasury/money.js";
 import { PayoutBook, payeeHash, type Payout } from "./book.js";
 import { DEFAULT_PRICING, price, transferFee, type PricingConfig } from "./pricing.js";
 import { decide, DEFAULT_DECIDE, type DecideConfig, type Decision } from "./decide.js";
-import { assess, DEFAULT_RISK, type RiskConfig, type RiskVerdict } from "./risk.js";
+import { assess, riskFromEnv, type RiskConfig, type RiskVerdict } from "./risk.js";
 
 export type PayoutAirwallex = Pick<Airwallex, "fxRate" | "fxConvert" | "createTransfer" | "transferByRequestId" | "validateBeneficiary" | "createBeneficiary" | "currentBalances">
   & Partial<Pick<Airwallex, "verifyAccount">>;
@@ -57,6 +57,14 @@ export const PayoutRequest = z.object({
   part_payment: z.boolean().default(false),
 });
 export type PayoutRequest = z.input<typeof PayoutRequest>;
+
+/** An account the owner allows agents to pay: hashed exactly as a quote hashes its payee. */
+export const TrustRequest = z.object({
+  name: z.string().min(1).max(140),
+  currency: z.string().regex(/^[A-Z]{3}$/),
+  bank_country_code: z.string().length(2),
+  bank: z.record(z.string(), z.string()).refine((b) => Object.keys(b).length > 0, "bank details required"),
+});
 
 export class PayoutError extends Error {
   constructor(readonly status: number, message: string, readonly payout?: Payout) {
@@ -102,7 +110,7 @@ export class PayoutService {
   constructor(private readonly d: PayoutDeps) {
     this.book = new PayoutBook(d.store);
     this.basePricing = d.pricing ?? DEFAULT_PRICING;
-    this.risk = d.risk ?? DEFAULT_RISK;
+    this.risk = d.risk ?? riskFromEnv();
     this.ttl = d.quoteTtlMs ?? 120_000;
     this.read = d.read ?? readAuto;
     // A split's second part, once quoted: one per split, so it can't be quoted (or paid) twice.
@@ -191,7 +199,9 @@ export class PayoutService {
     const verdict = assess({
       usdValueMinor: pr.costMinor,
       bankCountry: r.payee.bank_country_code,
-      payeeSeenBefore: Boolean(this.book.payee(hash)?.firstPaidAt),
+      // Paid before, or the owner said agents may pay it. Anything else is a new account.
+      payeeSeenBefore: Boolean(this.book.payee(hash)?.firstPaidAt) || this.book.trusted(hash),
+      ownerApprovesEach: Boolean(opts.fromFloat),
       buyerSpentTodayMinor: r.buyer ? this.book.buyerSpentSince(r.buyer, new Date(now.getTime() - 24 * HOUR)) : 0,
       buyerPayoutsLastHour: r.buyer ? this.book.buyerCountSince(r.buyer, new Date(now.getTime() - HOUR)) : 0,
       invoice: findings,
@@ -309,8 +319,22 @@ export class PayoutService {
   /** The operator looked at a held payout and is happy to quote it. */
   approveReview(id: string, operator: string, now = new Date(), ttlMs = this.ttl): Payout {
     if (!this.book.transition(id, ["needs_review"], "quoted", { expiresAt: new Date(now.getTime() + ttlMs).toISOString() })) throw new PayoutError(409, "not awaiting review");
+    const p = this.book.get(id)!;
+    // The owner looked at this account and allowed it, so agents may pay it again without asking.
+    this.book.trustPayee(p.payeeHash, p.payeeName, operator, now);
     emit("decide", `${operator} cleared payout ${id.slice(0, 8)} after review`, { payout: id });
-    return this.book.get(id)!;
+    return p;
+  }
+
+  /** The owner adds an account agents may pay without a review of the first payout (a known supplier). */
+  trustPayee(input: unknown, operator: string, now = new Date()): { payee_hash: string; name: string } {
+    const r = TrustRequest.safeParse(input);
+    if (!r.success) throw new PayoutError(400, r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
+    const { name, currency, bank_country_code, bank } = r.data;
+    const hash = payeeHash({ account_currency: currency, bank_country_code, account_name: name, ...bank });
+    this.book.trustPayee(hash, name, operator, now);
+    emit("decide", `${operator} allowed agents to pay ${name} (${currency}, ${bank_country_code})`);
+    return { payee_hash: hash, name };
   }
 
   rejectReview(id: string, operator: string): Payout {

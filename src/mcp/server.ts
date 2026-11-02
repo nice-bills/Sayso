@@ -195,7 +195,8 @@ server.registerTool("pay_quote", {
   if (Number(q.price_usdz) > Number(maxUsdz)) return text({ paid: false, reason: `price ${q.price_usdz} USDZ is above this agent's limit of ${maxUsdz}`, quote: q });
   const bad = await checkOffer(q, { amount: (Number(q.offer.terms.amountMinor) / 100).toFixed(2), currency: q.currency } as Invoice);
   if (bad) return text({ paid: false, reason: `Not paying: ${bad}`, quote: q });
-  return text(await pay(quote_id));
+  const r = await pay(quote_id);
+  return text({ paid: r.http_status < 400, quote_id, ...r });
 });
 
 server.registerTool("payout_receipt", {

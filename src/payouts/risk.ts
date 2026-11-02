@@ -8,10 +8,19 @@ import type { Findings } from "../agent/reader.js";
 export interface RiskConfig {
   perPayoutCapMinor: number;
   perBuyerDailyCapMinor: number;
-  /** A first payout to an account Sayso has never paid, above this, is held. */
+  /**
+   * When the owner already approves each payment (their own inbox), a first payout to an account Sayso
+   * has never paid is held only above this. An agent's first payout to a new account is always held:
+   * an injected invoice must not be able to send any amount to fresh bank details with no human.
+   */
   newPayeeReviewAboveMinor: number;
   maxPayoutsPerBuyerPerHour: number;
   blockedCountries: string[];
+  /**
+   * "agents" (the default): an agent's first payout to an account Sayso has never paid waits for the owner,
+   * whatever the amount. "large": only above newPayeeReviewAboveMinor, the older, laxer rule.
+   */
+  newPayeeHold: "agents" | "large";
 }
 
 export const DEFAULT_RISK: RiskConfig = {
@@ -21,12 +30,20 @@ export const DEFAULT_RISK: RiskConfig = {
   maxPayoutsPerBuyerPerHour: 10,
   // Illustrative only; production uses a maintained sanctions screen.
   blockedCountries: ["KP", "IR", "SY", "CU"],
+  newPayeeHold: "agents",
 };
+
+/** DEFAULT_RISK, with SAYSO_NEW_PAYEE_HOLD=large to loosen the new-payee rule (the unit tests' fixture). */
+export function riskFromEnv(raw = process.env.SAYSO_NEW_PAYEE_HOLD): RiskConfig {
+  return { ...DEFAULT_RISK, newPayeeHold: raw === "large" ? "large" : "agents" };
+}
 
 export interface RiskInput {
   usdValueMinor: number;
   bankCountry: string;
   payeeSeenBefore: boolean;
+  /** The owner approves this payment themselves (an invoice in their inbox), not an agent on its own. */
+  ownerApprovesEach?: boolean;
   buyerSpentTodayMinor: number;
   buyerPayoutsLastHour: number;
   invoice?: Findings;
@@ -43,7 +60,8 @@ export function assess(i: RiskInput, cfg: RiskConfig = DEFAULT_RISK): RiskVerdic
   if (reject.length) return { verdict: "reject", reasons: reject };
 
   if (i.buyerPayoutsLastHour >= cfg.maxPayoutsPerBuyerPerHour) hold.push("unusual payout velocity for this buyer");
-  if (!i.payeeSeenBefore && i.usdValueMinor > cfg.newPayeeReviewAboveMinor) hold.push("large first payout to a new account");
+  if (!i.payeeSeenBefore && !i.ownerApprovesEach && cfg.newPayeeHold === "agents") hold.push("an agent's first payout to an account Sayso has never paid");
+  else if (!i.payeeSeenBefore && i.usdValueMinor > cfg.newPayeeReviewAboveMinor) hold.push("large first payout to a new account");
   if (i.invoice?.requestsNewBankDetails || i.invoice?.kind === "bank_details_change") hold.push("invoice asks to pay new bank details");
   if (i.invoice?.pressureTactics) hold.push("invoice uses pressure tactics");
   return hold.length ? { verdict: "hold", reasons: hold } : { verdict: "allow" };

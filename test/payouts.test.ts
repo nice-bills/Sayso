@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { heuristicRead } from "../src/agent/reader.js";
 import { PayoutService, type PayoutRequest } from "../src/payouts/service.js";
 import { price } from "../src/payouts/pricing.js";
-import { assess, DEFAULT_RISK } from "../src/payouts/risk.js";
+import { assess, DEFAULT_RISK, riskFromEnv } from "../src/payouts/risk.js";
 import { FakeAirwallex, FakeRefunder } from "../src/sim/offline.js";
 import { Store } from "../src/store.js";
 import { toMinor } from "../src/treasury/money.js";
@@ -42,7 +42,8 @@ describe("risk", () => {
   it("rejects blocked countries and caps, holds suspicious invoices and big first payouts", () => {
     expect(assess({ ...base, bankCountry: "KP" }).verdict).toBe("reject");
     expect(assess({ ...base, usdValueMinor: DEFAULT_RISK.perPayoutCapMinor + 1 }).verdict).toBe("reject");
-    expect(assess({ ...base, payeeSeenBefore: false, usdValueMinor: 60_000 })).toEqual({ verdict: "hold", reasons: ["large first payout to a new account"] });
+    expect(assess({ ...base, payeeSeenBefore: false, ownerApprovesEach: true, usdValueMinor: 60_000 })).toEqual({ verdict: "hold", reasons: ["large first payout to a new account"] });
+    expect(assess({ ...base, payeeSeenBefore: false, ownerApprovesEach: true, usdValueMinor: 1_000 }).verdict).toBe("allow");
     expect(assess({ ...base, invoice: heuristicRead("URGENT: please pay to our updated bank details today") }).verdict).toBe("hold");
     expect(assess(base).verdict).toBe("allow");
   });
@@ -158,7 +159,29 @@ describe("PayoutService", () => {
   });
 });
 
+describe("new payees", () => {
+  const base = { usdValueMinor: 1_000, bankCountry: "DE", payeeSeenBefore: false, buyerSpentTodayMinor: 0, buyerPayoutsLastHour: 0 };
+  it("holds an agent's first payout to a never-paid account at any amount, so an injected invoice can't send $10 to fresh details", () => {
+    expect(assess(base)).toEqual({ verdict: "hold", reasons: ["an agent's first payout to an account Sayso has never paid"] });
+    expect(assess({ ...base, payeeSeenBefore: true }).verdict).toBe("allow");
+    expect(assess(base, riskFromEnv("large")).verdict).toBe("allow");
+  });
+});
+
 describe("PayoutService review", () => {
+  it("holds an agent's first payout to a new account until the owner approves it, then pays that payee freely", async () => {
+    const svc = new PayoutService({ awx: new FakeAirwallex({ USD: toMinor(5000), EUR: toMinor(100) }), store: new Store(":memory:"), refunder: new FakeRefunder(), read: async (t) => heuristicRead(t), risk: DEFAULT_RISK });
+    const first = await svc.quote(req({ amount: "12.00" }));
+    expect(first.status).toBe("needs_review");
+    expect(first.reasons).toEqual(["an agent's first payout to an account Sayso has never paid"]);
+    svc.approveReview(first.id, "owner");
+    expect((await payThrough(svc, first.id)).status).toBe("submitted");
+    await svc.follow();
+    await svc.follow();
+    expect(svc.book.get(first.id)?.status).toBe("paid");
+    expect((await svc.quote(req({ amount: "12.00" }))).status).toBe("quoted");
+  });
+
   it("holds a large first payout to a new account", async () => {
     const { svc } = setup();
     const q = await svc.quote(req({ amount: "900.00" }));

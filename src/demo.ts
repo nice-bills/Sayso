@@ -67,6 +67,8 @@ const payee = (name: string, iban: string, city: string) => ({
   ...(iban.startsWith("ES") ? { payee_state: city } : {}),
 });
 
+const post = (path: string, body: unknown) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${cs.ownerToken}` }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<{ id: string; status: string; error?: string }>);
+
 // ---- 1. agents pay invoices over MCP ----
 await beat(1, "three scripted agents pay real-world invoices through Sayso's MCP tool, then Claude pays one on its own");
 const buyers = simPayers
@@ -80,9 +82,28 @@ const jobs = [
 // Live, buyer-agent-2 pays under the budget its owner bound on Metal (npm run setup:agent-budget).
 const ownerBudget = !simPayers && existsSync(".metal/agent-budget.json") ? ".metal/agent-budget.json" : undefined;
 const agents = await Promise.all(buyers.slice(0, 3).map((b, i) => agent(`buyer-agent-${i + 1}`, b, i === 1 ? ownerBudget : undefined)));
+// Agents pay only accounts the owner knows. The owner allowed their regular suppliers once, ahead of time;
+// buyer-agent-1's translator is new, so that first payout waits for the owner's tap.
+const trust = (p: ReturnType<typeof payee>) => post("/v1/payees/trust", { name: p.payee_name, currency: "EUR", bank_country_code: p.bank_country, bank: p.bank });
+const sellers = [
+  ["Atelier Nord", "DE89370400440532013000", "Hamburg", "64.00"], ["Keramik Sud", "DE75512108001245126199", "Munich", "38.50"],
+  ["Linen & Co", "FR1420041010050500013M02606", "Lyon", "52.00"], ["Papel SL", "ES9121000418450200051332", "Valencia", "27.25"],
+];
+for (const p of [payee("Rechenzentrum Nord GmbH", "DE75512108001245126199", "Hamburg"), payee("Etiqueta SL", "ES9121000418450200051332", "Madrid"),
+  // Linen & Co banks at the translator's account, which the owner allows in beat 1.
+  ...sellers.filter(([n]) => n !== "Linen & Co").map(([n, iban, city]) => payee(n!, iban!, city!)), payee("Closed Account Co (CLOSED)", "DE02100100109307118603", "Berlin"), payee("Closed Account Co", "DE02100100109307118603", "Berlin")]) await trust(p);
+emit("observe", "The owner allowed their known suppliers once; any other account an agent pays waits for them");
 for (const [i, a] of agents.entries()) {
   const r = result(await a.callTool({ name: "pay_invoice", arguments: { ...jobs[i]!, max_usdz: "400" } }));
   emit("observe", `buyer-agent-${i + 1}: ${r.paid ? `paid quote ${String(r.quote_id).slice(0, 8)}, HTTP ${r.http_status}` : `not paid: ${r.reason ?? r.status}`}`);
+  const held = !r.paid && r.status === "needs_review" ? r.id : undefined;
+  if (!r.paid && held) {
+    // The owner looks at the new account and allows it (a passkey tap in the app); the agent then pays.
+    const ok = await post(`/v1/payouts/${held}/review`, { decision: "approve" });
+    emit("observe", `Owner reviewed ${jobs[i]!.payee_name}'s new account: ${ok.status === "quoted" ? "allowed" : ok.error ?? ok.status}`);
+    const again = result(await a.callTool({ name: "pay_quote", arguments: { quote_id: held } }));
+    emit("observe", `buyer-agent-${i + 1}: ${again.paid ? `paid quote ${String(held).slice(0, 8)} after the owner's tap, HTTP ${again.http_status}` : `still not paid: ${again.reason ?? again.status}`}`);
+  }
 }
 // Claude, not a script: it gets an invoice email and Sayso's tools, and decides what to call.
 if (hasClaudeCredentials() && buyers[2]) {
@@ -100,10 +121,6 @@ await settle();
 // ---- 2. batch payouts ----
 await beat(2, "a marketplace agent settles four sellers with one payment");
 if (agents[1]) {
-  const sellers = [
-    ["Atelier Nord", "DE89370400440532013000", "Hamburg", "64.00"], ["Keramik Sud", "DE75512108001245126199", "Munich", "38.50"],
-    ["Linen & Co", "FR1420041010050500013M02606", "Lyon", "52.00"], ["Papel SL", "ES9121000418450200051332", "Valencia", "27.25"],
-  ];
   const r = result(await agents[1].callTool({ name: "pay_batch", arguments: { reference: "Sellers week 44", max_usdz: "250", items: sellers.map(([n, iban, city, amount]) => ({ amount: amt(amount!), currency: "EUR", reference: "Sellers week 44", ...payee(n!, iban!, city!) })) } }));
   emit("observe", `buyer-agent-2 (marketplace): ${r.paid ? `paid ${r.payouts?.length} sellers with one payment of ${r.price_usdz} USDZ` : `not paid: ${r.reason ?? r.error}`}`);
   await settle();
@@ -111,7 +128,6 @@ if (agents[1]) {
 
 // ---- 3. the invoice inbox ----
 await beat(3, "a business forwards invoices; one tap pays each");
-const post = (path: string, body: unknown) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${cs.ownerToken}` }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<{ id: string; status: string; error?: string }>);
 const items = [];
 for (const e of [studioInvoice, designerInvoice, fakeLandlord, vagueEmail]) items.push(await post("/v1/inbox", { message_id: e.messageId, from: e.from, subject: e.subject, body: e.body }));
 for (const it of items.filter((i) => i.status === "awaiting_approval")) await post(`/v1/inbox/${encodeURIComponent(it.id)}/approve`, { approver: "will" });

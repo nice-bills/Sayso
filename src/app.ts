@@ -36,6 +36,7 @@ import { escrow } from "./metal/escrow.js";
 import { MetalAnchorer, readAnchor, RECEIPT_TAG, Receipts, SimAnchorer, type Anchorer } from "./metal/receipts.js";
 import { requireSignedOffer } from "@metalntwx/metal-pay/mandates";
 import { Trail } from "./trail.js";
+import { LIMITS, rateLimit } from "./ratelimit.js";
 import { payoutApi, type PaymentMode } from "./payouts/http.js";
 import { BatchBook } from "./payouts/batch.js";
 import { decide, whatIf } from "./payouts/decide.js";
@@ -284,6 +285,18 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const offers = new OfferSigner(store);
   const signOffer = (p: Payout) => offers.sign(p, payTo);
   app.get("/healthz", (_req, res) => res.json({ ok: true, offline: opts.offline, pay_to: payTo, quote_signer: offers.address, agent_mandates: policy }));
+  // Public routes that spend Airwallex, Metal RPC or Claude calls get a per-client limit.
+  const limited: [string | string[], ReturnType<typeof rateLimit>][] = [
+    ["/v1/quotes", rateLimit("quote", LIMITS.quotes)],
+    ["/v1/batches", rateLimit("batch", LIMITS.batches)],
+    [["/v1/payouts/:id/pay", "/v1/batches/:id/pay", "/v1/payouts/:id/remainder"], rateLimit("payment", LIMITS.pay)],
+    ["/v1/payouts/:id/disputes", rateLimit("dispute", LIMITS.disputes)],
+    [["/v1/decide/preview", "/v1/payouts/:id/what-if"], rateLimit("preview", LIMITS.preview)],
+    [["/auth/login", "/auth/email", "/auth/passkey/login", "/auth/passkey/login/options", "/auth/viewer", "/agent/identity", "/agent/identity/claim", "/oauth2/token"], rateLimit("sign-in", LIMITS.auth)],
+    [["/mcp", "/mcp/k/:key", "/v1/agent/invoices"], rateLimit("agent", LIMITS.mcp)],
+    ["/v/:token", rateLimit("link", LIMITS.links)],
+  ];
+  for (const [path, limit] of limited) app.post(path, limit);
   if (!opts.offline && process.env.AWX_WEBHOOK_SECRET) {
     app.use("/webhooks/airwallex", webhookRouter(process.env.AWX_WEBHOOK_SECRET, store, async (e) => {
       if (e.name.startsWith("payout.transfer.")) await svc.onTransfer(e.data.object as unknown as Transfer);
@@ -561,6 +574,13 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     disputes.settle(open.id, "denied_by_owner", "You kept the payout after reading the proof.");
     trail.add(open.payout, "decide", "You kept the payout after reading the proof");
     res.json({ dispute: disputes.for(open.payout).at(-1) });
+  });
+  // Accounts agents may pay without the owner reviewing a first payout. Adding one needs the passkey.
+  app.get("/v1/payees/trusted", auth.requireOwner, (_req, res) => res.json(svc.book.trustedPayees()));
+  app.post("/v1/payees/trust", auth.requireOwner, express.json(), async (req, res) => {
+    const subject = String(req.body?.name ?? "");
+    if (!(await auth.confirmed(req, req.body?.confirmation, "trust", subject))) return void res.status(401).json({ error: "Confirm with your passkey to allow agents to pay this account.", need: "passkey" });
+    try { res.json(svc.trustPayee(req.body, "owner")); } catch (err) { fail(res, err); }
   });
   app.post("/v1/payouts/:id/review", auth.requireOwner, express.json(), async (req, res) => {
     if (req.body?.decision !== "reject" && !(await auth.confirmed(req, req.body?.confirmation, "review", String(req.params.id)))) return void res.status(401).json({ error: "Confirm with your passkey to allow it.", need: "passkey" });

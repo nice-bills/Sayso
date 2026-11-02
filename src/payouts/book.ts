@@ -69,6 +69,9 @@ export class PayoutBook {
       );
       CREATE TABLE IF NOT EXISTS payees (
         payee_hash TEXT PRIMARY KEY, beneficiary_id TEXT NOT NULL, first_paid_at TEXT
+      );
+      CREATE TABLE IF NOT EXISTS trusted_payees (
+        payee_hash TEXT PRIMARY KEY, payee_name TEXT NOT NULL, trusted_by TEXT NOT NULL, trusted_at TEXT NOT NULL
       );`);
     // Books made before decide() existed get the column added.
     const cols = store.db.prepare("PRAGMA table_info(payouts)").all() as Array<{ name: string }>;
@@ -118,6 +121,20 @@ export class PayoutBook {
   payee(hash: string): { beneficiaryId: string; firstPaidAt: string | null } | undefined {
     const r = this.store.db.prepare("SELECT beneficiary_id, first_paid_at FROM payees WHERE payee_hash = ?").get(hash) as { beneficiary_id: string; first_paid_at: string | null } | undefined;
     return r ? { beneficiaryId: r.beneficiary_id, firstPaidAt: r.first_paid_at } : undefined;
+  }
+
+  /** The owner said agents may pay this account (they approved a payout to it, or added it themselves). */
+  trustPayee(hash: string, name: string, by: string, at = new Date()): void {
+    this.store.db.prepare("INSERT OR IGNORE INTO trusted_payees (payee_hash, payee_name, trusted_by, trusted_at) VALUES (?, ?, ?, ?)").run(hash, name, by, at.toISOString());
+  }
+
+  trusted(hash: string): boolean {
+    return Boolean(this.store.db.prepare("SELECT 1 FROM trusted_payees WHERE payee_hash = ?").get(hash));
+  }
+
+  trustedPayees(): Array<{ payeeHash: string; name: string; trustedBy: string; trustedAt: string }> {
+    return (this.store.db.prepare("SELECT payee_hash, payee_name, trusted_by, trusted_at FROM trusted_payees ORDER BY trusted_at DESC").all() as Array<Record<string, string>>)
+      .map((r) => ({ payeeHash: r.payee_hash!, name: r.payee_name!, trustedBy: r.trusted_by!, trustedAt: r.trusted_at! }));
   }
 
   savePayee(hash: string, beneficiaryId: string): void {
