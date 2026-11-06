@@ -1,6 +1,7 @@
 // Sayso, the app. No framework and no build step: a small element builder (text is always set
 // as text, never as HTML, because invoice emails are written by strangers), state in one object,
 // and a full re-render after each change. Live updates come from the server's event stream.
+import { landing, afterRender } from "/landing.js";
 
 const $root = document.getElementById("root");
 const state = {
@@ -181,7 +182,8 @@ function render() {
   const y = window.scrollY;
   $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn && (inApp() || state.claim || state.connect || state.focus) ? (state.claim ? claimView() : state.connect ? connectView() : appView()) : !state.signedIn && (state.claim || state.connect) ? claimGate() : landing(), state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].filter(Boolean));
   window.scrollTo(0, y);
-  if (!state.signedIn) watchReveals();
+  afterRender();
+  watchReveals();
 }
 // Enter motion plays only the first time something appears (the set clears on a tab switch),
 // and a status change flashes once. A full re-render would otherwise replay every animation.
@@ -252,136 +254,6 @@ async function turn(c, target, tok) {
 // ---------- landing: the decision is the hero ----------
 // The board asks the server's own decide() (POST /v1/decide/preview) what an agent would do with a
 // sample €480 invoice, and plays a run of changes until a visitor grabs a control.
-function landing() {
-  const st = stage();
-  if (navSignin) navSignin.textContent = state.signedIn ? "Open the app" : "Sign in";
-  return h("div", { class: "landing" },
-    heroSection(),
-    consoleSection(st),
-    storiesSection(),
-    stepsSection(),
-    proveSection(),
-    refusesSection(),
-    agentsSection(),
-    faqSection(),
-    signinSection(),
-    footer(),
-  );
-}
-
-const SITE_LINKS = [["#board", "How it decides"], ["#prove", "Proof"], ["#agents", "Agents"], ["#questions", "Questions"]];
-
-// The first screen: a night sky, one glossy coin, and the sentence that says what Sayso is for.
-// The glass card carries the console's current verdict, so the hero is never a still picture.
-function heroSection() {
-  return h("section", { class: "site-hero", id: "top" },
-    h("div", { class: "hero-atmos", "aria-hidden": "true" }, h("i", { class: "a1" }), h("i", { class: "a2" }), h("i", { class: "a3" }), h("i", { class: "a4" }), h("i", { class: "grain" })),
-    h("div", { class: "hero-in" },
-      h("header", { class: "site-nav" }, brand(),
-        h("nav", { class: "site-links", "aria-label": "Sections" },
-          SITE_LINKS.map(([href, label]) => h("a", { href, class: "glass" }, label)),
-          (navSignin = h("a", { class: "site-sign", href: "#signin", onclick: toApp }, state.signedIn ? "Open the app" : "Sign in")))),
-      h("div", { class: "hero-orb" },
-        h("div", { class: "orb-ring", "aria-hidden": "true" }, h("i")),
-        h("div", { class: "orb3d", "aria-hidden": "true" }),
-        h("div", { class: "hero-decides", id: "hero-decides", "data-tone": "pay" },
-          h("span", { class: "hd-k" }, "Sayso decides"),
-          h("b", { class: "hd-word" }, "Pay"),
-          h("span", { class: "hd-what" }, "€480.00 to Kreuzberg Studio"),
-          h("span", { class: "hd-why" }, "price, balance, payee, deadline"))),
-      h("div", { class: "hero-copy" },
-        h("div", { class: "hero-lead" },
-          h("span", { class: "hero-eyebrow" }, "Agent payments · Metal + Airwallex"),
-          h("h1", { class: "hero-h1" }, "Now your agent can pay.", h("br"), h("em", {}, "Only what you allow."))),
-        h("div", { class: "hero-side" },
-          h("p", { class: "hero-lede" }, "Forward an invoice, or let an MCP agent ask. Sayso prices it, checks the payee and decides pay, wait, split or hold — in code, not in a prompt."),
-          h("div", { class: "hero-actions" },
-            h("a", { class: "hero-btn solid", href: "#signin", onclick: toApp }, "Open the demo"),
-            h("a", { class: "hero-btn glass", href: "#board" }, "See how it decides", h("i", { "aria-hidden": "true" }, "↓"))),
-          h("p", { class: "hero-trust" }, "Every quote single-use · Airwallex checks the payee · A bounced payout is refunded in full")))));
-}
-
-function consoleSection(panel) {
-  return h("section", { class: "site-section" },
-    h("div", { class: "site-in" },
-      h("div", { class: "sec-head" },
-        h("span", { class: "eyebrow" }, "The decision"),
-        h("h2", { class: "sec-h" }, "One invoice. ", h("em", {}, "Four possible answers.")),
-        h("p", { class: "sec-lede" }, "This is Sayso's own decision engine, answering live. Move a dial: price, balance, payee and deadline decide what an agent may do — pay, wait, split or hold.")),
-      panel));
-}
-
-const STORIES = [
-  ["Subscriptions", "€", "cobalt", "Keep my API plan paid every month.", "One vendor on the list, and anything over €5 waits for you."],
-  ["Freelancers", "£", "warm", "Pay the illustrator once I sign off the proofs.", "Parked as a hold until you approve that exact payment."],
-  ["Compute", "$", "sky", "Top up my GPU credits when they run low.", "One provider, $25 a day, a minute between top-ups."],
-  ["Travel", "€", "green", "Book the cheapest train to Lisbon under €80.", "Under €80 it pays on its own. Above, it asks first."],
-  ["Teams", "£", "ink", "Give the intern's agent £20 for the week.", "A mandate that expires on Friday, whatever is left."],
-  ["Tipping", "$", "cream", "Tip the writers I read, a dollar each.", "$1 per payment, $10 a day, one a minute."],
-];
-function storiesSection() {
-  return h("section", { class: "site-section", id: "stories" },
-    h("div", { class: "site-in" },
-      h("div", { class: "sec-head" },
-        h("span", { class: "eyebrow" }, "What it pays for"),
-        h("h2", { class: "sec-h" }, "Tell it what to pay for. ", h("em", {}, "Sayso holds the limit.")),
-        h("p", { class: "sec-lede" }, "An agent with a card can spend anything. An agent with Sayso spends what you set, where you set it, and asks you about the rest.")),
-      h("ul", { class: "story-grid" }, STORIES.map(([label, mark, tone, quote, rule]) => h("li", { class: "story", "data-tone": tone },
-        h("div", { class: "story-art", "data-mark": mark }),
-        h("div", { class: "story-body" },
-          h("span", { class: "story-k" }, label),
-          h("p", { class: "story-quote" }, quote),
-          h("p", { class: "story-rule" }, rule))))),
-      h("p", { class: "stories-note" }, "Illustrative requests. Every limit above is one Sayso's decide() enforces before a cent moves.")));
-}
-
-const STEPS = [
-  ["You set the limits", "A mandate on Metal: a cap per payment, a total budget, an expiry, and Sayso as its only payee."],
-  ["The agent gets one key", "A key that can ask Sayso to pay, and nothing else. It is never your account, and never a bigger budget."],
-  ["Every payment is checked", "decide() weighs price, balance, payee and deadline before money moves. Above the limit, it asks you."],
-  ["Revoke, and it is gone", "Revoking the mandate refuses the agent's next payment on chain, before Sayso is even asked."],
-];
-function stepsSection() {
-  return h("section", { class: "site-section dark-sec", id: "how" },
-    h("div", { class: "site-in steps-grid" },
-      h("div", { class: "steps-lead" },
-        h("span", { class: "eyebrow" }, "How it holds"),
-        h("h2", { class: "sec-h" }, "The limit is a contract, ", h("em", {}, "not a promise.")),
-        h("p", { class: "sec-lede" }, "Limits are not instructions in a prompt that a model can talk its way around. They live in a mandate on your own Metal account, and the chain enforces them.")),
-      h("ol", { class: "step-list" }, STEPS.map(([title, body], i) => h("li", { class: "step-row" },
-        h("span", { class: "step-n" }, `0${i + 1}`),
-        h("div", {}, h("h3", {}, title), h("p", {}, body)))))));
-}
-
-const AGENT_CLIENTS = ["Claude Code", "claude.ai", "ChatGPT", "Cursor", "Windsurf", "Zed", "Cline", "Raycast", "iMessage", "OpenClaw", "Gemini CLI", "GitHub Copilot"];
-function agentsSection() {
-  return h("section", { class: "site-section" },
-    h("div", { class: "site-in" },
-      h("div", { class: "agents-panel", id: "agents" },
-        h("span", { class: "eyebrow" }, "One way in"),
-        h("h2", { class: "sec-h" }, "Every agent, ", h("em", {}, "one Sayso.")),
-        h("p", { class: "sec-lede" }, "Sayso speaks the Model Context Protocol, so any client that runs MCP servers can forward an invoice. Payments settle in USDZ on Metal; payees are paid in their own currency through Airwallex."),
-        h("ul", { class: "agent-chips" }, AGENT_CLIENTS.map((n) => h("li", {}, n))),
-        h("p", { class: "agents-rails" }, ["Metal", "USDZ", "Airwallex", "SEPA & UK rails", "x402"].map((n) => h("span", {}, n))))));
-}
-
-const FAQ = [
-  ["What is Sayso?", "An invoice paid by an agent: it forwards the invoice, or asks over MCP, and Sayso prices it, checks the payee and pays through Airwallex once the agent's USDZ settles on Metal."],
-  ["Who holds the money?", "You do, on Metal. An agent spends only inside the mandate you bind, and only to Sayso."],
-  ["What stops an agent from overspending?", "Two layers. Metal refuses any payment past the cap, the budget or the expiry. Sayso's decide() checks price, balance, payee and deadline before a cent moves."],
-  ["What happens above the limit?", "The payment waits as a hold. You see who, how much, to whom and why, and approve it with a passkey before the window closes."],
-  ["What if the bank details changed?", "Sayso holds it, sends 0.01 with a code to the new account, and asks the payee at the address on file from an earlier paid invoice — never the address that sent the new details."],
-  ["Is it live?", "Agents pay against Airwallex's sandbox and Metal's testnet. The offline demo simulates both; every proof it produces says sim:."],
-];
-function faqSection() {
-  return h("section", { class: "site-section", id: "questions" },
-    h("div", { class: "site-in faq-in" },
-      h("div", { class: "sec-head" },
-        h("span", { class: "eyebrow" }, "Questions"),
-        h("h2", { class: "sec-h" }, "What people ask ", h("em", {}, "first."))),
-      h("div", { class: "faq" }, FAQ.map(([q, a]) => h("details", {}, h("summary", {}, q), h("p", {}, a))))));
-}
-
 let stageEl;
 function stage() {
   if (stageEl) return stageEl;
@@ -477,13 +349,6 @@ function stage() {
     const d = r.decision, i = d.inputs, tone = COLORS[d.verdict];
     source.textContent = `A sample €480 invoice, priced like a real quote with ${r.rate_source === "airwallex" ? "Airwallex's EUR rate right now" : "the simulator's EUR rate"} (${r.median} USD) as the week's median. The Price dial moves today's rate away from it.`;
     stageEl.dataset.tone = tone;
-    // The hero's glass card mirrors the console, so the first screen shows the decision moving.
-    const chip = document.getElementById("hero-decides");
-    if (chip) {
-      chip.dataset.tone = tone;
-      chip.querySelector(".hd-word").textContent = VERDICT[d.verdict] ?? d.verdict;
-      chip.querySelector(".hd-why").textContent = `${i.price_usdz} USDZ · ${d.decided_by === "balance" ? "budget short" : d.decided_by === "risk" ? "payee held" : d.decided_by === "deadline" ? "due tomorrow" : "price on target"}`;
-    }
     setWord((VERDICT[d.verdict] ?? d.verdict).toUpperCase());
     verdictSr.textContent = VERDICT[d.verdict] ?? d.verdict;
     const [lead, ...rest] = d.reason.split(":");
@@ -531,7 +396,6 @@ function stage() {
 }
 const toToken = () => setTimeout(() => document.getElementById("token")?.focus({ preventScroll: true }), 600);
 // Signed in already (as the owner, or looking around read-only)? The landing's way in opens the app.
-let navSignin;
 const toApp = (e) => (state.signedIn ? openApp(e) : toToken());
 
 // ---------- prove it: the chain of proof behind one payout ----------
@@ -640,23 +504,6 @@ function stampedInvoice() {
   return el;
 }
 
-function refusesSection() {
-  const refusals = [
-    ["New bank details in an email", "The bank is asked whose account it is before a penny moves."],
-    ["Pressure to pay today", "Urgency is a reason to slow down, so Sayso holds it."],
-    ["A name the bank doesn't know", "If the account isn't the payee's, it waits for your call."],
-    ["More than you allowed", "Each agent has a cap per payout, and Metal enforces its own."],
-    ["The same invoice twice", "Airwallex dedupes every request, so a retry can't pay again."],
-    ["Fees sent elsewhere", "Sayso's earnings sweep into its own Airwallex account only."],
-  ];
-  return h("section", { id: "refuses", class: "l-sheet" },
-    h("div", { class: "sheet-in" },
-      h("span", { class: "eyebrow" }, "Held every time"),
-      h("h2", {}, "What it won't pay"),
-      h("ul", { class: "refuse" }, refusals.map(([name, why]) => h("li", {}, h("h3", {}, name), h("p", {}, why)))),
-    ));
-}
-
 const SIGNIN_NOTES = {
   expired: "That sign-in link has expired or was used already. Ask for a new one.",
   "google-not-owner": "That Google account isn't this Sayso's owner.", "google-failed": "Google sign-in didn't finish. Try again.", "google-off": "Google sign-in isn't set up here.",
@@ -704,19 +551,6 @@ function signinDialog() {
       h("button", { class: m.passkey || m.email ? "btn" : "btn pay", type: "submit" }, "Sign in")),
     m.demo ? h("p", { class: "small muted" }, "Running the offline demo? The token is ", h("code", {}, "sayso-demo"), ". Sign in with it, then turn on Face ID to try passkeys.") : null,
     err,
-  );
-}
-
-function signinSection() {
-  return h("section", { id: "signin", class: "site-cta" },
-    h("div", { class: "cta-side" },
-      h("span", { class: "eyebrow" }, "Your say"),
-      h("h2", { class: "cta-h" }, "Give your agent a budget, ", h("em", {}, "not your wallet.")),
-      h("p", {}, "Sign in with a passkey, then pay what your agents found — or hold it. Nothing leaves without one tap from you."),
-    ),
-    h("div", { class: "cta-card" }, state.signedIn
-      ? h("div", { class: "dialog signed", "data-ui": "" }, h("h3", {}, state.me?.viewer ? "You're looking around, read-only" : "You're signed in"), h("p", { class: "muted small" }, "Nothing on this page changed. The app is one tap away."), h("a", { class: "btn", href: "/app", onclick: openApp }, "Open the app"))
-      : signinDialog()),
   );
 }
 
@@ -807,14 +641,6 @@ function passkeyButton(iconOnly = false) {
   if (!state.me || state.me.viewer || state.me.passkeys || !canPasskey()) return null;
   return h("button", { class: "btn quiet small faceid", title: "Sign in and approve payments with your face or fingerprint. An agent can't fake it.", disabled: state.busy.passkey, onclick: () => act("passkey", addPasskey, "Face ID is on. You'll use it to sign in and to pay.") },
     icon("face", iconOnly ? 20 : 16), iconOnly ? null : h("span", { class: "tab-label" }, "Turn on Face ID"));
-}
-
-function footer() {
-  return h("footer", { class: "foot" }, h("div", { class: "foot-in" },
-    h("div", { class: "ft-id" }, brand(), h("p", {}, "Agents pay real invoices. You keep the final say. Built for the Airwallex Agentic Banking Hackathon")),
-    h("nav", { class: "ft-nav", "aria-label": "Footer" }, h("a", { href: "#board" }, "The board"), h("a", { href: "#prove" }, "Prove it"), h("a", { href: "/ops/" }, "Back office"), h("a", { href: "https://github.com/nice-bills/Sayso", rel: "noopener" }, "Source")),
-    h("div", { class: "ft-mail" }, h("span", {}, "Forward invoices to"), h("a", { href: "mailto:sayso-invoices@agentmail.to" }, "sayso-invoices@agentmail.to")),
-  ));
 }
 
 // Things marked data-reveal fade up as they enter the screen; html.js gates it so nothing hides without script.
@@ -1792,6 +1618,9 @@ function connectAgents(origin) {
     ))) : null,
   );
 }
+
+// The landing page lives in landing.js; it builds on these.
+export { h, state, brand, stage, proveSection, signinDialog, toApp, openApp, stillMotion };
 
 // ---------- start ----------
 (async () => {
