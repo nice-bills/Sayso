@@ -23,17 +23,26 @@
   .lbl { display: grid; gap: 8px; padding: 18px 20px; border-radius: 16px; }
   .m1 { --scrim: rgba(16, 38, 200, .62); color: #f4f1ea; } .m2 { --scrim: rgba(242, 239, 232, .18); color: #f4f1ea; } .m3 { --scrim: rgba(6, 6, 5, .45); color: #c6f432; }
   .m1 .lbl { --glass: rgba(20, 40, 190, .3); } .m2 .lbl { --glass: rgba(18, 18, 16, .32); } .m3 .lbl { --glass: rgba(14, 14, 12, .46); }
+  .a1 { --scrim: rgba(6, 6, 5, .4); color: #f5f3ee; } .a1 .lbl { --glass: rgba(14, 14, 12, .46); } .a1 .lbl b { color: #9cc49a; }
+  h2 { font-family: "Archivo"; font-weight: 700; font-stretch: 88%; letter-spacing: -.02em; font-size: 22px; margin: 64px 0 14px; color: #9a978f; }
+  .older a { min-height: 200px; } .older a b { font-size: 26px; }
 </style>
 <link rel="stylesheet" href="/mocks/surface.css">
 </head>
 <body>
 <div class="grain" aria-hidden="true"></div>
-<h1>Three takes on the app.</h1>
-<p>The same home screen each time: your balance, the payments that need you, what Sayso decided and how to tell it what to pay. Photo and film under frosted glass, film grain on top, and everything moves.</p>
+<h1>The signed-in app, restyled.</h1>
+<p>The real app's screens and flow, in the landing page's look: the night film behind smoked glass, film grain, one muted green. Click around; everything moves.</p>
 <ul>
-  <li><a class="m1 photo" href="/mocks/cobalt.html"><span class="ph"><img src="/people/team.jpg" alt=""></span><span class="lbl glass"><b>Cobalt</b><span>Cobalt-washed photo, glass deck, split-flap verdicts</span></span></a></li>
-  <li><a class="m2 photo" href="/mocks/paper.html"><span class="ph"><img src="/people/invoices.jpg" alt=""></span><span class="lbl glass"><b>Paper</b><span>Grainy paper, photo panels, the money moving along the wire</span></span></a></li>
-  <li><a class="m3 photo" href="/mocks/night.html"><span class="ph"><video src="/film/night.mp4" poster="/film/night.jpg" autoplay muted loop playsinline></video></span><span class="lbl glass"><b>Night shift</b><span>Night film under smoked glass, agents on a meter</span></span></a></li>
+  <li><a class="a1 photo" href="/mocks/app-home.html"><span class="ph"><video src="/film/night.mp4" poster="/film/night.jpg" autoplay muted loop playsinline></video></span><span class="lbl glass"><b>Home</b><span>Balance, the deck of what needs you, the mic, and what Sayso decided</span></span></a></li>
+  <li><a class="a1 photo" href="/mocks/app-inbox.html"><span class="ph"><img src="/people/closing.jpg" alt=""></span><span class="lbl glass"><b>Inbox</b><span>Held, ready and missing-details invoices; open one for its decision</span></span></a></li>
+  <li><a class="a1 photo" href="/mocks/app-agents.html"><span class="ph"><img src="/people/team.jpg" alt=""></span><span class="lbl glass"><b>Agents</b><span>Sayso's email, escrow, your agents and the limit each one has</span></span></a></li>
+</ul>
+<h2>Earlier takes on Home</h2>
+<ul class="older">
+  <li><a class="m1 photo" href="/mocks/cobalt.html"><span class="ph"><img src="/people/team.jpg" alt=""></span><span class="lbl glass"><b>Cobalt</b><span>Cobalt-washed photo, glass deck</span></span></a></li>
+  <li><a class="m2 photo" href="/mocks/paper.html"><span class="ph"><img src="/people/invoices.jpg" alt=""></span><span class="lbl glass"><b>Paper</b><span>Grainy paper, photo panels</span></span></a></li>
+  <li><a class="m3 photo" href="/mocks/night.html"><span class="ph"><video src="/film/night.mp4" poster="/film/night.jpg" autoplay muted loop playsinline></video></span><span class="lbl glass"><b>Night shift</b><span>Smoked glass, agents on a meter</span></span></a></li>
 </ul>
 </body>
 </html>

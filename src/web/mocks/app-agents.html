@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sayso app mock · Agents</title>
+<link rel="stylesheet" href="/mocks/surface.css">
+<link rel="stylesheet" href="/mocks/app.css">
+<style>
+  /* Agents, as the real app has it: Sayso's email, the escrow on Metal, the agents you connected and
+     the most each may ask for, how to connect another, recent agent payouts, then developer setup. */
+  .lay { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 14px; align-items: start; }
+  .col { display: grid; gap: 14px; }
+  .lbl { font: 11px var(--mono); text-transform: uppercase; letter-spacing: .07em; color: var(--dim); margin-bottom: 8px; }
+  .mail { --scrim: rgba(6, 6, 5, .55); min-height: 220px; display: flex; flex-direction: column; justify-content: flex-end; }
+  .mail .addr { display: flex; align-items: center; gap: 10px; font: 700 clamp(20px, 2.2vw, 26px) var(--display); font-stretch: 90%; letter-spacing: -.02em; word-break: break-all; }
+  .esc { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--hair); border-radius: 16px; overflow: hidden; margin-top: 4px; }
+  .esc > div { padding: 16px; background: rgba(10, 10, 9, .45); }
+  .esc b { display: block; font: 700 26px var(--mono); font-variant-numeric: tabular-nums; margin: 2px 0 4px; }
+
+  .card-title { margin: 0; font: 800 28px var(--display); font-stretch: 86%; letter-spacing: -.03em; }
+  .agents { display: grid; gap: 8px; margin-top: 16px; }
+  .agent { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px; border-radius: 18px; background: rgba(255, 255, 255, .05); box-shadow: inset 0 0 0 1px var(--hair); transition: opacity .4s, transform .5s var(--ease); }
+  .agent.gone { opacity: 0; transform: translateX(30px); }
+  .av { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; font: 700 15px var(--display); background: rgba(255, 255, 255, .08); }
+  .agent b { display: block; font-weight: 600; }
+  .cap { display: grid; gap: 6px; margin-top: 8px; grid-column: 2 / -1; }
+  .cap-top { display: flex; justify-content: space-between; font: 12px var(--mono); color: var(--dim); } .cap-top b { color: var(--fg); display: inline; font-weight: 500; }
+  .cbar { height: 5px; border-radius: 5px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+  .cbar i { display: block; height: 100%; width: 0; background: var(--green); border-radius: inherit; transition: width 1.3s var(--ease); }
+  .cbar i.warn { background: var(--amber); }
+  .edit { display: flex; align-items: center; gap: 6px; font: 12px var(--mono); }
+  .edit input { width: 70px; height: 30px; border-radius: 8px; border: 0; background: rgba(0, 0, 0, .35); box-shadow: inset 0 0 0 1px var(--hair); color: var(--fg); padding: 0 8px; font: inherit; outline: none; }
+  .edit input:focus { box-shadow: inset 0 0 0 1.5px var(--green); }
+
+  .authmd { margin-top: 18px; padding: 16px; border-radius: 16px; --scrim: rgba(6, 6, 5, .58); }
+  .form { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 10px; margin-top: 12px; }
+  .form label span { display: block; font-size: 12px; color: var(--dim); margin-bottom: 6px; }
+  .keysheet { margin-top: 12px; padding: 14px; border-radius: 16px; background: rgba(156, 196, 154, .1); box-shadow: inset 0 0 0 1px rgba(156, 196, 154, .25); animation: rise .5s var(--ease); }
+  pre { margin: 8px 0 0; padding: 12px; border-radius: 12px; background: rgba(0, 0, 0, .4); font: 12px/1.55 var(--mono); white-space: pre-wrap; word-break: break-all; }
+
+  .prow { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 13px 16px; border-radius: 16px; }
+  .prow + .prow { margin-top: 8px; }
+  .prow .m { font: 500 14px var(--mono); text-align: right; display: grid; gap: 4px; justify-items: end; }
+  details.dev { margin-top: 26px; border-radius: 18px; padding: 4px 18px; }
+  details.dev summary { cursor: pointer; padding: 14px 0; font-weight: 600; list-style: none; display: flex; justify-content: space-between; }
+  details.dev summary::after { content: "+"; font: 18px var(--mono); color: var(--dim); transition: transform .3s var(--ease); }
+  details.dev[open] summary::after { transform: rotate(45deg); }
+  details.dev > div { padding-bottom: 16px; }
+  @media (max-width: 900px) { .lay { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 520px) { .form { grid-template-columns: minmax(0, 1fr); } .esc { grid-template-columns: minmax(0, 1fr); } .agent { grid-template-columns: 42px minmax(0, 1fr); } .agent > .btn { grid-column: 2; justify-self: start; } }
+</style>
+</head>
+<body data-tab="agents">
+<div class="wrap page">
+  <div class="head"><div><h2>Agents</h2><div class="muted small">Who may ask Sayso to pay, and the most each may ask for. Approving stays with you.</div></div></div>
+  <div class="lay">
+    <div class="col">
+      <section class="card mail photo glass enter" style="--i:0">
+        <span class="ph"><img src="/people/freelance.jpg" alt=""></span>
+        <div class="lbl">Sayso's email</div>
+        <div class="addr"><span id="mi"></span>sayso-demo@agentmail.to</div>
+        <p class="small muted" style="margin:8px 0 0">Forward invoices here. Claude, ChatGPT and your other agents send and reply from this address through Sayso, so you don't connect another email.</p>
+      </section>
+      <section class="card glass enter" style="--i:1">
+        <div class="esc"><div><div class="lbl">In escrow on Metal</div><b data-n="68.21">0</b><span class="small muted">behind 1 payout on its way</span></div><div><div class="lbl">Earned by delivered payouts</div><b data-n="2.84">0</b><span class="small muted">2.10 USDZ released to Airwallex</span></div></div>
+        <p class="small muted" style="margin:12px 0 0">Released only when a payout is delivered; a bounce goes back to the agent. Metal enforces both.</p>
+      </section>
+      <section class="enter" style="--i:2">
+        <h3 class="group" style="margin-top:12px">Recent agent payouts</h3>
+        <div id="payouts"></div>
+      </section>
+    </div>
+    <section class="card glass enter" style="--i:1">
+      <h3 class="card-title">Your agents</h3>
+      <p class="small muted" style="margin:6px 0 0">Each one asks inside its own limit. Anything over it waits for your tap.</p>
+      <div class="agents" id="agents"></div>
+      <div class="authmd photo"><span class="ph"><img src="/people/team.jpg" alt=""></span><b>Easiest: let it sign itself up</b><p class="small" style="margin:6px 0 0">Tell your agent: <code>Connect to Sayso using https://sayso.app/auth.md</code>. It shows you a code; you enter it here and confirm with Face ID.</p></div>
+      <p class="small muted" style="margin:16px 0 0">Or make a key and paste it into the agent yourself:</p>
+      <form class="form" id="form">
+        <label><span>Agent name</span><input class="field" id="an" required placeholder="My phone assistant"></label>
+        <label><span>Most it can ask for, per payout (USD)</span><input class="field" id="ac" inputmode="decimal" placeholder="500"></label>
+        <div style="grid-column:1/-1"><button class="btn pay" type="submit">Create a key</button></div>
+      </form>
+      <div id="key"></div>
+    </section>
+  </div>
+  <details class="dev glass"><summary>Developer setup</summary><div>
+    <p class="small muted" style="margin:0">For an agent with its own Metal wallet: it gets a free quote, pays the exact price over x402, and Metal won't sign above the cap you set.</p>
+    <pre>claude mcp add sayso \
+  -e SAYSO_URL=https://sayso.app \
+  -e SAYSO_BUYER_KEY=0x… \
+  -e SAYSO_MAX_USDZ=500 \
+  -- npx tsx src/mcp/server.ts</pre>
+  </div></details>
+</div>
+<script src="/mocks/app-shell.js"></script>
+<script>
+  const { icon, toast, count } = M, $ = (s) => document.querySelector(s);
+  $("#mi").innerHTML = icon("mail", 22);
+  document.querySelectorAll("[data-n]").forEach((el) => count(el, +el.dataset.n, 1000, (v) => `${v.toFixed(2)} <span class="small muted" style="font-family:Figtree">USDZ</span>`));
+
+  // connected agents: name, the most it may ask for per payout, the biggest it asked for this week, last used
+  const AGENTS = [["C", "#D97757", "claude", 50, 42, "last used 2 hours ago"], ["O", "#f5f3ee", "codex", 250, 95.5, "last used 8 hours ago"], ["Cu", "#9fbfe6", "cursor", 40, 4, "last used yesterday"]];
+  const row = ([ic, col, name, cap, used, last]) => `<div class="agent"><span class="av" style="color:${col}">${ic}</span><div><b>${name}</b><span class="small muted">${last}</span></div><button class="btn sm danger" data-x>Disconnect</button>
+    <div class="cap"><div class="cap-top"><span>Largest ask this week <b>$${used.toFixed(2)}</b></span><label class="edit">Up to $<input value="${cap}" inputmode="decimal" aria-label="Most ${name} can ask for, per payout" data-cap></label></div><span class="cbar"><i class="${used / cap > .7 ? "warn" : ""}" data-used="${used}"></i></span></div></div>`;
+  $("#agents").innerHTML = AGENTS.map(row).join("");
+  const sizeBars = () => document.querySelectorAll(".agent").forEach((a) => { const i = a.querySelector(".cbar i"), cap = +a.querySelector("[data-cap]").value || 1, used = +i.dataset.used; i.style.width = `${Math.min(100, (used / cap) * 100)}%`; i.classList.toggle("warn", used / cap > .7); });
+  setTimeout(sizeBars, 300);
+  const wire = () => {
+    document.querySelectorAll("[data-cap]").forEach((c) => { c.oninput = sizeBars; c.onchange = () => toast(`Limit saved: up to $${c.value} per payout`); });
+    document.querySelectorAll("[data-x]").forEach((b) => (b.onclick = () => { const a = b.closest(".agent"); a.classList.add("gone"); toast(`Disconnected ${a.querySelector("b").textContent}.`); setTimeout(() => a.remove(), 450); }));
+  };
+  wire();
+
+  $("#form").onsubmit = (e) => {
+    e.preventDefault();
+    const name = $("#an").value.trim(), cap = +$("#ac").value || 100;
+    $("#key").innerHTML = `<div class="keysheet"><b style="color:var(--green)">Key for ${name}.</b> <span class="small">Copy it now; it won't be shown again.</span><pre>sk_sayso_${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}</pre><div class="actions"><button class="btn sm" type="button" id="done">Done</button></div></div>`;
+    $("#agents").insertAdjacentHTML("beforeend", row([name.slice(0, 2), "#9cc49a", name, cap, 0, "not used yet"]));
+    wire(); setTimeout(sizeBars, 50); e.target.reset();
+    $("#done").onclick = () => ($("#key").innerHTML = "");
+  };
+
+  const PAY = [["Rechenzentrum Nord GmbH", "codex · 8 hours ago", "€95.50", ["Delivered", "go"]], ["Lingua Freelance", "claude · 8 hours ago", "€180.00", ["Delivered", "go"]], ["Berlin Office Lettings", "claude · 2 hours ago", "€60.00", ["Needs review", "warn"]], ["A writer you read", "cursor · yesterday", "$1.00", ["Delivered", "go"]]];
+  $("#payouts").innerHTML = PAY.map(([who, sub, m, [st, t]]) => `<div class="prow glass"><span class="av">${icon("bot", 16)}</span><span><b style="font-weight:600">${who}</b><span class="small muted" style="display:block">${sub}</span></span><span class="m">${m}<span class="pill ${t}">${st}</span></span></div>`).join("");
+</script>
+</body>
+</html>
