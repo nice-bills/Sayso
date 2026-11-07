@@ -77,3 +77,23 @@ test('api: a connected agent can forward an invoice and list tools, but has no w
   await fetch(new URL(`/v1/inbox/${encodeURIComponent(id)}/ignore`, base), { method: 'POST', headers: { ...OWNER, ...JSON_H }, body: '{}' });
   expect(approve.status).toBe(401);
 });
+
+test('api: an app paying through Sayso is held to its own rules and cannot approve itself', async ({ app }) => {
+  const base = app.baseUrl;
+  const created = await fetch(new URL('/v1/platform/apps', base), { method: 'POST', headers: { ...OWNER, ...JSON_H }, body: JSON.stringify({ name: 'E2E Hub', rules: 'No more than 300 EUR per payout. Only pay EUR.' }) });
+  expect(created.status).toBe(201);
+  const { api_key } = (await created.json()) as { api_key: string };
+  const asApp = { authorization: `Bearer ${api_key}`, ...JSON_H };
+  const pay = (body: object) => fetch(new URL('/v1/platform/payouts', base), { method: 'POST', headers: asApp, body: JSON.stringify(body) });
+  const job = { ref: 'e2e-1', payee_name: 'Atelier Nord', amount: '120.00', currency: 'EUR', reference: 'E2E-1', bank: { iban: 'DE89370400440532013000' } };
+
+  expect((await pay({ ...job, ref: 'e2e-big', amount: '999.00' })).status).toBe(422);
+  const ok = await pay(job);
+  expect(ok.status).toBe(201);
+  expect(((await ok.json()) as { state: string }).state).toBe('awaiting_approval');
+  // The app's key is not an owner sign-in, and it doesn't open the agent endpoints.
+  expect((await fetch(new URL('/v1/inbox/b44/approve', base), { method: 'POST', headers: asApp, body: '{}' })).status).toBe(401);
+  expect((await fetch(new URL('/v1/agent/invoices', base), { headers: asApp })).status).toBe(401);
+  const spec = (await (await fetch(new URL('/v1/platform/openapi.json', base))).json()) as { paths: Record<string, unknown> };
+  expect(Object.keys(spec.paths)).toContain('/v1/platform/payouts');
+});

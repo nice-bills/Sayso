@@ -20,7 +20,7 @@ import { toMinor } from "../treasury/money.js";
 import { MailError, type Mailbox } from "../inbox/mailbox.js";
 import { invoiceShape, toRequest, type Invoice } from "./tools.js";
 
-export interface HostedDeps { svc: PayoutService; inbox: Inbox; keys: AgentKeys; notify: Notifier; mailbox?: Mailbox }
+export interface HostedDeps { svc: PayoutService; inbox: Inbox; keys: AgentKeys; notify: Notifier; mailbox?: Mailbox; isPlatformKey?: (agentId: string) => boolean }
 
 const text = (o: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(o, null, 2) }] });
 const fail = (message: string) => ({ ...text({ error: message }), isError: true });
@@ -242,7 +242,9 @@ export function hostedMcpRouter(d: HostedDeps): express.Router {
   const r = express.Router();
   const agentOf = (req: Request) => {
     const key = (req.params.key as string | undefined) ?? req.header("authorization")?.match(/^Bearer (.+)$/)?.[1];
-    return key ? d.keys.verify(key) : undefined;
+    const agent = key ? d.keys.verify(key) : undefined;
+    // An app's payout key works only on /v1/platform, where its rules apply.
+    return agent && !d.isPlatformKey?.(agent.id) ? agent : undefined;
   };
 
   // The same two actions as plain REST, for agent frameworks that run curl from a skill (OpenClaw, Hermes).

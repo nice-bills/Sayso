@@ -1,0 +1,20 @@
+{
+  "name": "SaysoPayout",
+  "type": "object",
+  "properties": {
+    "ref": { "type": "string", "description": "Your id for the payout, also Sayso's idempotency key" },
+    "payee_name": { "type": "string" },
+    "amount": { "type": "string" },
+    "currency": { "type": "string" },
+    "state": {
+      "type": "string",
+      "enum": ["requested", "awaiting_approval", "needs_verification", "needs_details", "rejected", "duplicate", "ignored", "paying", "paid", "failed", "refunded"]
+    },
+    "approval_url": { "type": "string", "description": "Where the account owner approves. Show it while state is awaiting_approval or needs_verification" },
+    "reasons": { "type": "array", "items": { "type": "string" } },
+    "failure": { "type": "string" },
+    "last_sequence": { "type": "number", "description": "Highest Sayso event sequence applied, so a late event never moves the state backwards" },
+    "last_event_id": { "type": "string" }
+  },
+  "required": ["ref", "payee_name", "amount", "currency", "state"]
+}

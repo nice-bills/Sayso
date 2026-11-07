@@ -16,7 +16,7 @@ import { webhookRouter } from "./airwallex/webhooks.js";
 import { createAuth } from "./auth.js";
 import { authMdRouter } from "./agents/authmd.js";
 import { AgentKeys } from "./agents/keys.js";
-import { hostedMcpRouter, shortCode } from "./mcp/hosted.js";
+import { approvalPath, hostedMcpRouter, shortCode } from "./mcp/hosted.js";
 import { notifierFromEnv } from "./notify.js";
 import { RampLedger } from "./bridge/ledger.js";
 import { SimulatedDepositCredit } from "./bridge/deposit-credit.js";
@@ -24,6 +24,8 @@ import { sweepEpoch, type MetalSettlementVerifier } from "./bridge/ramp.js";
 import { dashboardRouter } from "./dashboard/server.js";
 import { emit } from "./events.js";
 import { Inbox } from "./inbox/inbox.js";
+import { Platform } from "./platform/platform.js";
+import { platformRouter } from "./platform/router.js";
 import { say } from "./inbox/say.js";
 import { last4, PennyChecks } from "./inbox/penny.js";
 import { imapFromEnv, pollImap } from "./inbox/imap.js";
@@ -192,6 +194,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   })() : undefined;
   const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, rates, floatReserveMinor: policyConfig.reserveFloorMinor, onFinal: (p) => void receipts.issue(p), balanceOf });
   const inbox = new Inbox(store, svc);
+  const keys = new AgentKeys(store);
+  const platform = new Platform(store, keys, inbox, { offline: opts.offline, baseUrl: () => (process.env.PUBLIC_URL ?? "").replace(/\/$/, ""), approvalPath });
   // Live, the ramp credits Sayso's own USD global account; a made-up id would only fail later at Airwallex.
   const globalAccount = process.env.AWX_GLOBAL_ACCOUNT_ID || (opts.offline ? "sim:ga_usd" : undefined);
   if (!globalAccount) emit("escalate", "AWX_GLOBAL_ACCOUNT_ID is not set: earnings will not be swept into Airwallex until it is");
@@ -217,6 +221,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   // Set once the live sandbox refuses to issue a card and the simulator stands in for it.
   let cardSimulated = false;
   async function reconcileNow() {
+    await platform.tick().catch((e) => emit("escalate", `Sending events to connected apps failed: ${String(e).slice(0, 200)}`));
     lastBalances = await balances();
     const books = flowsFromBooks(store, ledger, "USD", before, { cardOnAirwallex: !cardSimulated });
     const currencies: Record<string, CurrencyFlows> = {};
@@ -269,6 +274,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     const mc = opts.offline || process.env.AGENTMAIL_WEBHOOK_SECRET ? undefined : mailbox.credentials();
     if (mc) agentMail ??= new AgentMailPoller(mc.apiKey, mc.inboxId);
     if (agentMail) await agentMail.poll((e) => inbox.receive(e)).catch((e) => emit("escalate", `AgentMail poll failed: ${String(e).slice(0, 200)}`));
+    await platform.tick().catch((e) => emit("escalate", `Sending events to connected apps failed: ${String(e).slice(0, 200)}`));
     lastBalances = await balances().catch(() => lastBalances);
     // The books are checked on their own, not only when someone runs the demo.
     if (reconcileEveryMs > 0 && Date.now() - lastReconcileAt >= reconcileEveryMs) {
@@ -296,6 +302,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     [["/v1/decide/preview", "/v1/payouts/:id/what-if"], rateLimit("preview", LIMITS.preview)],
     [["/auth/login", "/auth/email", "/auth/passkey/login", "/auth/passkey/login/options", "/auth/viewer", "/agent/identity", "/agent/identity/claim", "/oauth2/token"], rateLimit("sign-in", LIMITS.auth)],
     [["/mcp", "/mcp/k/:key", "/v1/agent/invoices"], rateLimit("agent", LIMITS.mcp)],
+    [["/v1/platform/payouts"], rateLimit("platform", LIMITS.mcp)],
     ["/v/:token", rateLimit("link", LIMITS.links)],
   ];
   for (const [path, limit] of limited) app.post(path, limit);
@@ -414,10 +421,11 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   // Agents connect over the hosted MCP endpoint, with a key the owner makes here or by signing
   // themselves up through auth.md, which the owner confirms with their passkey.
-  const keys = new AgentKeys(store);
   app.use(authMdRouter({ store, keys, auth }));
   const notify = notifierFromEnv();
-  app.use(hostedMcpRouter({ svc, inbox, keys, notify, mailbox }));
+  // Apps that pay through Sayso (Base44 apps, any backend) use their own keys and rules; those keys don't open the agent MCP.
+  app.use(platformRouter(platform, keys, auth.requireOwner));
+  app.use(hostedMcpRouter({ svc, inbox, keys, notify, mailbox, isPlatformKey: platform.isPlatformKey }));
   // Sayso's email: its address, and the owner's one-time AgentMail code that lets it email people.
   app.get("/v1/mailbox", auth.requireOwner, (_req, res) => res.json(mailbox.status()));
   app.post("/v1/mailbox/verify", auth.requireOwner, express.json(), async (req, res) => {
