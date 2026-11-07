@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sayso mock · Cobalt</title>
+<style>
+  /* Mock 1, Cobalt: one solid blue field, cream type, a deck you swipe through. No gradients. */
+  @font-face { font-family: "Archivo"; src: url("/archivo-vf.woff2") format("woff2"); font-weight: 100 900; font-stretch: 62% 125%; }
+  @font-face { font-family: "Figtree"; src: url("/figtree-vf.woff2") format("woff2"); font-weight: 300 900; }
+  @font-face { font-family: "Martian Mono"; src: url("/martian-mono-vf.woff2") format("woff2"); font-weight: 100 800; font-stretch: 75% 112.5%; }
+  :root { --bg: #1832d6; --ink: #f4f1ea; --dim: #aab6f5; --card: #0e1f9e; --line: #3550e6; --pay: #b9f5c6; --hold: #ffb3a1; --ease: cubic-bezier(.22, 1, .36, 1); }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Figtree", system-ui, sans-serif; min-height: 100vh; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 28px clamp(18px, 4vw, 48px) 64px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; animation: drop .8s var(--ease) both; }
+  .brand { font-family: "Archivo"; font-weight: 800; font-stretch: 88%; font-size: 22px; letter-spacing: -.02em; display: flex; align-items: center; gap: 10px; }
+  .brand i { width: 26px; height: 26px; border-radius: 7px; background: var(--ink); position: relative; }
+  .brand i::after { content: ""; position: absolute; left: 6px; right: 6px; top: 12px; height: 3px; background: var(--bg); }
+  .chips { display: flex; gap: 8px; }
+  .chip { font-family: "Martian Mono"; font-size: 11px; padding: 6px 10px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line); color: var(--dim); }
+  .chip.live::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--pay); margin-right: 7px; vertical-align: 1px; animation: blink 2s infinite; }
+
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(28px, 5vw, 72px); margin-top: clamp(36px, 6vw, 72px); align-items: start; }
+  .k { font-size: 14px; color: var(--dim); margin: 0 0 8px; }
+  .bal { font-family: "Archivo"; font-weight: 800; font-stretch: 82%; letter-spacing: -.05em; font-size: clamp(64px, 9vw, 132px); line-height: .85; font-variant-numeric: tabular-nums; margin: 0; }
+  .bal small { color: var(--dim); font-size: .5em; letter-spacing: -.02em; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; margin: 44px 0 14px; font-size: 14px; color: var(--dim); }
+  .row b { color: var(--ink); font-weight: 600; }
+
+  /* the deck */
+  .deck { position: relative; height: 250px; }
+  .card { position: absolute; inset: 0; background: var(--card); border-radius: 22px; padding: 24px; display: flex; flex-direction: column; justify-content: space-between; transition: transform .7s var(--ease), opacity .5s; will-change: transform; }
+  .card[data-i="1"] { transform: translateY(-14px) scale(.95); }
+  .card[data-i="2"] { transform: translateY(-26px) scale(.9); }
+  .card[data-i="3"] { transform: translateY(-36px) scale(.85); opacity: 0; }
+  .card.out-r { transform: translateX(120%) rotate(12deg); opacity: 0; }
+  .card.out-l { transform: translateX(-120%) rotate(-12deg); opacity: 0; }
+  .card .top { display: flex; justify-content: space-between; align-items: center; font-size: 15px; }
+  .amt { font-family: "Archivo"; font-weight: 700; font-stretch: 88%; font-size: 48px; letter-spacing: -.03em; line-height: 1; }
+  .why { font-size: 14px; color: var(--dim); margin-top: 8px; }
+  .acts { display: flex; gap: 8px; margin-top: 16px; }
+  .btn { flex: 1; height: 46px; border: 0; border-radius: 999px; font: 600 15px "Figtree", sans-serif; cursor: pointer; transition: transform .2s var(--ease), background-color .2s; }
+  .btn:active { transform: scale(.96); }
+  .btn.no { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--line); }
+  .btn.yes { background: var(--ink); color: var(--bg); flex: 1.6; }
+  .done { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--dim); font-size: 15px; opacity: 0; transition: opacity .6s .3s; }
+  .deck.empty .done { opacity: 1; }
+
+  /* split-flap verdict */
+  .flaps { display: inline-flex; gap: 3px; }
+  .flap { width: 18px; height: 26px; border-radius: 4px; background: var(--bg); display: grid; place-items: center; font: 600 13px "Martian Mono", monospace; perspective: 200px; }
+  .flap.turn { animation: flip .32s var(--ease); }
+  .flap.pay { color: var(--pay); } .flap.hold { color: var(--hold); }
+
+  /* the right side: what Sayso decided */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border-radius: 18px; overflow: hidden; }
+  .stats div { background: var(--bg); padding: 18px 16px; }
+  .stats b { display: block; font: 700 30px "Martian Mono", monospace; font-variant-numeric: tabular-nums; }
+  .stats span { font-size: 12px; color: var(--dim); }
+  .latest { margin-top: 14px; background: var(--ink); color: var(--bg); border-radius: 22px; padding: 26px; overflow: hidden; }
+  .latest .meta { font: 12px "Martian Mono", monospace; opacity: .7; }
+  .latest .word { font-family: "Archivo"; font-weight: 900; font-stretch: 75%; font-size: clamp(80px, 10vw, 140px); line-height: .82; letter-spacing: -.04em; margin: 10px 0 14px; display: flex; }
+  .latest .word span { display: inline-block; animation: rise .8s var(--ease) both; }
+  .latest p { margin: 0; font-size: 15px; }
+  ul.feed { list-style: none; margin: 14px 0 0; padding: 0; }
+  .feed li { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 4px; border-top: 1px solid var(--line); animation: rise .7s var(--ease) both; }
+  .feed li:nth-child(2) { animation-delay: .08s; } .feed li:nth-child(3) { animation-delay: .16s; } .feed li:nth-child(4) { animation-delay: .24s; } .feed li:nth-child(5) { animation-delay: .32s; }
+  .tag { font: 600 11px "Martian Mono", monospace; text-align: center; padding: 6px 0; border-radius: 6px; background: var(--card); }
+  .tag.pay { color: var(--pay); } .tag.hold { color: var(--hold); }
+  .feed .who { font-weight: 600; } .feed small { display: block; color: var(--dim); font-size: 12px; font-weight: 400; margin-top: 2px; }
+  .feed .money { font: 600 15px "Martian Mono", monospace; text-align: right; } .feed .money small { font-family: "Figtree"; }
+
+  .say { margin-top: 48px; display: flex; align-items: center; gap: 18px; }
+  .mic { width: 64px; height: 64px; border-radius: 50%; border: 0; background: var(--ink); color: var(--bg); cursor: pointer; position: relative; flex: none; }
+  .mic::before { content: ""; position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 0 var(--ink); animation: ring 2.4s var(--ease) infinite; }
+  .mic svg { width: 24px; height: 24px; }
+  .say p { margin: 0; font-size: 20px; } .say small { display: block; font-size: 13px; color: var(--dim); margin-top: 4px; }
+
+  @keyframes drop { from { opacity: 0; transform: translateY(-12px); } }
+  @keyframes rise { from { opacity: 0; transform: translateY(18px); } }
+  @keyframes flip { 0% { transform: rotateX(0); } 50% { transform: rotateX(90deg); } 100% { transform: rotateX(0); } }
+  @keyframes blink { 50% { opacity: .3; } }
+  @keyframes ring { 0% { box-shadow: 0 0 0 0 rgba(244, 241, 234, .5); } 100% { box-shadow: 0 0 0 18px rgba(244, 241, 234, 0); } }
+  @media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } .stats { grid-template-columns: repeat(2, 1fr); } }
+  @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><i></i>sayso</div>
+    <div class="chips"><span class="chip live">Offline demo</span><span class="chip">Read-only</span></div>
+  </header>
+  <div class="grid">
+    <section>
+      <p class="k">Available</p>
+      <p class="bal" id="bal">$0<small>.00</small></p>
+      <div class="row"><span><b id="left">4</b> need you</span><span>Swipe, or use the buttons</span></div>
+      <div class="deck" id="deck"><div class="done">All caught up. Sayso will ask when something crosses your line.</div></div>
+      <div class="say">
+        <button class="mic" aria-label="Hold to talk"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+        <p>Say who to pay, and how much.<small>Hold to talk · type instead</small></p>
+      </div>
+    </section>
+    <section>
+      <div class="stats"><div><b data-n="3">0</b><span>Delivered</span></div><div><b data-n="0">0</b><span>On the way</span></div><div><b data-n="0">0</b><span>Waiting</span></div><div><b data-n="2">0</b><span>Held or blocked</span></div></div>
+      <div class="latest">
+        <span class="meta">Latest · from an agent · 8 hours ago</span>
+        <div class="word"><span>P</span><span style="animation-delay:.06s">A</span><span style="animation-delay:.12s">Y</span></div>
+        <p><b>€95.50 to Rechenzentrum Nord GmbH.</b> It costs 108.59 USDZ and the payee checks out.</p>
+      </div>
+      <ul class="feed" id="feed"></ul>
+    </section>
+  </div>
+</div>
+<script>
+  const ITEMS = [
+    ["Kreuzberg Studio GmbH", "€340.00", "The invoice asks to pay new bank details", "HOLD"],
+    ["Berlin Office Lettings", "€60.00", "Over the $50 your agents may pay alone", "HOLD"],
+    ["Holloway Print Ltd", "£72.00", "Paid before, the usual amount", "PAY"],
+    ["Lingua Freelance", "€180.00", "Due Friday, the rate is good today", "PAY"],
+  ];
+  const FEED = [["PAY", "Lingua Freelance", "Agent · 8 hours ago", "€180.00", "Delivered"], ["HOLD", "Kreuzberg Studio GmbH", "Inbox · 8 hours ago", "€340.00", "Needs review"], ["PAY", "Holloway Print Ltd", "Inbox · 8 hours ago", "£72.00", "Waiting for payment"], ["HOLD", "Berlin Office Lettings", "Inbox · 8 hours ago", "€60.00", "Needs review"], ["PAY", "Kreuzberg Studio GmbH", "Inbox · 3 days ago", "€280.00", "Delivered"]];
+  const $ = (s) => document.querySelector(s);
+  const deck = $("#deck");
+
+  // the balance counts up once
+  function count(el, to, ms, fmt) { const t0 = performance.now(); (function f(t) { const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 4); el.innerHTML = fmt(to * e); if (k < 1) requestAnimationFrame(f); })(t0); }
+  count($("#bal"), 1496.03, 1600, (v) => { const [a, b] = v.toFixed(2).split("."); return `$${Number(a).toLocaleString("en-US")}<small>.${b}</small>`; });
+  document.querySelectorAll("[data-n]").forEach((el) => count(el, +el.dataset.n, 900, (v) => Math.round(v)));
+
+  // split-flap: each letter turns through a few random ones before it lands
+  function flaps(word) {
+    const box = document.createElement("span"); box.className = "flaps";
+    [...word.padEnd(4)].forEach((ch, i) => {
+      const f = document.createElement("span"); f.className = `flap ${word === "PAY" ? "pay" : "hold"}`; box.append(f);
+      let n = 0; const tick = () => { f.classList.remove("turn"); void f.offsetWidth; f.classList.add("turn"); f.textContent = n < 4 + i ? "ABCDEHLOPY"[Math.floor(Math.random() * 10)] : ch; if (n++ < 4 + i) setTimeout(tick, 90); };
+      setTimeout(tick, 300);
+    });
+    return box;
+  }
+  function build() {
+    ITEMS.forEach(([who, amt, why, verdict], i) => {
+      const c = document.createElement("article"); c.className = "card"; c.dataset.i = i;
+      c.innerHTML = `<div><div class="top"><span>${who}</span></div><div style="margin-top:22px" class="amt">${amt}</div><div class="why">${why}</div></div><div class="acts"><button class="btn no">${verdict === "HOLD" ? "Deny" : "Not now"}</button><button class="btn yes">${verdict === "HOLD" ? "Approve with passkey" : "Pay now"}</button></div>`;
+      c.querySelector(".top").append(flaps(verdict));
+      c.querySelector(".no").onclick = () => out(c, "out-l");
+      c.querySelector(".yes").onclick = () => out(c, "out-r");
+      swipe(c);
+      deck.append(c);
+    });
+  }
+  function restack() { const cs = [...deck.querySelectorAll(".card:not(.out-l):not(.out-r)")]; cs.forEach((c, i) => { c.dataset.i = i; c.style.zIndex = 10 - i; }); $("#left").textContent = cs.length; deck.classList.toggle("empty", !cs.length); if (!cs.length) setTimeout(reset, 2600); }
+  function out(c, dir) { c.style.transform = ""; c.classList.add(dir); restack(); }
+  function reset() { deck.querySelectorAll(".card").forEach((c) => c.remove()); build(); restack(); }
+  function swipe(c) {
+    let x0 = null, dx = 0;
+    c.addEventListener("pointerdown", (e) => { if (c.dataset.i !== "0" || e.target.closest("button")) return; x0 = e.clientX; c.style.transition = "none"; c.setPointerCapture(e.pointerId); });
+    c.addEventListener("pointermove", (e) => { if (x0 === null) return; dx = e.clientX - x0; c.style.transform = `translateX(${dx}px) rotate(${dx / 24}deg)`; });
+    c.addEventListener("pointerup", () => { if (x0 === null) return; c.style.transition = ""; x0 = null; if (Math.abs(dx) > 110) out(c, dx > 0 ? "out-r" : "out-l"); else c.style.transform = ""; dx = 0; });
+  }
+  build(); restack();
+  $("#feed").innerHTML = FEED.map(([v, who, sub, amt, st]) => `<li><span class="tag ${v.toLowerCase()}">${v}</span><span class="who">${who}<small>${sub}</small></span><span class="money">${amt}<small>${st}</small></span></li>`).join("");
+</script>
+</body>
+</html>

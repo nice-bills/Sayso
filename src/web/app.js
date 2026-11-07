@@ -281,7 +281,7 @@ function stage() {
   const POS = [2, 26, 51, 76, 98];
   const STATIONS = [["Agent", "asks"], ["Sayso", "decides"], ["Metal", "USDZ"], ["Airwallex", "EUR"], ["Kreuzberg", "paid"]];
   const nodes = POS.map((x, i) => h("span", { class: `node${i === 1 ? " v-gate" : ""}`, style: `left:${x}%` }));
-  const names = STATIONS.map(([k, n], i) => h("span", { class: `node-l${i === 0 ? " first" : i === POS.length - 1 ? " last" : ""}`, style: `left:${POS[i]}%` }, k, h("small", {}, n)));
+  const names = STATIONS.map(([k, n], i) => h("span", { class: `node-l${i === 0 ? " first" : i === POS.length - 1 ? " last" : ""}${i % 2 ? " alt" : ""}`, style: `left:${POS[i]}%` }, k, h("small", {}, n)));
   const coin = h("span", { class: "coin" }, h("span", { class: "tag" })), coin2 = h("span", { class: "coin hidden" }, h("span", { class: "tag" }));
   const line = h("span", { class: "line" }), lit = h("span", { class: "line lit" });
   const track = h("div", { class: "track" }, line, lit, nodes, names, coin, coin2);

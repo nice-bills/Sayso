@@ -34,11 +34,20 @@ setInterval(() => {
 
 // ---------- nav ----------
 const LINKS = [["#how", "How it works"], ["#uses", "Use cases"], ["#clients", "Clients"], ["#questions", "FAQ"]];
+// On a phone the section links fold into a menu; it toggles a class, so opening it never re-renders.
+function setMenu(open) {
+  const nav = document.querySelector(".lp-nav");
+  nav?.classList.toggle("open", open);
+  nav?.querySelector(".lp-burger")?.setAttribute("aria-expanded", String(open));
+}
 function nav() {
   return h("header", { class: "lp-nav" },
     h("a", { href: "#top", class: "lp-brand", "aria-label": "Sayso, back to top" }, brand()),
-    h("nav", { class: "lp-links", "aria-label": "Sections" }, LINKS.map(([href, label]) => h("a", { href }, label))),
-    h("a", { class: "lp-pill solid small", href: "#signin", onclick: toApp }, state.signedIn ? "Open the app" : "Sign in"));
+    h("nav", { class: "lp-links", id: "lp-links", "aria-label": "Sections" }, LINKS.map(([href, label]) => h("a", { href, onclick: () => setMenu(false) }, label))),
+    h("span", { class: "lp-nav-end" },
+      h("a", { class: "lp-pill solid small", href: "#signin", onclick: toApp }, state.signedIn ? "Open the app" : "Sign in"),
+      h("button", { type: "button", class: "lp-burger", "aria-label": "Menu", "aria-controls": "lp-links", "aria-expanded": "false",
+        onclick: () => setMenu(!document.querySelector(".lp-nav")?.classList.contains("open")) }, h("i"), h("i"))));
 }
 
 // ---------- 1–2: the film hero, pinned into the dashboard ----------
@@ -46,7 +55,8 @@ function nav() {
 let filmEl;
 function film() {
   if (filmEl) return filmEl;
-  const video = h("video", { src: "/film/street.mp4", poster: "/film/poster.jpg", loop: "", playsinline: "", preload: "auto" });
+  // night.mp4 is cut so its last second crossfades into its first: the loop has no seam and no black frame.
+  const video = h("video", { src: "/film/night.mp4", poster: "/film/night.jpg", loop: "", playsinline: "", preload: "auto" });
   video.muted = true;
   if (!stillMotion) video.autoplay = true;
   return (filmEl = h("div", { class: "lp-film", "aria-hidden": "true" }, video, h("i", { class: "lp-grade" }), h("i", { class: "lp-grain" }), h("i", { class: "lp-veil" })));
@@ -89,7 +99,7 @@ function dashboard() {
         h("strong", { class: "db-balance" }, "$184", h("span", {}, ".20")),
         h("span", { class: "db-sub" }, "USDZ on Metal"),
         h("div", { class: "db-today" }, h("span", {}, "Spent today"), h("b", {}, "$6.40"), h("span", {}, "of $18 across agents")),
-        svg(`<svg class="db-chart" viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="dbFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity=".22"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs><path d="M6 80 54 53 102 69 150 37 198 47 246 18 294 33 294 94 6 94Z" fill="url(#dbFill)"/><path d="M6 80 54 53 102 69 150 37 198 47 246 18 294 33" fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`),
+        svg(`<svg class="db-chart" viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true"><path d="M6 80 54 53 102 69 150 37 198 47 246 18 294 33 294 94 6 94Z" fill="currentColor" fill-opacity=".12"/><path d="M6 80 54 53 102 69 150 37 198 47 246 18 294 33" fill="none" stroke="currentColor" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`),
         h("div", { class: "db-days" }, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => h("span", {}, d)))),
       h("section", { class: "db-card db-ask" },
         h("div", { class: "db-head" }, h("span", { class: "db-who" }, h("span", { class: "db-ico" }, mark("claude", 16, "#D97757")), "claude wants to pay"), h("span", { class: "db-flag" }, "over $2 limit")),
