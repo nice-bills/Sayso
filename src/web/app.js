@@ -35,6 +35,7 @@ function h(tag, attrs, ...kids) {
 
 // Line icons, drawn as one SVG path each.
 const ICONS = {
+  x: "M6 6l12 12M18 6 6 18",
   home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
   inbox: "M22 12h-6l-2 3h-4l-2-3H2 M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z",
   payments: "M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M2 10h20 M6 15h4",
@@ -180,7 +181,7 @@ function render() {
   dirty = false;
   staggered = 0;
   const y = window.scrollY;
-  $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn && (inApp() || state.claim || state.connect || state.focus) ? (state.claim ? claimView() : state.connect ? connectView() : appView()) : !state.signedIn && (state.claim || state.connect) ? claimGate() : landing(), state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].filter(Boolean));
+  $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn && (inApp() || state.claim || state.connect || state.focus) ? (state.claim ? claimView() : state.connect ? connectView() : appView()) : !state.signedIn && (state.claim || state.connect) ? claimGate() : landing(), state.signedIn ? whyDrawer() : null, state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].flat().filter(Boolean));
   window.scrollTo(0, y);
   filmBehindApp();
   afterRender();
@@ -911,7 +912,7 @@ function itemCard(item, r) {
     item.status === "awaiting_approval" ? approveBlock(item)
       : held ? verifyBlock(item, true)
       : item.status === "needs_details" ? h("div", { class: "actions" }, h("button", { class: "btn pay wide", onclick: () => { state.open[item.id] = true; state.tab = "inbox"; render(); } }, "Add the missing details"), ignoreButton(item))
-      : item.status === "paying" && p ? [timeline(p, true), whyButton(p.id), whyPanel(p.id)] : null,
+      : item.status === "paying" && p ? [timeline(p, true), whyButton(p.id)] : null,
   );
 }
 
@@ -923,7 +924,6 @@ function paidCard(item) {
     h("b", { class: "paid-title" }, paid ? "Paid." : failed ? PAYOUT_PILL[p.status]?.[0] ?? "Bounced" : "Sending…"),
     h("div", { class: "paid-what" }, `${money(p.amount, p.currency)} ${paid ? "is on its way to" : "to"} ${p.payee}.`),
     h("div", { class: "paid-actions" }, whyButton(p.id), h("button", { class: "btn pay wide", onclick: () => { state.lastPaid = null; render(); } }, "Done")),
-    whyPanel(p.id),
   );
 }
 
@@ -1057,7 +1057,17 @@ const SAID = { payee: "Pay", amount: "Amount", reference: "Reference", bank: "In
 const WHY = { heard: "You said", read: "Read", risk: "Rules", payee: "Bank", mandate: "Mandate", observe: "Seen", decide: "Decided", act: "Moved", reconcile: "Settled", escalate: "Flagged", refuse: "Refused", receipt: "Receipt" };
 function whyButton(id) {
   const open = Boolean(state.why[id]);
-  return h("button", { class: "btn quiet small why-btn", type: "button", disabled: state.busy[`why:${id}`], onclick: () => open ? (delete state.why[id], render()) : act(`why:${id}`, async () => { state.why[id] = await api(`/v1/payouts/${encodeURIComponent(id)}/why`); }) }, open ? "Hide why" : "Why?");
+  return h("button", { class: "btn quiet small why-btn", type: "button", disabled: state.busy[`why:${id}`], onclick: () => open ? (delete state.why[id], render()) : act(`why:${id}`, async () => { state.why = { [id]: await api(`/v1/payouts/${encodeURIComponent(id)}/why`) }; }) }, open ? "Hide why" : "Why?");
+}
+// The open "Why?" slides in as a side panel over the page (one at a time), like the inbox mock.
+function whyDrawer() {
+  const id = Object.keys(state.why)[0];
+  if (!id) return null;
+  const close = () => { delete state.why[id]; render(); };
+  return [h("div", { class: "why-scrim", onclick: close }),
+    h("aside", { class: "why-drawer", "aria-label": "Why Sayso decided this" },
+      h("div", { class: "wd-head" }, h("b", {}, "Why Sayso decided this"), h("button", { class: "btn quiet icon-btn", type: "button", "aria-label": "Close", onclick: close }, icon("x", 18))),
+      whyPanel(id))];
 }
 function whyPanel(id) {
   const w = state.why[id];
@@ -1198,7 +1208,7 @@ function invoiceCard(item) {
         h("span", { class: "rh-end" }, known ? h("span", { class: "amt" }, money(f.amount, f.currency)) : null, h("span", { class: `pill ${tone}` }, label))),
       open ? h("div", { class: "row-body" },
         sub,
-        item.status === "paying" && p ? [p.status === "paid" ? null : timeline(p, true), failure(p), whyButton(p.id), whyPanel(p.id)] : null,
+        item.status === "paying" && p ? [p.status === "paid" ? null : timeline(p, true), failure(p), whyButton(p.id)] : null,
         item.status === "rejected" && p?.reasons?.length ? h("div", { class: "alert" }, h("b", {}, "Sayso won't pay this: "), p.reasons.join("; ")) : null,
         item.status === "duplicate" ? h("div", { class: "note-line" }, "This matches an invoice already in your inbox, so it wasn't queued again.") : null,
       ) : null,
@@ -1427,7 +1437,6 @@ function payoutRow(p, opts = {}) {
       failure(p),
       needsYou ? reviewBlock(p) : null,
       p.status === "quoted" ? null : whyButton(p.id),
-      whyPanel(p.id),
       state.why[p.id] ? h("dl", { class: "proofs" },
         prow("Payout id", p.id), prow("Method", p.method),
         from === "Agent" ? prow("Agent paid", `${usdz(p.price_usdz)} (fee ${usdz(p.fee_usdz)})`) : null,
@@ -1540,10 +1549,12 @@ function agentsView() {
   const curl = `curl -X POST ${origin}/v1/quotes \\\n  -H 'content-type: application/json' \\\n  -d '{"amount":"180.00","currency":"EUR","reference":"Oct",\n       "payee":{"name":"Lingua Freelance","bank":{"iban":"FR14…"},\n       "bank_country_code":"FR","address":{"country_code":"FR","city":"Paris"}}}'`;
   return h("div", { class: "page agents-page" },
     h("div", { class: "head" }, h("h2", {}, "Agents")),
-    mailboxBox(),
-    escrowBox(),
-    agentPays.length ? [h("h3", { class: "section" }, "Recent agent payouts"), h("div", { class: "list" }, agentPays.slice(0, 10).map((p) => payoutRow(p)))] : null,
-    connectAgents(origin),
+    h("div", { class: "ag-lay" },
+      h("div", { class: "ag-col" },
+        mailboxBox(),
+        escrowBox(),
+        agentPays.length ? h("div", {}, h("h3", { class: "section" }, "Recent agent payouts"), h("div", { class: "list" }, agentPays.slice(0, 10).map((p) => payoutRow(p)))) : null),
+      connectAgents(origin)),
     h("details", { class: "dev" },
       h("summary", {}, "Developer setup"),
       h("p", { class: "small muted" }, "For an agent with its own Metal wallet: it gets a free quote, pays the exact price over x402, and Metal won't sign above the cap you set."),
@@ -1562,7 +1573,7 @@ function mailboxBox() {
     e.preventDefault();
     act("mailcode", async () => { await api("/v1/mailbox/verify", { code: state.mailCode ?? "" }); state.mailCode = ""; }, "Sayso can email people now");
   };
-  return h("div", { class: "card" },
+  return h("div", { class: "card mail" },
     h("div", { class: "lbl" }, "Sayso's email"),
     h("b", {}, m.address),
     h("p", { class: "small muted", style: "margin:6px 0 0" }, "Forward invoices here. Claude, ChatGPT and your other agents send and reply from this address through Sayso, so you don't connect another email."),
