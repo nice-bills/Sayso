@@ -261,3 +261,34 @@ body.film .osheet, body.film .osheet:is(.ink, .lime, .sky) { background: rgba(12
 /* on a phone the say column is the whole screen: no panel edge */
 @media (max-width: 699px) { body.film .say-home { border-radius: 0; box-shadow: none; background: rgba(14, 14, 12, .4); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 body.film :is(.osheet, .inv) .dc-tag { background: var(--go-bg); color: var(--go); }
+
+/* ---------- the mock look (mocks/app-*.html): photos on the deck and the latest verdict, softer
+   rounder panels, a lighter smoke, mono figures and mono verdict tags ---------- */
+body.film { --glass: rgba(18, 18, 16, .42); }
+body.film :is(.card, .inv, .row, .stat, .empty, .dpane, .say-home, .pcard) { -webkit-backdrop-filter: blur(30px) saturate(160%); backdrop-filter: blur(30px) saturate(160%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), inset 0 1px 0 rgba(255, 255, 255, .14), 0 24px 60px -30px rgba(0, 0, 0, .55); }
+body.film :is(.dpane, .say-home) { border-radius: 30px; }
+body.film :is(.card, .inv, .row, .stat, .pcard, .dialog[data-ui]) { border-radius: 24px; }
+
+/* deck cards carry a photo under a flat scrim, picked by what the card is */
+body.film .hc, body.film .hc:is(.ink, .lime, .sky, .green) { --ph: url("/people/invoices.jpg"); border-radius: 24px; color: var(--ink);
+  background: linear-gradient(rgba(6, 6, 5, .55), rgba(6, 6, 5, .55)), var(--ph) center / cover, #141412;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14), 0 30px 60px -30px rgba(0, 0, 0, .8); }
+body.film .hc.ink { --ph: url("/people/closing.jpg"); } body.film .hc.lime { --ph: url("/people/travel.jpg"); }
+body.film .hc.sky { --ph: url("/people/errands.jpg"); } body.film .hc.green { --ph: url("/people/freelance.jpg"); }
+body.film .hc-who { color: rgba(245, 243, 238, .78); } body.film .hc-sub { color: rgba(245, 243, 238, .7); }
+body.film .hc-amt { font-weight: 800; font-stretch: 82%; letter-spacing: -.04em; }
+
+@media (min-width: 1100px) {
+  body.film .dp-stats { gap: 8px; background: none; box-shadow: none; overflow: visible; }
+  body.film .dp-stat { border-radius: 16px; background: rgba(255, 255, 255, .05); box-shadow: inset 0 0 0 1px var(--hair); }
+  body.film .dp-stat b { font-family: var(--mono); font-stretch: 100%; font-weight: 700; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+  /* the latest verdict sits on a photo, the word huge and condensed */
+  body.film .dp-latest, body.film .dp-latest[data-tone] { border-radius: 22px; min-height: 290px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14);
+    background: linear-gradient(rgba(6, 6, 5, .5), rgba(6, 6, 5, .5)), url("/people/compute.jpg") center / cover; }
+  body.film .dp-latest:hover { background: linear-gradient(rgba(6, 6, 5, .4), rgba(6, 6, 5, .4)), url("/people/compute.jpg") center / cover; }
+  body.film .dp-word { font-weight: 900; font-stretch: 75%; letter-spacing: -.045em; line-height: .8; }
+  body.film .dp-list .rh-chip { font-family: var(--mono); border-radius: 7px; background: rgba(255, 255, 255, .07); box-shadow: none; }
+  body.film .dp-list .rh-end .amt { font-family: var(--mono); font-weight: 500; }
+}
+/* verdict tags back in mono, like the mocks' feed */
+body.film :is(.pill, .badge, .dc-tag) { font-family: var(--mono); font-size: 11px; letter-spacing: .02em; }
