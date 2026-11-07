@@ -182,18 +182,8 @@ function render() {
   const y = window.scrollY;
   $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn && (inApp() || state.claim || state.connect || state.focus) ? (state.claim ? claimView() : state.connect ? connectView() : appView()) : !state.signedIn && (state.claim || state.connect) ? claimGate() : landing(), state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].filter(Boolean));
   window.scrollTo(0, y);
-  filmBehindApp();
   afterRender();
   watchReveals();
-}
-// Every screen but the landing sits on the night film (app-film.css); the film only plays while shown.
-const appFilm = document.querySelector(".app-film video");
-function filmBehindApp() {
-  const on = state.signedIn !== null && !$root.querySelector(".lp");
-  document.body.classList.toggle("film", on);
-  if (!appFilm) return;
-  if (on && appFilm.paused && !stillMotion) appFilm.play().catch(() => {});
-  if (!on && !appFilm.paused) appFilm.pause();
 }
 // Enter motion plays only the first time something appears (the set clears on a tab switch),
 // and a status change flashes once. A full re-render would otherwise replay every animation.
