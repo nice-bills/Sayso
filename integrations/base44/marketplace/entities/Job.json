@@ -1,0 +1,14 @@
+{
+  "name": "Job",
+  "type": "object",
+  "properties": {
+    "title": { "type": "string" },
+    "buyer_email": { "type": "string" },
+    "freelancer_id": { "type": "string" },
+    "amount": { "type": "string", "description": "Major units, e.g. \"480.00\"" },
+    "currency": { "type": "string" },
+    "status": { "type": "string", "enum": ["open", "in_progress", "delivered", "released", "cancelled"] },
+    "sayso_ref": { "type": "string", "description": "Sayso payout ref, set once the buyer releases payment" }
+  },
+  "required": ["title", "buyer_email", "amount", "currency", "status"]
+}

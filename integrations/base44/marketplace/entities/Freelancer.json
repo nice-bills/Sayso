@@ -1,0 +1,11 @@
+{
+  "name": "Freelancer",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "email": { "type": "string" },
+    "country": { "type": "string", "description": "Two-letter bank country" },
+    "iban": { "type": "string", "description": "Changing this sends the freelancer a Sayso confirmation; the first payout to new details waits for the owner" }
+  },
+  "required": ["name", "email", "country"]
+}
