@@ -80,7 +80,7 @@ Agents can now earn and hold money, but they can't pay a freelancer in Lyon or a
 
 ## Proven live
 
-`npm run demo` runs end to end against the Airwallex sandbox and Metal testnet: x402 payments from three buyer agents, a batch payout, real Airwallex transfers, a bounce through Airwallex's transfer simulation refunded on chain, earnings swept under the ramp-only mandate and credited exactly once, an agent paying under an owner-signed mandate with all four of Metal's checks passing, three disputes settled from the proof ("never agreed to that price", filed by the agent itself with its mandate key and denied by its own signed order, [tx](https://testnet.metalntwx.com/tx/0xb4de45222dbddb1faa32b8d7f76f0fca0a0c9784875da9b49d6ea3b1ff3f9ec5); a "never arrived" claim denied with its answer anchored on Metal, [tx](https://testnet.metalntwx.com/tx/0x0027d07614f64ccd007d05b426f84e5fa4f0d60a81b17842bd605061232a1cca), and a "wasn't allowed" claim on a bare-key payment sent to the owner, since the payee already has the money), the heist refused on chain (`mandate_payee_not_listed`), and the books reconciled to the cent. Last run: 1 Nov 2026, on `metal-agent` 0.3.3 and `metal-pay` 0.3.4.
+`npm run demo` runs end to end against the Airwallex sandbox and Metal testnet: x402 payments from three buyer agents, a batch payout, real Airwallex transfers, a bounce through Airwallex's transfer simulation refunded on chain, earnings swept under the ramp-only mandate and credited exactly once, an agent paying under an owner-signed mandate (checked offline with simulators and unit tests; the README says plainly that this path has not yet run on testnet), three disputes settled from the proof ("never agreed to that price", filed by the agent itself with its mandate key and denied by its own signed order, [tx](https://testnet.metalntwx.com/tx/0xb4de45222dbddb1faa32b8d7f76f0fca0a0c9784875da9b49d6ea3b1ff3f9ec5); a "never arrived" claim denied with its answer anchored on Metal, [tx](https://testnet.metalntwx.com/tx/0x0027d07614f64ccd007d05b426f84e5fa4f0d60a81b17842bd605061232a1cca), and a "wasn't allowed" claim on a bare-key payment sent to the owner, since the payee already has the money), the heist refused on chain (`mandate_payee_not_listed`), and the books reconciled to the cent. The live run was 1 Nov 2026, on `metal-agent` 0.3.3 and `metal-pay` 0.3.4.
 
 The live run found what offline tests couldn't: Airwallex quotes FX in market convention (EURUSD even when you sell USD, so rates had to be inverted or every EUR quote was 23% cheap), returns a new beneficiary as `id`, charges a fee on every LOCAL transfer and keeps it on a bounce, needs `address.state` for Spanish and US payees, and only fails a transfer from `SENT`. All of it is handled and tested.
 
@@ -100,8 +100,9 @@ The live run found what offline tests couldn't: Airwallex quotes FX in market co
 | 2 Intent-Bound Purchase | Agents pay only at or below `max_usdz`; Metal won't sign above the agent's cap. The agent's own card (simulated in the demo) is bound to compute merchants by category and amount. |
 | 3 Payment Ops Incident | Bounced payouts are refunded automatically, even when the bank returns one after `PAID`; ambiguous transfers are looked up before any retry. |
 | 8 Marketplace Settlement | Batch payouts: many sellers, one x402 payment, per-line refunds. |
-| 9 Approval-Bound | Agents propose; the owner approves each payment from a link bound to its amount and payee. |
-| 10 Agentic Checkout | Sayso's own checkout is x402: the 402 response is the price, and the agent pays it. |
+| 11 x402 Business Agents (Metal) | Sayso is the business side of the guide's Kit 11: an x402 API paid per call in USDZ, with refunds and earnings moved to Airwallex under capped Metal mandates, refusals verified from the chain, and a deposit referenced by the Metal tx hash. It is not the kit's three-agents-on-one-account setup with a reallocation step: Sayso runs the refund and sweep mandates, and each paying agent has its own owner mandate. |
+
+Not entered: tracks 9 and 10 (they need Airi CLI access and a merchant storefront with a catalogue, which Sayso does not have) and the Visa award (no Visa tooling is used). Sayso does ask for the owner's approval of each payment, bound to its amount and payee, but that is not the shopping-agent kit.
 
 ## Challenges
 
@@ -118,4 +119,6 @@ The live run found what offline tests couldn't: Airwallex quotes FX in market co
 ## Links
 
 - Repo: https://github.com/nice-bills/Sayso
+- Live app: https://sayso-mp5d.onrender.com (sign in with "Look around, read-only" to see the live sandbox data)
+- Setup: README.md, "Try it now" (offline, no keys) and "Live run"
 - Video: (add after recording)
