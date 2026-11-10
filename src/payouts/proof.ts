@@ -159,8 +159,8 @@ export function judge(claim: Claim, proof: Proof): Judgement {
       if (is("approval", "proven") && is("order", "proven")) return {
         verdict: "denied",
         reason: e.delivery?.simulated
-          ? `This was a simulated run and no real money moved: the recorded transfer went to the bank details in the agent's own order${proof.nameChecked ? ", which the simulated bank's name check matched" : "; the payee's name was not checked (name matching was off), so nothing about the name is claimed"}.`
-          : `The money went to the bank details in the agent's own order${proof.nameChecked ? ", and the payee's bank confirmed them or the owner approved them" : "; the payee's name was not checked (name matching was off), so nothing about the name is claimed"}.`,
+          ? `This was a simulated run and no real money moved: the recorded transfer went to the bank details in the agent's own order${proof.nameChecked ? ", which the simulated bank's name check matched" : "; no name check is on record for this payout, so nothing about the name is claimed"}.`
+          : `The money went to the bank details in the agent's own order${proof.nameChecked ? ", and the payee's bank confirmed them or the owner approved them" : "; no name check is on record for this payout, so nothing about the name is claimed"}.`,
         cites: ["order", "approval"],
       };
       return { verdict: "review", reason: "The record doesn't show who checked the bank details.", cites: ["approval"] };

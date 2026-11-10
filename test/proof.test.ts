@@ -75,7 +75,7 @@ describe("a denial claims only what the evidence shows", () => {
     expect(proof.nameChecked).toBe(false);
     const j = judge("wrong_payee", proof);
     expect(j.verdict).toBe("denied");
-    expect(j.reason).toMatch(/name was not checked/);
+    expect(j.reason).toMatch(/no name check is on record/);
     expect(j.reason).not.toMatch(/bank confirmed/);
   });
 
