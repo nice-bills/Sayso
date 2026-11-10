@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { heuristicRead } from "../src/agent/reader.js";
+import { AirwallexError } from "../src/airwallex/client.js";
 import { PayoutService, type PayoutRequest } from "../src/payouts/service.js";
 import { price } from "../src/payouts/pricing.js";
 import { assess, DEFAULT_RISK, riskFromEnv } from "../src/payouts/risk.js";
@@ -156,6 +157,54 @@ describe("PayoutService", () => {
       await svc.follow();
     }
     expect(awx.beneficiaries.size).toBe(1);
+  });
+
+  it("creates a beneficiary under one request_id when the first answer is lost", async () => {
+    const { svc, awx } = setup();
+    const ids: string[] = [];
+    const create = awx.createBeneficiary.bind(awx);
+    let calls = 0;
+    awx.createBeneficiary = async (body) => {
+      ids.push(body.request_id);
+      if (++calls === 1) throw new AirwallexError(504, undefined, {}, "/beneficiaries/create");
+      return create(body);
+    };
+    const q = await svc.quote(req({ amount: "10.00" }));
+    const p = await payThrough(svc, q.id);
+    expect(p.status).toBe("submitted");
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(1);
+    expect(awx.beneficiaries.size).toBe(1);
+  });
+
+  it("retries an ambiguous conversion under the same request_id, never a second conversion", async () => {
+    const { svc, awx } = setup({ USD: toMinor(5000), EUR: 0 });
+    const ids: string[] = [];
+    const convert = awx.fxConvert.bind(awx);
+    let calls = 0;
+    awx.fxConvert = async (body) => {
+      ids.push(body.request_id);
+      if (++calls === 1) throw new AirwallexError(504, undefined, {}, "/fx/conversions/create");
+      return convert(body);
+    };
+    const q = await svc.quote(req({ amount: "10.00" }));
+    const p = await payThrough(svc, q.id);
+    expect(p.status).toBe("submitted");
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(1);
+  });
+
+  it("does not retry a conversion Airwallex definitely refused", async () => {
+    const { svc, awx } = setup({ USD: toMinor(5000), EUR: 0 });
+    const ids: string[] = [];
+    awx.fxConvert = async (body) => {
+      ids.push(body.request_id);
+      throw new AirwallexError(400, "insufficient_fund", {}, "/fx/conversions/create");
+    };
+    const q = await svc.quote(req({ amount: "10.00" }));
+    const p = await payThrough(svc, q.id);
+    expect(ids).toHaveLength(1);
+    expect(p.status).toBe("refunded");
   });
 });
 

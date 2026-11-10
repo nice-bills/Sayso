@@ -103,17 +103,31 @@ export class Airwallex {
   private async call<T>(method: "GET" | "POST", path: string, body?: unknown, query?: Record<string, string>): Promise<T> {
     const url = new URL(`/api/v1${path}`, this.baseUrl);
     for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, v);
-    const res = await fetch(url, {
-      method,
-      headers: { Authorization: `Bearer ${await this.bearer()}`, ...(body ? { "content-type": "application/json" } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const text = await res.text();
-    let parsed: unknown = {};
-    // A gateway in front of Airwallex can answer with plain text (an upstream timeout): treat it as a 5xx.
-    try { parsed = text ? JSON.parse(text) : {}; } catch { throw new AirwallexError(res.ok ? 502 : res.status, undefined, text.slice(0, 200), path); }
-    if (!res.ok) throw new AirwallexError(res.status, (parsed as { code?: string }).code, parsed, path);
-    return parsed as T;
+    const payload = body ? JSON.stringify(body) : undefined;
+    const send = async (token: string): Promise<T> => {
+      const res = await fetch(url, {
+        method,
+        headers: { Authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
+        body: payload,
+      });
+      const text = await res.text();
+      let parsed: unknown = {};
+      // A gateway in front of Airwallex can answer with plain text (an upstream timeout): treat it as a 5xx.
+      try { parsed = text ? JSON.parse(text) : {}; } catch { throw new AirwallexError(res.ok ? 502 : res.status, undefined, text.slice(0, 200), path); }
+      if (!res.ok) throw new AirwallexError(res.status, (parsed as { code?: string }).code, parsed, path);
+      return parsed as T;
+    };
+    // Fetched outside the retry: a 401 from the login call itself is never tried again.
+    let token = await this.bearer();
+    try {
+      return await send(token);
+    } catch (err) {
+      // A token can expire early. Sign in once more and resend the identical call, never in a loop.
+      if (!(err instanceof AirwallexError) || err.status !== 401) throw err;
+      this.token = undefined;
+      token = await this.bearer();
+      return send(token);
+    }
   }
 
   // --- Accounts and balances ---
@@ -149,8 +163,8 @@ export class Airwallex {
   /** Account verification: does the account exist, and does the name match the bank's record (VoP in SEPA, CoP in the UK)? LOCAL only. */
   verifyAccount = (body: { entity_type: "COMPANY" | "PERSONAL"; transfer_method: "LOCAL"; bank_details: Record<string, string> }) =>
     this.call<AccountVerification>("POST", "/beneficiaries/verify_account", body);
-  /** The new beneficiary's id comes back as `id`. */
-  createBeneficiary = (body: unknown) => this.call<{ id: string }>("POST", "/beneficiaries/create", body);
+  /** The new beneficiary's id comes back as `id`; the same request_id returns the one already created. */
+  createBeneficiary = (body: { request_id: string } & Record<string, unknown>) => this.call<{ id: string }>("POST", "/beneficiaries/create", body);
 
   // --- Transfers ---
   // A failed transfer goes FAILED and is cancelled seconds later; FAILED can also follow PAID

@@ -36,13 +36,19 @@ export class FakeAirwallex implements LoopAirwallex {
     return { rate: this.midRates[buy]! };
   };
 
+  private readonly conversions = new Map<string, { id: string; status: string; sell_amount: number; buy_amount: number }>();
+
   fxConvert = async (b: { request_id: string; sell_currency: string; buy_currency: string; buy_amount: string }) => {
+    const existing = this.conversions.get(b.request_id);
+    if (existing) return existing; // same request_id, same conversion
     const buyMinor = toMinor(Number(b.buy_amount));
     const sellMinor = Math.ceil(buyMinor / (this.midRates[b.buy_currency]! * (1 - SPREAD)));
     if ((this.balances[b.sell_currency] ?? 0) < sellMinor) throw new AirwallexError(400, "insufficient_fund", {}, "/fx/conversions/create");
     this.add(b.sell_currency, -sellMinor);
     this.add(b.buy_currency, buyMinor);
-    return { id: `sim:conv_${b.request_id.slice(0, 8)}`, status: "SETTLED", sell_amount: toMajor(sellMinor), buy_amount: toMajor(buyMinor) };
+    const c = { id: `sim:conv_${b.request_id.slice(0, 8)}`, status: "SETTLED", sell_amount: toMajor(sellMinor), buy_amount: toMajor(buyMinor) };
+    this.conversions.set(b.request_id, c);
+    return c;
   };
 
   createTransfer = async (b: { request_id: string; beneficiary_id: string; transfer_amount: string; transfer_currency: string; transfer_method: "LOCAL" | "SWIFT"; reason?: string }) => {
@@ -74,6 +80,7 @@ export class FakeAirwallex implements LoopAirwallex {
   };
 
   readonly beneficiaries = new Map<string, unknown>();
+  private readonly beneficiaryIds = new Map<string, string>();
   /** Fails a payout to an account whose details contain this marker, like a closed account would. */
   failMarker = "CLOSED";
 
@@ -96,9 +103,12 @@ export class FakeAirwallex implements LoopAirwallex {
     return { code: "VERIFIED", details: { account_name_match_result: same ? "FULL_MATCH" : "NOT_MATCHED", resolved_account_name: holder } };
   };
 
-  createBeneficiary = async (body: unknown) => {
+  createBeneficiary = async (body: { request_id: string } & Record<string, unknown>) => {
+    const existing = this.beneficiaryIds.get(body.request_id);
+    if (existing) return { id: existing }; // same request_id, same beneficiary
     const id = `sim:ben_${this.beneficiaries.size + 1}`;
     this.beneficiaries.set(id, body);
+    this.beneficiaryIds.set(body.request_id, id);
     return { id };
   };
 

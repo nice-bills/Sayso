@@ -34,7 +34,7 @@ for (const [key, nickname, beneficiary] of beneficiaries) {
   if (process.env[key]) { env.push(`${key}=${process.env[key]}`); continue; }
   try {
     await awx.validateBeneficiary(beneficiary, ["LOCAL"]);
-    const { id: beneficiary_id } = await awx.createBeneficiary({ beneficiary, transfer_methods: ["LOCAL"], nickname });
+    const { id: beneficiary_id } = await awx.createBeneficiary({ request_id: `setup-${key}`, beneficiary, transfer_methods: ["LOCAL"], nickname });
     env.push(`${key}=${beneficiary_id}`);
   } catch (err) {
     console.error(`${nickname}: ${String(err)}`);

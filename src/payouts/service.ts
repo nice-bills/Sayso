@@ -449,12 +449,16 @@ export class PayoutService {
 
     let beneficiaryId = this.book.payee(p.payeeHash)?.beneficiaryId;
     if (!beneficiaryId) {
+      // The payout id already names this operation, so a retry carries the same request_id and creates at most one beneficiary.
+      const body = { request_id: `beneficiary-${p.id}`, beneficiary: p.beneficiary, transfer_methods: [p.method], nickname: p.payeeName.slice(0, 50) };
       try {
-        beneficiaryId = (await this.d.awx.createBeneficiary({ beneficiary: p.beneficiary, transfer_methods: [p.method], nickname: p.payeeName.slice(0, 50) })).id;
-        this.book.savePayee(p.payeeHash, beneficiaryId);
+        beneficiaryId = (await this.d.awx.createBeneficiary(body)).id;
       } catch (err) {
-        return this.fail(p, `Airwallex would not create the beneficiary: ${String(err).slice(0, 200)}`);
+        if (!isAmbiguous(err)) return this.fail(p, `Airwallex would not create the beneficiary: ${String(err).slice(0, 200)}`);
+        beneficiaryId = (await this.d.awx.createBeneficiary(body).catch(() => undefined))?.id;
+        if (!beneficiaryId) return this.fail(p, `Airwallex would not create the beneficiary: ${String(err).slice(0, 200)}`);
       }
+      this.book.savePayee(p.payeeHash, beneficiaryId);
     }
     return this.submit(p, beneficiaryId);
   }
@@ -471,7 +475,23 @@ export class PayoutService {
     const buyMinor = need - have;
     const requestId = randomUUID();
     this.d.store.insertOp({ requestId, obligationId: p.id, kind: "convert", attempt: 1, status: "submitted", currency: p.currency, amountMinor: buyMinor });
-    const c = await this.d.awx.fxConvert({ request_id: requestId, sell_currency: "USD", buy_currency: p.currency, buy_amount: toMajor(buyMinor).toFixed(2) });
+    const body = { request_id: requestId, sell_currency: "USD", buy_currency: p.currency, buy_amount: toMajor(buyMinor).toFixed(2) };
+    const attempt = async () => {
+      try {
+        return await this.d.awx.fxConvert(body);
+      } catch (err) {
+        this.d.store.updateOp(requestId, isAmbiguous(err) ? "ambiguous" : "failed", null, String(err));
+        throw err;
+      }
+    };
+    let c: Awaited<ReturnType<PayoutAirwallex["fxConvert"]>>;
+    try {
+      c = await attempt();
+    } catch (err) {
+      if (!isAmbiguous(err)) throw err;
+      // No lookup by request_id exists for conversions, so the retry carries the same one, which Airwallex dedupes on.
+      c = await attempt();
+    }
     this.d.store.updateOp(requestId, "settled", c.id, JSON.stringify({ sell_currency: "USD", sell_minor: toMinor(c.sell_amount) }));
     emit("act", `Converted ${toMajor(toMinor(c.sell_amount)).toFixed(2)} USD into the ${fmt(buyMinor, p.currency)} shortfall`, { payout: p.id }, c.id);
   }
