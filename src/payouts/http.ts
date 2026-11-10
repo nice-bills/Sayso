@@ -24,7 +24,7 @@ import type { Payout } from "./book.js";
 import type { SignedOffer } from "./offer.js";
 
 /** Signs what a quote promises (see offer.ts). */
-export type SignOffer = (p: Payout) => Promise<SignedOffer>;
+export type SignOffer = (p: Payout) => Promise<SignedOffer | null>;
 /** A quote that ever became payable carries Sayso's signed offer; held, rejected ones never had one. */
 const SIGNED = new Set(["quoted", "accepted", "funded", "waiting", "submitted", "paid", "failed", "refunded", "refund_failed", "expired"]);
 

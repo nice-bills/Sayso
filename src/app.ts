@@ -291,7 +291,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const payTo = (mode.kind === "x402" ? mode.payTo : SIM_PAY_TO) as Address;
   // Sayso's quote key signs every payable quote; agents check offers against this address.
   const offers = new OfferSigner(store);
-  const signOffer = (p: Payout) => offers.offer(p, payTo);
+  // Signed only while the quote is still open: a payout first looked at after it moved on gets no back-dated offer.
+  const signOffer = async (p: Payout) => p.status === "quoted" ? offers.offer(p, payTo) : offers.recorded(p.id) ?? null;
   app.get("/healthz", (_req, res) => res.json({ ok: true, offline: opts.offline, pay_to: payTo, quote_signer: offers.address, agent_mandates: policy }));
   // Public routes that spend Airwallex, Metal RPC or Claude calls get a per-client limit.
   const limited: [string | string[], ReturnType<typeof rateLimit>][] = [
