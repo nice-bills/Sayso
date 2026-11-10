@@ -159,21 +159,18 @@ describe("PayoutService", () => {
     expect(awx.beneficiaries.size).toBe(1);
   });
 
-  it("creates a beneficiary under one request_id when the first answer is lost", async () => {
+  it("retries beneficiary creation once when the first answer is lost", async () => {
     const { svc, awx } = setup();
-    const ids: string[] = [];
     const create = awx.createBeneficiary.bind(awx);
     let calls = 0;
     awx.createBeneficiary = async (body) => {
-      ids.push(body.request_id);
       if (++calls === 1) throw new AirwallexError(504, undefined, {}, "/beneficiaries/create");
       return create(body);
     };
     const q = await svc.quote(req({ amount: "10.00" }));
     const p = await payThrough(svc, q.id);
     expect(p.status).toBe("submitted");
-    expect(ids).toHaveLength(2);
-    expect(new Set(ids).size).toBe(1);
+    expect(calls).toBe(2);
     expect(awx.beneficiaries.size).toBe(1);
   });
 

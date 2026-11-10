@@ -163,8 +163,8 @@ export class Airwallex {
   /** Account verification: does the account exist, and does the name match the bank's record (VoP in SEPA, CoP in the UK)? LOCAL only. */
   verifyAccount = (body: { entity_type: "COMPANY" | "PERSONAL"; transfer_method: "LOCAL"; bank_details: Record<string, string> }) =>
     this.call<AccountVerification>("POST", "/beneficiaries/verify_account", body);
-  /** The new beneficiary's id comes back as `id`; the same request_id returns the one already created. */
-  createBeneficiary = (body: { request_id: string } & Record<string, unknown>) => this.call<{ id: string }>("POST", "/beneficiaries/create", body);
+  /** The new beneficiary's id comes back as `id`. Airwallex takes no request_id here: a repeat makes a second record, which moves no money. */
+  createBeneficiary = (body: unknown) => this.call<{ id: string }>("POST", "/beneficiaries/create", body);
 
   // --- Transfers ---
   // A failed transfer goes FAILED and is cancelled seconds later; FAILED can also follow PAID

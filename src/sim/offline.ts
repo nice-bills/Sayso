@@ -80,7 +80,6 @@ export class FakeAirwallex implements LoopAirwallex {
   };
 
   readonly beneficiaries = new Map<string, unknown>();
-  private readonly beneficiaryIds = new Map<string, string>();
   /** Fails a payout to an account whose details contain this marker, like a closed account would. */
   failMarker = "CLOSED";
 
@@ -103,12 +102,9 @@ export class FakeAirwallex implements LoopAirwallex {
     return { code: "VERIFIED", details: { account_name_match_result: same ? "FULL_MATCH" : "NOT_MATCHED", resolved_account_name: holder } };
   };
 
-  createBeneficiary = async (body: { request_id: string } & Record<string, unknown>) => {
-    const existing = this.beneficiaryIds.get(body.request_id);
-    if (existing) return { id: existing }; // same request_id, same beneficiary
+  createBeneficiary = async (body: unknown) => {
     const id = `sim:ben_${this.beneficiaries.size + 1}`;
     this.beneficiaries.set(id, body);
-    this.beneficiaryIds.set(body.request_id, id);
     return { id };
   };
 

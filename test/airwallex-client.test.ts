@@ -36,17 +36,17 @@ describe("Airwallex token expiry", () => {
     let logins = 0, calls = 0;
     const sent = stubFetch((url) => {
       if (url.endsWith("/authentication/login")) return json(200, { token: `t${++logins}` });
-      return ++calls === 1 ? json(401, { code: "unauthorized" }) : json(200, { id: "ben_1" });
+      return ++calls === 1 ? json(401, { code: "unauthorized" }) : json(200, { id: "conv_1" });
     });
 
-    const body = { request_id: "beneficiary-payout-1", beneficiary: { company_name: "Kreuzberg Studio" }, transfer_methods: ["LOCAL"] };
-    expect(await client().createBeneficiary(body)).toEqual({ id: "ben_1" });
+    const body = { request_id: "convert-1", sell_currency: "USD", buy_currency: "EUR", buy_amount: "10.00" };
+    expect(await client().fxConvert(body)).toEqual({ id: "conv_1" });
     expect(logins).toBe(2);
     expect(calls).toBe(2);
 
-    const posts = sent.filter((s) => s.url.endsWith("/beneficiaries/create"));
+    const posts = sent.filter((s) => s.url.endsWith("/fx/conversions/create"));
     expect(posts).toHaveLength(2);
-    expect(JSON.parse(posts[0]!.body!).request_id).toBe("beneficiary-payout-1");
+    expect(JSON.parse(posts[0]!.body!).request_id).toBe("convert-1");
     expect(posts[1]!.body).toBe(posts[0]!.body);
     expect(posts[1]!.auth).toBe("Bearer t2");
   });

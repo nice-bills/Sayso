@@ -449,8 +449,8 @@ export class PayoutService {
 
     let beneficiaryId = this.book.payee(p.payeeHash)?.beneficiaryId;
     if (!beneficiaryId) {
-      // The payout id already names this operation, so a retry carries the same request_id and creates at most one beneficiary.
-      const body = { request_id: `beneficiary-${p.id}`, beneficiary: p.beneficiary, transfer_methods: [p.method], nickname: p.payeeName.slice(0, 50) };
+      // Airwallex has no request_id for beneficiaries. One retry after an unknown outcome can at worst leave a spare record; the transfer still goes once.
+      const body = { beneficiary: p.beneficiary, transfer_methods: [p.method], nickname: p.payeeName.slice(0, 50) };
       try {
         beneficiaryId = (await this.d.awx.createBeneficiary(body)).id;
       } catch (err) {

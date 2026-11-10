@@ -75,7 +75,7 @@ export class PennyChecks {
     const token = randomUUID().replaceAll("-", "");
     const reference = `SAYSO CODE ${code}`;
     // The cent goes to the new account, like any payout: Airwallex checks the details, and request_id makes it once-only.
-    const ben = await this.d.awx.createBeneficiary({ request_id: `beneficiary-${id}`, beneficiary: p.beneficiary, transfer_methods: [p.method], nickname: `Check ${payee}`.slice(0, 50) });
+    const ben = await this.d.awx.createBeneficiary({ beneficiary: p.beneficiary, transfer_methods: [p.method], nickname: `Check ${payee}`.slice(0, 50) });
     const t = await this.d.awx.createTransfer({
       request_id: `penny-${id}`, beneficiary_id: ben.id, transfer_amount: "0.01", transfer_currency: p.currency, transfer_method: p.method,
       reference, source_currency: p.currency, reason: "business_expenses",
