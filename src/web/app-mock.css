@@ -39,8 +39,8 @@ body.film .head h2 { font-size: clamp(44px, 6vw, 72px); line-height: .9; }
   body.film .dp-stat span { font-size: 12px; }
   /* the latest verdict sits on a photo, the word huge and condensed */
   body.film .dp-latest, body.film .dp-latest[data-tone] { border-radius: 22px; min-height: 290px; align-content: end; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14);
-    background: linear-gradient(rgba(6, 6, 5, .5), rgba(6, 6, 5, .5)), url("/people/compute.jpg") center / cover; }
-  body.film .dp-latest:hover { background: linear-gradient(rgba(6, 6, 5, .4), rgba(6, 6, 5, .4)), url("/people/compute.jpg") center / cover; }
+    background: linear-gradient(rgba(6, 6, 5, .34), rgba(6, 6, 5, .8)), url("/people/compute.jpg") center / cover; }
+  body.film .dp-latest:hover { background: linear-gradient(rgba(6, 6, 5, .26), rgba(6, 6, 5, .74)), url("/people/compute.jpg") center / cover; }
   body.film .dp-word { font-weight: 900; font-stretch: 75%; font-size: clamp(90px, 11vw, 150px); letter-spacing: -.045em; line-height: .8; }
   body.film .dp-list li { border: 0; border-top: 1px solid var(--hair); }
   body.film .dp-list .rh-chip { font-family: var(--mono); border-radius: 7px; background: rgba(255, 255, 255, .07); box-shadow: none; }
@@ -49,11 +49,11 @@ body.film .head h2 { font-size: clamp(44px, 6vw, 72px); line-height: .9; }
 
 /* the deck: photo cards, picked by what the card is */
 body.film .hc, body.film .hc:is(.ink, .lime, .sky, .green) { --ph: url("/people/invoices.jpg"); border-radius: 24px; color: var(--ink);
-  background: linear-gradient(rgba(6, 6, 5, .52), rgba(6, 6, 5, .52)), var(--ph) center / cover, #141412;
+  background: linear-gradient(rgba(6, 6, 5, .5), rgba(6, 6, 5, .78)), var(--ph) center / cover, #141412;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14), 0 30px 60px -30px rgba(0, 0, 0, .8); }
 body.film .hc.ink { --ph: url("/people/closing.jpg"); } body.film .hc.lime { --ph: url("/people/travel.jpg"); }
 body.film .hc.sky { --ph: url("/people/errands.jpg"); } body.film .hc.green { --ph: url("/people/freelance.jpg"); }
-body.film .hc-who { color: rgba(245, 243, 238, .78); } body.film .hc-sub { color: rgba(245, 243, 238, .7); }
+body.film .hc-who { color: rgba(245, 243, 238, .92); } body.film .hc-sub { color: rgba(245, 243, 238, .86); }
 body.film .hc-amt { font-weight: 800; font-stretch: 82%; letter-spacing: -.04em; }
 
 /* ---------- inbox: a grid of cards, the first one on a photo ---------- */

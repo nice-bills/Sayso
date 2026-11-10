@@ -15,7 +15,7 @@ html:has(.lp), body:has(.lp) { background: #0a0a09; }
 .lp ::selection { background: var(--green); color: #0a0a09; }
 .lp a { color: inherit; }
 .lp-col { max-width: var(--col); margin: 0 auto; padding: 0 var(--pad); }
-.lp-display { font-family: var(--display); font-weight: 800; font-stretch: 84%; letter-spacing: -.04em; line-height: .92; margin: 0; text-wrap: balance; }
+.lp-display { font-family: var(--display); font-weight: 800; font-stretch: 84%; letter-spacing: -.04em; word-spacing: .07em; line-height: .92; margin: 0; text-wrap: balance; }
 .lp-h2 { font-size: clamp(38px, 5.2vw, 76px); }
 .lp-h-giant { font-size: clamp(52px, 8.6vw, 138px); line-height: .88; }
 .lp-dim { color: var(--lp-faint); }
@@ -180,7 +180,7 @@ html:has(.lp), body:has(.lp) { background: #0a0a09; }
 .lp-faq { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(32px, 6vw, 120px); align-items: start; }
 .lp-acc { border-top: 1px solid var(--hair); }
 .lp-acc details { border-bottom: 1px solid var(--hair); }
-.lp-acc summary { list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 24px 0; font-size: clamp(18px, 1.4vw, 22px); font-weight: 600; letter-spacing: -.01em; }
+.lp-acc summary { color: var(--fg); list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 24px 0; font-size: clamp(18px, 1.4vw, 22px); font-weight: 600; letter-spacing: -.01em; }
 .lp-acc summary::-webkit-details-marker { display: none; }
 .lp-acc summary i { position: relative; width: 14px; height: 14px; flex: none; }
 .lp-acc summary i::before, .lp-acc summary i::after { content: ""; position: absolute; left: 0; right: 0; top: 6px; height: 1.5px; background: var(--dim); transition: transform .3s; }
