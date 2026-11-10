@@ -1,13 +1,14 @@
 // Sample invoice emails for the offline run and tests. Bank details are public test numbers.
 import type { InboundEmail } from "../src/inbox/extract.js";
 
-const at = (iso: string) => new Date(iso);
+// Relative to now: a fixed date outlives the inbox's 7-day approval window and every quote arrives expired.
+const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000);
 
 export const studioInvoice: InboundEmail = {
   messageId: "<inv-114@kreuzberg-studio.example>",
   from: "\"Kreuzberg Studio GmbH\" <billing@kreuzberg-studio.example>",
   subject: "Invoice INV-2026-114 for October design work",
-  receivedAt: at("2026-11-02T08:12:00Z"),
+  receivedAt: ago(228),
   body: `Hi,
 
 Please find our invoice for October.
@@ -28,7 +29,7 @@ export const designerInvoice: InboundEmail = {
   messageId: "<inv-0042@hollowayprint.example>",
   from: "Holloway Print Ltd <accounts@hollowayprint.example>",
   subject: "Invoice 0042",
-  receivedAt: at("2026-11-02T09:40:00Z"),
+  receivedAt: ago(140),
   body: `Invoice No: HP-0042
 Amount due: £72.00
 Account name: Holloway Print Ltd
@@ -40,7 +41,7 @@ export const fakeLandlord: InboundEmail = {
   messageId: "<urgent-rent@berlin-office-lettings.example>",
   from: "Berlin Office Lettings <accounts@berlin-office-lettings.example>",
   subject: "URGENT: updated bank details for rent",
-  receivedAt: at("2026-11-02T10:05:00Z"),
+  receivedAt: ago(115),
   body: `Hello, our bank has changed. Please pay this month's rent to our updated bank details today.
 Invoice number: RENT-NOV
 Total due: EUR 60.00
@@ -53,7 +54,7 @@ export const vagueEmail: InboundEmail = {
   messageId: "<hello@someone.example>",
   from: "someone@someone.example",
   subject: "quick question",
-  receivedAt: at("2026-11-02T11:00:00Z"),
+  receivedAt: ago(60),
   body: "Hey, can you send the money we talked about? Thanks",
 };
 
@@ -62,7 +63,7 @@ export const studioBankChange: InboundEmail = {
   messageId: "<inv-121@kreuzberg-studlo.example>",
   from: "\"Kreuzberg Studio GmbH\" <billing@kreuzberg-studlo.example>",
   subject: "Invoice INV-2026-121 (please note our new bank details)",
-  receivedAt: at("2026-11-09T08:30:00Z"),
+  receivedAt: ago(30),
   body: `Hi,
 
 Invoice number: INV-2026-121

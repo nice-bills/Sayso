@@ -85,7 +85,8 @@ test('api: an app paying through Sayso is held to its own rules and cannot appro
   const { api_key } = (await created.json()) as { api_key: string };
   const asApp = { authorization: `Bearer ${api_key}`, ...JSON_H };
   const pay = (body: object) => fetch(new URL('/v1/platform/payouts', base), { method: 'POST', headers: asApp, body: JSON.stringify(body) });
-  const job = { ref: 'e2e-1', payee_name: 'Atelier Nord', amount: '120.00', currency: 'EUR', reference: 'E2E-1', bank: { iban: 'DE89370400440532013000' } };
+  // Not 120.00: the browser suite shares this server and looks for its own 'Pay €120.00'.
+  const job = { ref: 'e2e-1', payee_name: 'Atelier Nord', amount: '135.00', currency: 'EUR', reference: 'E2E-1', bank: { iban: 'DE89370400440532013000' } };
 
   expect((await pay({ ...job, ref: 'e2e-big', amount: '999.00' })).status).toBe(422);
   const ok = await pay(job);
