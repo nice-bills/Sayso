@@ -1,7 +1,10 @@
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildSayso } from "../src/app.js";
-import { judge, type Claim, type Evidence, type Proof } from "../src/payouts/proof.js";
+import type { Anchored } from "../src/metal/receipts.js";
+import type { Payout } from "../src/payouts/book.js";
+import { buildProof, judge, type Claim, type Evidence, type Proof } from "../src/payouts/proof.js";
+import type { TrailStep } from "../src/trail.js";
 
 const quoteBody = (iban = "ES9121000418450200051332") => ({
   amount: "300.00", currency: "EUR", reference: "agent job",
@@ -34,6 +37,53 @@ describe("judge: a dispute settled from the proof", () => {
   it("answers 'never agreed to that price' with the agent's own signature, and 'not allowed' with the owner's", () => {
     expect(judge("wrong_amount", proofWith({}, { order: true, owner: true })).reason).toMatch(/signed this exact order, price included/);
     expect(judge("not_authorized", proofWith({}, { order: true, owner: true })).reason).toMatch(/owner signed the mandate/);
+  });
+});
+
+describe("a denial claims only what the evidence shows", () => {
+  const payout = (over: Partial<Payout> = {}): Payout => ({
+    id: "p1", buyer: "0xAgent", currency: "EUR", amountMinor: 30_000, method: "LOCAL", bankCountry: "ES",
+    payeeName: "Etiqueta SL", payeeHash: "h", beneficiary: {}, reference: "agent job", costMinor: 30_000, feeMinor: 300,
+    totalMinor: 30_300, rateUsed: 1, status: "paid", reasons: [], createdAt: new Date().toISOString(), expiresAt: new Date().toISOString(),
+    fundingTx: "0x" + "a".repeat(64), transferId: "awx_transfer_1", refundTx: null, failure: null, decision: null, ...over,
+  } as Payout);
+  const anchored = (tx: string): Anchored => ({ status: "paid", receipt: {} as Anchored["receipt"], hash: `0x${"b".repeat(64)}` as `0x${string}`, tx, explorer: null, error: null });
+  const step = (title: string): TrailStep[] => [{ at: new Date().toISOString(), kind: "payee", title }];
+
+  it("says plainly when a not_delivered denial rests on simulated evidence", () => {
+    const proof = buildProof(payout({ fundingTx: "sim:0xfund", transferId: "sim:tfr_1" }), [], [anchored("sim:0xanchor")]);
+    for (const id of ["funding", "delivery", "receipt"] as const) {
+      expect(proof.evidence.find((e) => e.id === id)!.simulated).toBe(true);
+      expect(proof.evidence.find((e) => e.id === id)!.detail).toMatch(/simulat/i);
+    }
+    const j = judge("not_delivered", proof);
+    expect(j.verdict).toBe("denied");
+    expect(j.reason).toMatch(/simulated run/);
+    expect(j.reason).not.toMatch(/reached the payee's bank|receipt on chain/);
+  });
+
+  it("a real transfer with a simulator's receipt anchor drops only the on-chain claim", () => {
+    const proof = buildProof(payout(), [], [anchored("sim:0xanchor")]);
+    const j = judge("not_delivered", proof);
+    expect(j.verdict).toBe("denied");
+    expect(j.reason).toMatch(/anchored by the simulator, not on chain/);
+    expect(j.reason).not.toMatch(/receipt on chain says/);
+  });
+
+  it("a wrong_payee denial without a name check claims the account details only", () => {
+    const proof = buildProof(payout(), step("The payee's bank says the account exists (name matching is off on the sandbox)"), []);
+    expect(proof.nameChecked).toBe(false);
+    const j = judge("wrong_payee", proof);
+    expect(j.verdict).toBe("denied");
+    expect(j.reason).toMatch(/name was not checked/);
+    expect(j.reason).not.toMatch(/bank confirmed/);
+  });
+
+  it("real evidence and a run name check keep the strong wording", () => {
+    const proof = buildProof(payout(), step("The payee's bank says the account belongs to Etiqueta SL"), [anchored("0x" + "c".repeat(64))]);
+    expect(proof.nameChecked).toBe(true);
+    expect(judge("not_delivered", proof).reason).toBe("Airwallex reports the transfer reached the payee's bank, and the receipt on chain says so too.");
+    expect(judge("wrong_payee", proof).reason).toBe("The money went to the bank details in the agent's own order, and the payee's bank confirmed them or the owner approved them.");
   });
 });
 

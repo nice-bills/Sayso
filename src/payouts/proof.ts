@@ -29,6 +29,8 @@ export interface Evidence {
   status: "proven" | "against" | "missing";
   detail: string;
   link?: string;
+  /** The record behind it is the simulator's (its id starts with sim:), so nothing real happened. */
+  simulated?: boolean;
 }
 
 export interface Proof {
@@ -38,6 +40,8 @@ export interface Proof {
   hash: string;
   /** The agent's mandate key signed this exact order, and the owner signed the mandate it paid under. */
   signed: { order: boolean; owner: boolean };
+  /** The payee's bank ran its name check (VoP/CoP) for this payout. False when it is off, or nothing is on record. */
+  nameChecked?: boolean;
   /** The offer signed at quote time, exactly as the agent received it. Absent when none was recorded then. */
   offer?: SignedOffer;
 }
@@ -60,6 +64,7 @@ export interface Judgement {
 const EXPLORER = "https://testnet.metalntwx.com/tx/";
 const usdz = (minor: number) => `${toMajor(minor).toFixed(2)} USDZ`;
 const txLink = (tx: string | null | undefined) => (tx && tx.startsWith("0x") ? `${EXPLORER}${tx}` : undefined);
+const sim = (s: string | null | undefined) => Boolean(s?.startsWith("sim:"));
 
 /** The evidence for one payout, from the book, its trail, its receipts and (when known) the transfer's status now. */
 export function buildProof(p: Payout, steps: TrailStep[], anchors: Anchored[], transferStatus?: string, offer?: SignedOffer): Proof {
@@ -87,21 +92,35 @@ export function buildProof(p: Payout, steps: TrailStep[], anchors: Anchored[], t
   else evidence.push({ id: "approval", title: "The owner's approval", status: "proven", detail: payeeSteps.length ? `Not needed. ${payeeSteps.join(". ")}.` : "Not needed. No rule held it." });
 
   evidence.push(p.fundingTx
-    ? { id: "funding", title: "The agent's payment on Metal", status: "proven", detail: `${usdz(p.totalMinor)}, the quoted price, settled in ${short(p.fundingTx)}.`, link: txLink(p.fundingTx) }
+    ? { id: "funding", title: "The agent's payment on Metal", status: "proven", simulated: sim(p.fundingTx),
+        detail: sim(p.fundingTx)
+          ? `${usdz(p.totalMinor)}, the quoted price, settled in ${short(p.fundingTx)} — a simulated payment, not a real one.`
+          : `${usdz(p.totalMinor)}, the quoted price, settled in ${short(p.fundingTx)}.`, link: txLink(p.fundingTx) }
     : { id: "funding", title: "The agent's payment on Metal", status: "missing", detail: "No Metal payment is on record." });
 
   const now = transferStatus ?? (p.status === "paid" ? "PAID" : p.status);
   if (!p.transferId) evidence.push({ id: "delivery", title: "The bank transfer", status: "missing", detail: "No Airwallex transfer was made." });
-  else if (now === "PAID" || now === "SETTLED") evidence.push({ id: "delivery", title: "The bank transfer", status: "proven", detail: `Airwallex transfer ${p.transferId} reached ${p.payeeName}'s bank (${now}).` });
+  else if (now === "PAID" || now === "SETTLED") evidence.push({ id: "delivery", title: "The bank transfer", status: "proven", simulated: sim(p.transferId),
+    detail: sim(p.transferId)
+      ? `Simulated transfer ${p.transferId} (${now}): the simulator reported it paid, but no real money reached ${p.payeeName}'s bank.`
+      : `Airwallex transfer ${p.transferId} reached ${p.payeeName}'s bank (${now}).` })
   else if (/FAIL|RETURN|CANCEL|refund/i.test(now)) evidence.push({ id: "delivery", title: "The bank transfer", status: "against", detail: `Airwallex transfer ${p.transferId} did not arrive (${now}).` });
   else evidence.push({ id: "delivery", title: "The bank transfer", status: "missing", detail: `Airwallex transfer ${p.transferId} is still ${now}.` });
 
   const paid = anchors.find((a) => a.status === "paid");
   evidence.push(paid?.tx
-    ? { id: "receipt", title: "The receipt on chain", status: "proven", detail: `Receipt ${short(paid.hash)} anchored in ${short(paid.tx)}; anyone can rehash it and compare.`, link: paid.explorer ?? txLink(paid.tx) }
+    ? { id: "receipt", title: "The receipt on chain", status: "proven", simulated: sim(paid.tx),
+        detail: sim(paid.tx)
+          ? `Receipt ${short(paid.hash)} is recorded but was anchored by the simulator (${short(paid.tx)}), not on chain.`
+          : `Receipt ${short(paid.hash)} anchored in ${short(paid.tx)}; anyone can rehash it and compare.`, link: paid.explorer ?? txLink(paid.tx) }
     : { id: "receipt", title: "The receipt on chain", status: "missing", detail: paid ? "The receipt is recorded but not yet anchored." : "No receipt has been issued." });
 
-  return { payout: p.id, evidence, hash: hashOf(evidence), signed: { order: Boolean(mandate?.ok && mandate.signed_order), owner: Boolean(mandate?.ok && mandate.owner_signed) }, ...(offer ? { offer } : {}) };
+  // Whether the payee's name was actually checked: the trail says so when the bank answered it
+  // ("belongs to", "checked the account"), and says plainly when matching was off. Nothing on
+  // record counts as not checked, so a denial never claims a check it can't show.
+  const nameChecked = payeeSteps.some((s) => s.includes("says the account belongs to") || s.includes("checked the account"));
+
+  return { payout: p.id, evidence, hash: hashOf(evidence), signed: { order: Boolean(mandate?.ok && mandate.signed_order), owner: Boolean(mandate?.ok && mandate.owner_signed) }, nameChecked, ...(offer ? { offer } : {}) };
 }
 
 /** Settles a claim from the evidence. Pure: the same proof and claim always give the same answer. */
@@ -122,12 +141,28 @@ export function judge(claim: Claim, proof: Proof): Judgement {
       if (is("funding", "proven")) return { verdict: "denied", reason: "The agent paid exactly the quoted price: Sayso's signed offer and the 402 response both named it before the agent paid.", cites: ["order", "funding"] };
       return { verdict: "review", reason: "No Metal payment is on record to compare with the quote.", cites: ["funding"] };
     case "not_delivered":
-      if (is("delivery", "proven")) return { verdict: "denied", reason: "Airwallex reports the transfer reached the payee's bank, and the receipt on chain says so too.", cites: ["delivery", "receipt"] };
+      // A denial is a public statement: with simulator evidence it says so, and claims no real delivery or anchor.
+      if (is("delivery", "proven")) return {
+        verdict: "denied",
+        reason: e.delivery.simulated
+          ? `This was a simulated run: the transfer on record is the simulator's and no real money moved${e.receipt?.simulated ? "; the receipt on record was anchored by the simulator, not on chain" : ""}.`
+          : e.receipt?.simulated
+            ? "Airwallex reports the transfer reached the payee's bank; the receipt on record was anchored by the simulator, not on chain."
+            : "Airwallex reports the transfer reached the payee's bank, and the receipt on chain says so too.",
+        cites: ["delivery", "receipt"],
+      };
       if (is("delivery", "against")) return { verdict: "upheld", reason: "Airwallex reports the transfer did not arrive, so the agent gets its USDZ back.", cites: ["delivery"] };
       return { verdict: "review", reason: "The transfer hasn't settled yet, so the proof can't settle this.", cites: ["delivery"] };
     case "wrong_payee":
       if (is("approval", "against")) return { verdict: "upheld", reason: "The payee's bank didn't confirm the name, or a hold was never cleared, so the agent gets its USDZ back.", cites: ["approval"] };
-      if (is("approval", "proven") && is("order", "proven")) return { verdict: "denied", reason: "The money went to the bank details in the agent's own order, and the payee's bank confirmed them or the owner approved them.", cites: ["order", "approval"] };
+      // When the name check didn't run (off on the sandbox), the denial claims the account details only.
+      if (is("approval", "proven") && is("order", "proven")) return {
+        verdict: "denied",
+        reason: e.delivery?.simulated
+          ? `This was a simulated run and no real money moved: the recorded transfer went to the bank details in the agent's own order${proof.nameChecked ? ", which the simulated bank's name check matched" : "; the payee's name was not checked (name matching was off), so nothing about the name is claimed"}.`
+          : `The money went to the bank details in the agent's own order${proof.nameChecked ? ", and the payee's bank confirmed them or the owner approved them" : "; the payee's name was not checked (name matching was off), so nothing about the name is claimed"}.`,
+        cites: ["order", "approval"],
+      };
       return { verdict: "review", reason: "The record doesn't show who checked the bank details.", cites: ["approval"] };
     default:
       return { verdict: "review", reason: "The proof doesn't cover this claim, so the owner decides.", cites: [] };
