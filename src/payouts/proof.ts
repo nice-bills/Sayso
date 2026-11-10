@@ -38,6 +38,8 @@ export interface Proof {
   hash: string;
   /** The agent's mandate key signed this exact order, and the owner signed the mandate it paid under. */
   signed: { order: boolean; owner: boolean };
+  /** The offer signed at quote time, exactly as the agent received it. Absent when none was recorded then. */
+  offer?: SignedOffer;
 }
 
 export const CLAIMS = {
@@ -99,7 +101,7 @@ export function buildProof(p: Payout, steps: TrailStep[], anchors: Anchored[], t
     ? { id: "receipt", title: "The receipt on chain", status: "proven", detail: `Receipt ${short(paid.hash)} anchored in ${short(paid.tx)}; anyone can rehash it and compare.`, link: paid.explorer ?? txLink(paid.tx) }
     : { id: "receipt", title: "The receipt on chain", status: "missing", detail: paid ? "The receipt is recorded but not yet anchored." : "No receipt has been issued." });
 
-  return { payout: p.id, evidence, hash: hashOf(evidence), signed: { order: Boolean(mandate?.ok && mandate.signed_order), owner: Boolean(mandate?.ok && mandate.owner_signed) } };
+  return { payout: p.id, evidence, hash: hashOf(evidence), signed: { order: Boolean(mandate?.ok && mandate.signed_order), owner: Boolean(mandate?.ok && mandate.owner_signed) }, ...(offer ? { offer } : {}) };
 }
 
 /** Settles a claim from the evidence. Pure: the same proof and claim always give the same answer. */

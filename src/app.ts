@@ -291,7 +291,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const payTo = (mode.kind === "x402" ? mode.payTo : SIM_PAY_TO) as Address;
   // Sayso's quote key signs every payable quote; agents check offers against this address.
   const offers = new OfferSigner(store);
-  const signOffer = (p: Payout) => offers.sign(p, payTo);
+  const signOffer = (p: Payout) => offers.offer(p, payTo);
   app.get("/healthz", (_req, res) => res.json({ ok: true, offline: opts.offline, pay_to: payTo, quote_signer: offers.address, agent_mandates: policy }));
   // Public routes that spend Airwallex, Metal RPC or Claude calls get a per-client limit.
   const limited: [string | string[], ReturnType<typeof rateLimit>][] = [
@@ -349,7 +349,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const disputes = new Disputes(store);
   const proofOf = async (p: Payout) => {
     const t = p.transferId ? await awx.transferByRequestId(p.id).catch(() => undefined) : undefined;
-    return buildProof(p, trail.for(p.id), receipts.get(p.id), t?.status, p.fundingTx ? await signOffer(p) : undefined);
+    return buildProof(p, trail.for(p.id), receipts.get(p.id), t?.status, offers.recorded(p.id));
   };
   app.get("/v1/payouts/:id/proof", async (req, res) => {
     const p = svc.book.get(String(req.params.id));

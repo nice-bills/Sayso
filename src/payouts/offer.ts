@@ -75,9 +75,12 @@ export function storedKey(store: Store, name: string): Hex {
 
 export class OfferSigner {
   private readonly account: PrivateKeyAccount;
+  private readonly store: Store;
 
   constructor(store: Store, key = process.env.SAYSO_QUOTE_KEY as Hex | undefined) {
     this.account = privateKeyToAccount(key ?? storedKey(store, "quote"));
+    this.store = store;
+    store.db.exec("CREATE TABLE IF NOT EXISTS signed_offers (payout_id TEXT PRIMARY KEY, offer TEXT NOT NULL)");
   }
 
   get address(): Address { return this.account.address; }
@@ -87,5 +90,20 @@ export class OfferSigner {
     const terms = termsOf(p, payTo);
     const signature = await this.account.signTypedData({ domain: OFFER_DOMAIN, types: OFFER_TYPES, primaryType: "Offer", message: message(terms) });
     return { signer: this.address, terms, signature };
+  }
+
+  /** The offer signed when the payout was first quoted. Stored once: later requests get those exact bytes back. */
+  async offer(p: Payout, payTo: Address): Promise<SignedOffer> {
+    const stored = this.recorded(p.id);
+    if (stored) return stored;
+    const o = await this.sign(p, payTo);
+    this.store.db.prepare("INSERT OR IGNORE INTO signed_offers (payout_id, offer) VALUES (?, ?)").run(p.id, JSON.stringify(o));
+    return this.recorded(p.id) ?? o;
+  }
+
+  /** The offer exactly as signed at quote time, or nothing when the payout never had one. */
+  recorded(payoutId: string): SignedOffer | undefined {
+    const row = this.store.db.prepare("SELECT offer FROM signed_offers WHERE payout_id = ?").get(payoutId) as { offer: string } | undefined;
+    return row ? (JSON.parse(row.offer) as SignedOffer) : undefined;
   }
 }

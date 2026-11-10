@@ -1,6 +1,7 @@
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import { buildSayso } from "../src/app.js";
+import type { Payout } from "../src/payouts/book.js";
 import { verifyOffer, type SignedOffer } from "../src/payouts/offer.js";
 
 const quoteBody = {
@@ -29,6 +30,52 @@ describe("Sayso's signed offer", () => {
       expect(await verifyOffer({ ...o, signer: "0x0000000000000000000000000000000000000002" }, "0x0000000000000000000000000000000000000002")).toBe(false);
       // The same offer comes back on the payout itself, unchanged.
       expect((await (await fetch(`${base}/v1/payouts/${q.id}`)).json()).offer.signature).toBe(o.signature);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("cites the offer it signed at quote time in the proof, unchanged, and never makes a new one", async () => {
+    const cs = await buildSayso({ offline: true });
+    const server = cs.app.listen(0);
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const call = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
+      const r = await fetch(base + path, { method, headers: { "content-type": "application/json", ...headers }, body: body ? JSON.stringify(body) : undefined });
+      return { status: r.status, body: (await r.json()) as Record<string, any> };
+    };
+    try {
+      const q = await call("POST", "/v1/quotes", quoteBody);
+      const quoted = q.body.offer as SignedOffer;
+      expect(await call("POST", q.body.pay_url, undefined, { "x-sim-payer": "0xAgent" })).toMatchObject({ status: 202 });
+      for (let i = 0; i < 3; i++) await cs.tick();
+      const a = await call("GET", `/v1/payouts/${q.body.id}/proof`);
+      expect(a.body.offer).toEqual(quoted);
+      expect(JSON.stringify(a.body.offer)).toBe(JSON.stringify(quoted));
+      const b = await call("GET", `/v1/payouts/${q.body.id}/proof`);
+      expect(b.body.offer.signature).toBe(quoted.signature);
+      expect(b.body.hash).toBe(a.body.hash);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("leaves a payout with no offer recorded at quote time without one in its proof", async () => {
+    const cs = await buildSayso({ offline: true });
+    const server = cs.app.listen(0);
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const p: Payout = {
+      id: "11111111-1111-4111-8111-111111111111",
+      buyer: null, currency: "EUR", amountMinor: 12000, method: "LOCAL", bankCountry: "ES",
+      payeeName: "Legacy SL", payeeHash: "legacy", beneficiary: {}, reference: "INV-OLD",
+      costMinor: 12000, feeMinor: 0, totalMinor: 12000, rateUsed: 1, status: "paid", reasons: [],
+      createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      fundingTx: "sim:0xfunded", transferId: null, refundTx: null, failure: null, decision: null,
+    };
+    cs.svc.book.insert(p);
+    try {
+      const proof = (await (await fetch(`${base}/v1/payouts/${p.id}/proof`)).json()) as Record<string, any>;
+      expect(proof.offer).toBeUndefined();
+      expect(proof.evidence[0].detail).not.toMatch(/quote key/);
     } finally {
       server.close();
     }
