@@ -1,6 +1,7 @@
 // Sayso, the app. No framework and no build step: a small element builder (text is always set
 // as text, never as HTML, because invoice emails are written by strangers), state in one object,
 // and a full re-render after each change. Live updates come from the server's event stream.
+import { landing, afterRender } from "/landing.js";
 
 const $root = document.getElementById("root");
 const state = {
@@ -34,6 +35,7 @@ function h(tag, attrs, ...kids) {
 
 // Line icons, drawn as one SVG path each.
 const ICONS = {
+  x: "M6 6l12 12M18 6 6 18",
   home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
   inbox: "M22 12h-6l-2 3h-4l-2-3H2 M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z",
   payments: "M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z M2 10h20 M6 15h4",
@@ -179,9 +181,20 @@ function render() {
   dirty = false;
   staggered = 0;
   const y = window.scrollY;
-  $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn && (inApp() || state.claim || state.connect || state.focus) ? (state.claim ? claimView() : state.connect ? connectView() : appView()) : !state.signedIn && (state.claim || state.connect) ? claimGate() : landing(), state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].filter(Boolean));
+  $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn && (inApp() || state.claim || state.connect || state.focus) ? (state.claim ? claimView() : state.connect ? connectView() : appView()) : !state.signedIn && (state.claim || state.connect) ? claimGate() : landing(), state.signedIn ? whyDrawer() : null, state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].flat().filter(Boolean));
   window.scrollTo(0, y);
-  if (!state.signedIn) watchReveals();
+  filmBehindApp();
+  afterRender();
+  watchReveals();
+}
+// Every screen but the landing sits on the night film (app-film.css); the film only plays while shown.
+const appFilm = document.querySelector(".app-film video");
+function filmBehindApp() {
+  const on = state.signedIn !== null && !$root.querySelector(".lp");
+  document.body.classList.toggle("film", on);
+  if (!appFilm) return;
+  if (on && appFilm.paused && !stillMotion) appFilm.play().catch(() => {});
+  if (!on && !appFilm.paused) appFilm.pause();
 }
 // Enter motion plays only the first time something appears (the set clears on a tab switch),
 // and a status change flashes once. A full re-render would otherwise replay every animation.
@@ -252,18 +265,6 @@ async function turn(c, target, tok) {
 // ---------- landing: the decision is the hero ----------
 // The board asks the server's own decide() (POST /v1/decide/preview) what an agent would do with a
 // sample €480 invoice, and plays a run of changes until a visitor grabs a control.
-function landing() {
-  const st = stage();
-  if (navSignin) navSignin.textContent = state.signedIn ? "Open the app" : "Sign in";
-  return h("div", { class: "landing" },
-    st,
-    proveSection(),
-    refusesSection(),
-    signinSection(),
-    footer(),
-  );
-}
-
 let stageEl;
 function stage() {
   if (stageEl) return stageEl;
@@ -291,7 +292,7 @@ function stage() {
   const POS = [2, 26, 51, 76, 98];
   const STATIONS = [["Agent", "asks"], ["Sayso", "decides"], ["Metal", "USDZ"], ["Airwallex", "EUR"], ["Kreuzberg", "paid"]];
   const nodes = POS.map((x, i) => h("span", { class: `node${i === 1 ? " v-gate" : ""}`, style: `left:${x}%` }));
-  const names = STATIONS.map(([k, n], i) => h("span", { class: `node-l${i === 0 ? " first" : i === POS.length - 1 ? " last" : ""}`, style: `left:${POS[i]}%` }, k, h("small", {}, n)));
+  const names = STATIONS.map(([k, n], i) => h("span", { class: `node-l${i === 0 ? " first" : i === POS.length - 1 ? " last" : ""}${i % 2 ? " alt" : ""}`, style: `left:${POS[i]}%` }, k, h("small", {}, n)));
   const coin = h("span", { class: "coin" }, h("span", { class: "tag" })), coin2 = h("span", { class: "coin hidden" }, h("span", { class: "tag" }));
   const line = h("span", { class: "line" }), lit = h("span", { class: "line lit" });
   const track = h("div", { class: "track" }, line, lit, nodes, names, coin, coin2);
@@ -387,12 +388,8 @@ function stage() {
     Object.assign(st, c); decideNow();
   }
 
-  stageEl = h("section", { class: "l-stage v-hero", id: "board", "aria-label": "What Sayso decides" },
+  stageEl = h("section", { class: "l-stage v-hero board-panel", id: "board", "aria-label": "What Sayso decides" },
     h("div", { class: "stage-in" },
-      h("header", { class: "l-top" }, brand(),
-        h("nav", { class: "l-nav", "aria-label": "Sections" },
-          h("a", { href: "#prove" }, "Prove it"), h("a", { href: "#refuses" }, "What it holds"),
-          (navSignin = h("a", { class: "l-signin", href: "#signin", onclick: toApp }, "Sign in")))),
       h("div", { class: "v-main" },
         h("h1", { class: "sr" }, "Sayso decides how your agent pays: pay, wait, split or hold"),
         word, verdictSr,
@@ -410,7 +407,6 @@ function stage() {
 }
 const toToken = () => setTimeout(() => document.getElementById("token")?.focus({ preventScroll: true }), 600);
 // Signed in already (as the owner, or looking around read-only)? The landing's way in opens the app.
-let navSignin;
 const toApp = (e) => (state.signedIn ? openApp(e) : toToken());
 
 // ---------- prove it: the chain of proof behind one payout ----------
@@ -519,23 +515,6 @@ function stampedInvoice() {
   return el;
 }
 
-function refusesSection() {
-  const refusals = [
-    ["New bank details in an email", "The bank is asked whose account it is before a penny moves."],
-    ["Pressure to pay today", "Urgency is a reason to slow down, so Sayso holds it."],
-    ["A name the bank doesn't know", "If the account isn't the payee's, it waits for your call."],
-    ["More than you allowed", "Each agent has a cap per payout, and Metal enforces its own."],
-    ["The same invoice twice", "Airwallex dedupes every request, so a retry can't pay again."],
-    ["Fees sent elsewhere", "Sayso's earnings sweep into its own Airwallex account only."],
-  ];
-  return h("section", { id: "refuses", class: "l-sheet" },
-    h("div", { class: "sheet-in" },
-      h("span", { class: "eyebrow" }, "Held every time"),
-      h("h2", {}, "What it won't pay"),
-      h("ul", { class: "refuse" }, refusals.map(([name, why]) => h("li", {}, h("h3", {}, name), h("p", {}, why)))),
-    ));
-}
-
 const SIGNIN_NOTES = {
   expired: "That sign-in link has expired or was used already. Ask for a new one.",
   "google-not-owner": "That Google account isn't this Sayso's owner.", "google-failed": "Google sign-in didn't finish. Try again.", "google-off": "Google sign-in isn't set up here.",
@@ -583,19 +562,6 @@ function signinDialog() {
       h("button", { class: m.passkey || m.email ? "btn" : "btn pay", type: "submit" }, "Sign in")),
     m.demo ? h("p", { class: "small muted" }, "Running the offline demo? The token is ", h("code", {}, "sayso-demo"), ". Sign in with it, then turn on Face ID to try passkeys.") : null,
     err,
-  );
-}
-
-function signinSection() {
-  return h("section", { id: "signin", class: "cta" },
-    h("div", { class: "cta-copy" },
-      h("span", { class: "eyebrow" }, "Your say"),
-      h("h2", {}, "Every held payment waits for one tap from you"),
-      h("p", {}, "Sign in with Face ID or a fingerprint, then pay what your agents found, or hold it."),
-    ),
-    h("div", {}, state.signedIn
-      ? h("div", { class: "dialog signed", "data-ui": "" }, h("h3", {}, state.me?.viewer ? "You're looking around, read-only" : "You're signed in"), h("p", { class: "muted small" }, "Nothing on this page changed. The app is one tap away."), h("a", { class: "btn", href: "/app", onclick: openApp }, "Open the app"))
-      : signinDialog()),
   );
 }
 
@@ -686,14 +652,6 @@ function passkeyButton(iconOnly = false) {
   if (!state.me || state.me.viewer || state.me.passkeys || !canPasskey()) return null;
   return h("button", { class: "btn quiet small faceid", title: "Sign in and approve payments with your face or fingerprint. An agent can't fake it.", disabled: state.busy.passkey, onclick: () => act("passkey", addPasskey, "Face ID is on. You'll use it to sign in and to pay.") },
     icon("face", iconOnly ? 20 : 16), iconOnly ? null : h("span", { class: "tab-label" }, "Turn on Face ID"));
-}
-
-function footer() {
-  return h("footer", { class: "foot" }, h("div", { class: "foot-in" },
-    h("div", { class: "ft-id" }, brand(), h("p", {}, "Agents pay real invoices. You keep the final say. Built for the Airwallex Agentic Banking Hackathon")),
-    h("nav", { class: "ft-nav", "aria-label": "Footer" }, h("a", { href: "#board" }, "The board"), h("a", { href: "#prove" }, "Prove it"), h("a", { href: "/ops/" }, "Back office"), h("a", { href: "https://github.com/nice-bills/Sayso", rel: "noopener" }, "Source")),
-    h("div", { class: "ft-mail" }, h("span", {}, "Forward invoices to"), h("a", { href: "mailto:sayso-invoices@agentmail.to" }, "sayso-invoices@agentmail.to")),
-  ));
 }
 
 // Things marked data-reveal fade up as they enter the screen; html.js gates it so nothing hides without script.
@@ -954,7 +912,7 @@ function itemCard(item, r) {
     item.status === "awaiting_approval" ? approveBlock(item)
       : held ? verifyBlock(item, true)
       : item.status === "needs_details" ? h("div", { class: "actions" }, h("button", { class: "btn pay wide", onclick: () => { state.open[item.id] = true; state.tab = "inbox"; render(); } }, "Add the missing details"), ignoreButton(item))
-      : item.status === "paying" && p ? [timeline(p, true), whyButton(p.id), whyPanel(p.id)] : null,
+      : item.status === "paying" && p ? [timeline(p, true), whyButton(p.id)] : null,
   );
 }
 
@@ -966,7 +924,6 @@ function paidCard(item) {
     h("b", { class: "paid-title" }, paid ? "Paid." : failed ? PAYOUT_PILL[p.status]?.[0] ?? "Bounced" : "Sending…"),
     h("div", { class: "paid-what" }, `${money(p.amount, p.currency)} ${paid ? "is on its way to" : "to"} ${p.payee}.`),
     h("div", { class: "paid-actions" }, whyButton(p.id), h("button", { class: "btn pay wide", onclick: () => { state.lastPaid = null; render(); } }, "Done")),
-    whyPanel(p.id),
   );
 }
 
@@ -1100,7 +1057,17 @@ const SAID = { payee: "Pay", amount: "Amount", reference: "Reference", bank: "In
 const WHY = { heard: "You said", read: "Read", risk: "Rules", payee: "Bank", mandate: "Mandate", observe: "Seen", decide: "Decided", act: "Moved", reconcile: "Settled", escalate: "Flagged", refuse: "Refused", receipt: "Receipt" };
 function whyButton(id) {
   const open = Boolean(state.why[id]);
-  return h("button", { class: "btn quiet small why-btn", type: "button", disabled: state.busy[`why:${id}`], onclick: () => open ? (delete state.why[id], render()) : act(`why:${id}`, async () => { state.why[id] = await api(`/v1/payouts/${encodeURIComponent(id)}/why`); }) }, open ? "Hide why" : "Why?");
+  return h("button", { class: "btn quiet small why-btn", type: "button", disabled: state.busy[`why:${id}`], onclick: () => open ? (delete state.why[id], render()) : act(`why:${id}`, async () => { state.why = { [id]: await api(`/v1/payouts/${encodeURIComponent(id)}/why`) }; }) }, open ? "Hide why" : "Why?");
+}
+// The open "Why?" slides in as a side panel over the page (one at a time), like the inbox mock.
+function whyDrawer() {
+  const id = Object.keys(state.why)[0];
+  if (!id) return null;
+  const close = () => { delete state.why[id]; render(); };
+  return [h("div", { class: "why-scrim", onclick: close }),
+    h("aside", { class: "why-drawer", "aria-label": "Why Sayso decided this" },
+      h("div", { class: "wd-head" }, h("b", {}, "Why Sayso decided this"), h("button", { class: "btn quiet icon-btn", type: "button", "aria-label": "Close", onclick: close }, icon("x", 18))),
+      whyPanel(id))];
 }
 function whyPanel(id) {
   const w = state.why[id];
@@ -1241,7 +1208,7 @@ function invoiceCard(item) {
         h("span", { class: "rh-end" }, known ? h("span", { class: "amt" }, money(f.amount, f.currency)) : null, h("span", { class: `pill ${tone}` }, label))),
       open ? h("div", { class: "row-body" },
         sub,
-        item.status === "paying" && p ? [p.status === "paid" ? null : timeline(p, true), failure(p), whyButton(p.id), whyPanel(p.id)] : null,
+        item.status === "paying" && p ? [p.status === "paid" ? null : timeline(p, true), failure(p), whyButton(p.id)] : null,
         item.status === "rejected" && p?.reasons?.length ? h("div", { class: "alert" }, h("b", {}, "Sayso won't pay this: "), p.reasons.join("; ")) : null,
         item.status === "duplicate" ? h("div", { class: "note-line" }, "This matches an invoice already in your inbox, so it wasn't queued again.") : null,
       ) : null,
@@ -1470,7 +1437,6 @@ function payoutRow(p, opts = {}) {
       failure(p),
       needsYou ? reviewBlock(p) : null,
       p.status === "quoted" ? null : whyButton(p.id),
-      whyPanel(p.id),
       state.why[p.id] ? h("dl", { class: "proofs" },
         prow("Payout id", p.id), prow("Method", p.method),
         from === "Agent" ? prow("Agent paid", `${usdz(p.price_usdz)} (fee ${usdz(p.fee_usdz)})`) : null,
@@ -1583,10 +1549,12 @@ function agentsView() {
   const curl = `curl -X POST ${origin}/v1/quotes \\\n  -H 'content-type: application/json' \\\n  -d '{"amount":"180.00","currency":"EUR","reference":"Oct",\n       "payee":{"name":"Lingua Freelance","bank":{"iban":"FR14…"},\n       "bank_country_code":"FR","address":{"country_code":"FR","city":"Paris"}}}'`;
   return h("div", { class: "page agents-page" },
     h("div", { class: "head" }, h("h2", {}, "Agents")),
-    mailboxBox(),
-    escrowBox(),
-    agentPays.length ? [h("h3", { class: "section" }, "Recent agent payouts"), h("div", { class: "list" }, agentPays.slice(0, 10).map((p) => payoutRow(p)))] : null,
-    connectAgents(origin),
+    h("div", { class: "ag-lay" },
+      h("div", { class: "ag-col" },
+        mailboxBox(),
+        escrowBox(),
+        agentPays.length ? h("div", {}, h("h3", { class: "section" }, "Recent agent payouts"), h("div", { class: "list" }, agentPays.slice(0, 10).map((p) => payoutRow(p)))) : null),
+      connectAgents(origin)),
     h("details", { class: "dev" },
       h("summary", {}, "Developer setup"),
       h("p", { class: "small muted" }, "For an agent with its own Metal wallet: it gets a free quote, pays the exact price over x402, and Metal won't sign above the cap you set."),
@@ -1605,7 +1573,7 @@ function mailboxBox() {
     e.preventDefault();
     act("mailcode", async () => { await api("/v1/mailbox/verify", { code: state.mailCode ?? "" }); state.mailCode = ""; }, "Sayso can email people now");
   };
-  return h("div", { class: "card" },
+  return h("div", { class: "card mail" },
     h("div", { class: "lbl" }, "Sayso's email"),
     h("b", {}, m.address),
     h("p", { class: "small muted", style: "margin:6px 0 0" }, "Forward invoices here. Claude, ChatGPT and your other agents send and reply from this address through Sayso, so you don't connect another email."),
@@ -1671,6 +1639,9 @@ function connectAgents(origin) {
     ))) : null,
   );
 }
+
+// The landing page lives in landing.js; it builds on these.
+export { h, state, brand, stage, proveSection, signinDialog, toApp, openApp, stillMotion };
 
 // ---------- start ----------
 (async () => {

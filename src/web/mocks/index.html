@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sayso · app mocks</title>
+<style>
+  @font-face { font-family: "Archivo"; src: url("/archivo-vf.woff2") format("woff2"); font-weight: 100 900; font-stretch: 62% 125%; }
+  @font-face { font-family: "Figtree"; src: url("/figtree-vf.woff2") format("woff2"); font-weight: 300 900; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #0b0b0a; position: relative; color: #f2efe8; font-family: "Figtree", system-ui, sans-serif; padding: clamp(24px, 5vw, 72px); }
+  h1 { font-family: "Archivo"; font-weight: 800; font-stretch: 84%; letter-spacing: -.04em; font-size: clamp(44px, 7vw, 96px); line-height: .9; margin: 0 0 14px; }
+  p { color: #9a978f; max-width: 52ch; line-height: 1.5; margin: 0 0 48px; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+  a { display: grid; gap: 10px; text-decoration: none; color: inherit; padding: 28px; border-radius: 22px; min-height: 260px; align-content: end; transition: transform .5s cubic-bezier(.22, 1, .36, 1); }
+  a:hover { transform: translateY(-6px); }
+  a b { font-family: "Archivo"; font-weight: 800; font-stretch: 84%; font-size: 40px; letter-spacing: -.03em; line-height: 1; }
+  .lbl > span { font-size: 14px; opacity: .8; }
+    a { position: relative; isolation: isolate; overflow: hidden; min-height: 340px; }
+  a .ph img, a .ph video { transition: transform 1.6s cubic-bezier(.22, 1, .36, 1); }
+  a:hover .ph img, a:hover .ph video { transform: scale(1.1); }
+  .ph video { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.04); }
+  .lbl { display: grid; gap: 8px; padding: 18px 20px; border-radius: 16px; }
+  .m1 { --scrim: rgba(16, 38, 200, .62); color: #f4f1ea; } .m2 { --scrim: rgba(242, 239, 232, .18); color: #f4f1ea; } .m3 { --scrim: rgba(6, 6, 5, .45); color: #c6f432; }
+  .m1 .lbl { --glass: rgba(20, 40, 190, .3); } .m2 .lbl { --glass: rgba(18, 18, 16, .32); } .m3 .lbl { --glass: rgba(14, 14, 12, .46); }
+  .a1 { --scrim: rgba(6, 6, 5, .4); color: #f5f3ee; } .a1 .lbl { --glass: rgba(14, 14, 12, .46); } .a1 .lbl b { color: #9cc49a; }
+  h2 { font-family: "Archivo"; font-weight: 700; font-stretch: 88%; letter-spacing: -.02em; font-size: 22px; margin: 64px 0 14px; color: #9a978f; }
+  .older a { min-height: 200px; } .older a b { font-size: 26px; }
+</style>
+<link rel="stylesheet" href="/mocks/surface.css">
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+<h1>The signed-in app, restyled.</h1>
+<p>The real app's screens and flow, in the landing page's look: the night film behind smoked glass, film grain, one muted green. Click around; everything moves.</p>
+<ul>
+  <li><a class="a1 photo" href="/mocks/app-home.html"><span class="ph"><video src="/film/night.mp4" poster="/film/night.jpg" autoplay muted loop playsinline></video></span><span class="lbl glass"><b>Home</b><span>Balance, the deck of what needs you, the mic, and what Sayso decided</span></span></a></li>
+  <li><a class="a1 photo" href="/mocks/app-inbox.html"><span class="ph"><img src="/people/closing.jpg" alt=""></span><span class="lbl glass"><b>Inbox</b><span>Held, ready and missing-details invoices; open one for its decision</span></span></a></li>
+  <li><a class="a1 photo" href="/mocks/app-agents.html"><span class="ph"><img src="/people/team.jpg" alt=""></span><span class="lbl glass"><b>Agents</b><span>Sayso's email, escrow, your agents and the limit each one has</span></span></a></li>
+</ul>
+<h2>Earlier takes on Home</h2>
+<ul class="older">
+  <li><a class="m1 photo" href="/mocks/cobalt.html"><span class="ph"><img src="/people/team.jpg" alt=""></span><span class="lbl glass"><b>Cobalt</b><span>Cobalt-washed photo, glass deck</span></span></a></li>
+  <li><a class="m2 photo" href="/mocks/paper.html"><span class="ph"><img src="/people/invoices.jpg" alt=""></span><span class="lbl glass"><b>Paper</b><span>Grainy paper, photo panels</span></span></a></li>
+  <li><a class="m3 photo" href="/mocks/night.html"><span class="ph"><video src="/film/night.mp4" poster="/film/night.jpg" autoplay muted loop playsinline></video></span><span class="lbl glass"><b>Night shift</b><span>Smoked glass, agents on a meter</span></span></a></li>
+</ul>
+</body>
+</html>

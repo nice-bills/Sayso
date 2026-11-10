@@ -1,0 +1,100 @@
+/* The signed-in app laid out like the mocks (src/web/mocks/app-home|inbox|agents.html), on top of
+   app-film.css: a floating glass tab bar, Home's split from 900px, the inbox as a card grid with the
+   decision in a side drawer, Agents in two columns, and photos on the deck, the latest verdict, the
+   first invoice, Sayso's email and the auth.md box. */
+
+/* ---------- glass, softer and rounder ---------- */
+body.film { --glass: rgba(18, 18, 16, .42); }
+body.film :is(.card, .inv, .row, .stat, .empty, .dpane, .say-home, .pcard) { -webkit-backdrop-filter: blur(30px) saturate(160%); backdrop-filter: blur(30px) saturate(160%); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), inset 0 1px 0 rgba(255, 255, 255, .14), 0 24px 60px -30px rgba(0, 0, 0, .55); }
+body.film :is(.dpane, .say-home) { border-radius: 30px; }
+body.film :is(.card, .inv, .stat, .pcard, .dialog[data-ui]) { border-radius: 22px; }
+body.film .row { border-radius: 18px; }
+/* a photo under a flat scrim */
+body.film .ph-fill { background: linear-gradient(var(--scrim, rgba(6, 6, 5, .55)), var(--scrim, rgba(6, 6, 5, .55))), var(--ph) center / cover, #141412; }
+
+/* ---------- the shell: one floating glass bar ---------- */
+body.film .top { padding: 14px clamp(16px, 3vw, 36px); }
+body.film .top::before { display: none; }
+body.film .top .wrap { max-width: 1168px; height: auto; padding: 8px 8px 8px 18px; gap: 18px; border-radius: 999px;
+  background: rgba(18, 18, 16, .55); -webkit-backdrop-filter: blur(30px) saturate(160%); backdrop-filter: blur(30px) saturate(160%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), inset 0 1px 0 rgba(255, 255, 255, .14), 0 24px 60px -30px rgba(0, 0, 0, .55); }
+@media (min-width: 721px) {
+  body.film .top .tabs { margin: 0 auto; padding: 0; gap: 4px; background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  body.film .tab { min-height: 40px; }
+}
+body.film .top-right { gap: 8px; margin-left: 0; }
+@media (max-width: 860px) { body.film .top .bal { display: none; } body.film .top .wrap { gap: 8px; } }
+body.film .shell .wrap:not(.top .wrap) { max-width: 1240px; padding-inline: clamp(16px, 3vw, 36px); }
+body.film .shell .page { max-width: none; padding-top: 14px; padding-bottom: 80px; }
+body.film .head h2 { font-size: clamp(44px, 6vw, 72px); line-height: .9; }
+
+/* ---------- home: the say column and what Sayso decided, side by side from 900px ---------- */
+@media (min-width: 900px) {
+  body.film .home-split { max-width: 1240px; margin: 0 auto; grid-template-columns: minmax(0, 460px) minmax(0, 1fr); gap: clamp(16px, 2.4vw, 28px); padding: 16px clamp(16px, 3vw, 36px) 40px; }
+  body.film .home-split .say-home { padding: 0 22px; }
+  body.film .dpane { padding: 22px; gap: 14px; }
+  body.film .dp-stats { gap: 8px; background: none; box-shadow: none; overflow: visible; }
+  body.film .dp-stat { border-radius: 16px; background: rgba(255, 255, 255, .05); box-shadow: inset 0 0 0 1px var(--hair); padding: 16px; }
+  body.film .dp-stat b { font-family: var(--mono); font-stretch: 100%; font-weight: 700; letter-spacing: 0; font-size: 32px; font-variant-numeric: tabular-nums; }
+  body.film .dp-stat span { font-size: 12px; }
+  /* the latest verdict sits on a photo, the word huge and condensed */
+  body.film .dp-latest, body.film .dp-latest[data-tone] { border-radius: 22px; min-height: 290px; align-content: end; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14);
+    background: linear-gradient(rgba(6, 6, 5, .5), rgba(6, 6, 5, .5)), url("/people/compute.jpg") center / cover; }
+  body.film .dp-latest:hover { background: linear-gradient(rgba(6, 6, 5, .4), rgba(6, 6, 5, .4)), url("/people/compute.jpg") center / cover; }
+  body.film .dp-word { font-weight: 900; font-stretch: 75%; font-size: clamp(90px, 11vw, 150px); letter-spacing: -.045em; line-height: .8; }
+  body.film .dp-list li { border: 0; border-top: 1px solid var(--hair); }
+  body.film .dp-list .rh-chip { font-family: var(--mono); border-radius: 7px; background: rgba(255, 255, 255, .07); box-shadow: none; }
+  body.film .dp-amt { font-family: var(--mono); font-weight: 500; }
+}
+
+/* the deck: photo cards, picked by what the card is */
+body.film .hc, body.film .hc:is(.ink, .lime, .sky, .green) { --ph: url("/people/invoices.jpg"); border-radius: 24px; color: var(--ink);
+  background: linear-gradient(rgba(6, 6, 5, .52), rgba(6, 6, 5, .52)), var(--ph) center / cover, #141412;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14), 0 30px 60px -30px rgba(0, 0, 0, .8); }
+body.film .hc.ink { --ph: url("/people/closing.jpg"); } body.film .hc.lime { --ph: url("/people/travel.jpg"); }
+body.film .hc.sky { --ph: url("/people/errands.jpg"); } body.film .hc.green { --ph: url("/people/freelance.jpg"); }
+body.film .hc-who { color: rgba(245, 243, 238, .78); } body.film .hc-sub { color: rgba(245, 243, 238, .7); }
+body.film .hc-amt { font-weight: 800; font-stretch: 82%; letter-spacing: -.04em; }
+
+/* ---------- inbox: a grid of cards, the first one on a photo ---------- */
+body.film .inbox-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); gap: 14px; align-items: start; }
+body.film .inbox-grid > .empty { grid-column: 1 / -1; }
+body.film .inv { transition: transform .5s var(--ease-out); }
+@media (hover: hover) { body.film .inbox-grid > .inv:hover { transform: translateY(-3px); } }
+body.film .inbox-grid > .inv[data-status]:first-child { background: linear-gradient(rgba(8, 8, 7, .62), rgba(8, 8, 7, .62)), url("/people/closing.jpg") center / cover; }
+body.film .inv .what .amt { display: block; font-size: 48px; font-stretch: 82%; line-height: .95; margin-bottom: 4px; }
+body.film .rows { display: grid; gap: 8px; }
+body.film .group { font-size: 20px; font-weight: 700; font-stretch: 88%; letter-spacing: -.02em; color: var(--ink); margin-top: 40px; }
+
+/* the decision ("Why?"): a side drawer over a scrim */
+.why-scrim { position: fixed; inset: 0; z-index: 30; background: rgba(0, 0, 0, .35); animation: wd-fade .4s both; }
+.why-drawer { position: fixed; top: 12px; right: 12px; bottom: 12px; width: min(520px, calc(100vw - 24px)); z-index: 31; overflow-y: auto; border-radius: 28px; padding: 22px;
+  background: rgba(14, 14, 12, .82); color: #f5f3ee; -webkit-backdrop-filter: blur(30px) saturate(160%); backdrop-filter: blur(30px) saturate(160%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .1), inset 0 1px 0 rgba(255, 255, 255, .14), 0 24px 60px -30px rgba(0, 0, 0, .55); animation: wd-in .7s cubic-bezier(.22, 1, .36, 1) both; }
+.wd-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 18px; }
+.wd-head b { font-weight: 700; font-size: 20px; font-stretch: 88%; letter-spacing: -.02em; }
+.why-drawer .why-step::before { background: rgba(255, 255, 255, .12); }
+.why-drawer .why-d { color: rgba(245, 243, 238, .62); }
+@keyframes wd-in { from { transform: translateX(110%); } }
+@keyframes wd-fade { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .why-drawer, .why-scrim { animation: none; } }
+
+/* ---------- agents: two columns ---------- */
+body.film .agents-page > * { max-width: none; }
+.ag-lay { display: grid; gap: 14px; }
+.ag-col { display: grid; gap: 14px; align-content: start; min-width: 0; }
+@media (min-width: 900px) { .ag-lay { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); align-items: start; } }
+body.film .ag-lay > .connect, body.film .ag-col > * { margin: 0; }
+body.film .ag-col .section { margin: 12px 0 10px; }
+body.film .card.mail { min-height: 220px; display: flex; flex-direction: column; justify-content: flex-end;
+  background: linear-gradient(rgba(6, 6, 5, .55), rgba(6, 6, 5, .55)), url("/people/freelance.jpg") center / cover; }
+body.film .card.mail > b { font-weight: 700; font-size: clamp(20px, 2.2vw, 26px); font-stretch: 90%; letter-spacing: -.02em; word-break: break-all; }
+body.film .esc b { font-family: var(--mono); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+body.film .connect .card-title { font-size: 28px; font-weight: 800; font-stretch: 86%; letter-spacing: -.03em; }
+body.film .connect .authmd { background: linear-gradient(rgba(6, 6, 5, .58), rgba(6, 6, 5, .58)), url("/people/team.jpg") center / cover; border-radius: 16px; }
+body.film details.dev { margin-top: 26px; }
+
+/* verdict tags back in mono, like the mocks */
+body.film :is(.pill, .badge, .dc-tag) { font-family: var(--mono); font-size: 11px; letter-spacing: .02em; }
+/* on a phone the tabs are a fixed bottom bar inside the top bar: a blur here would trap them */
+@media (max-width: 720px) { body.film .top .wrap { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(18, 18, 16, .88); } }

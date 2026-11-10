@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sayso app mock · Home</title>
+<link rel="stylesheet" href="/mocks/surface.css">
+<link rel="stylesheet" href="/mocks/app.css">
+<style>
+  /* Home, as the real app lays it out: the say column (balance, the deck of things that need you, the mic)
+     and, beside it on a wide screen, everything Sayso decided. */
+  .home-split { display: grid; grid-template-columns: minmax(0, 460px) minmax(0, 1fr); gap: clamp(16px, 2.4vw, 28px); max-width: 1240px; margin: 0 auto; padding: 16px clamp(16px, 3vw, 36px) 40px; min-height: 100vh; }
+  .say { display: flex; flex-direction: column; border-radius: 30px; padding: 22px; min-height: calc(100vh - 56px); position: sticky; top: 16px; }
+  .sh-top { display: flex; justify-content: space-between; align-items: center; }
+  .sh-icons { display: flex; gap: 8px; align-items: center; }
+  .sh-main { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 26px 0 18px; }
+  .amt-big { font: 800 clamp(64px, 7vw, 92px) var(--display); font-stretch: 80%; letter-spacing: -.055em; line-height: .86; margin: 10px 0 0; font-variant-numeric: tabular-nums; }
+  .amt-big small { color: var(--faint); font-size: .5em; letter-spacing: -.02em; }
+  .sh-row { display: flex; justify-content: space-between; margin: 34px 0 14px; }
+
+  /* the deck: photo cards, swipe for the next, tap to open */
+  .deck { position: relative; height: 268px; }
+  .dc { position: absolute; inset: 0; border-radius: 24px; padding: 20px; display: flex; flex-direction: column; justify-content: space-between; cursor: pointer; transition: transform .7s var(--ease), opacity .5s; touch-action: pan-y; --scrim: rgba(6, 6, 5, .52); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14), 0 30px 60px -30px rgba(0, 0, 0, .8); }
+  .dc[data-i="1"] { transform: translateY(-14px) scale(.95); } .dc[data-i="2"] { transform: translateY(-26px) scale(.9); }
+  .dc[data-i="3"] { transform: translateY(-36px) scale(.85); opacity: 0; }
+  .dc.gone { transform: translateX(-130%) rotate(-10deg); opacity: 0; pointer-events: none; }
+  .dc .from { font-size: 13px; color: var(--dim); display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .dc .flaps { font-size: 15px; }
+  .dc .money { font: 800 54px var(--display); font-stretch: 82%; letter-spacing: -.04em; line-height: .95; }
+  .dc .to { font-size: 16px; font-weight: 600; margin-top: 6px; } .dc .why { font-size: 13px; color: var(--dim); margin-top: 4px; }
+  .dc[data-i="0"]:hover .ph img { transform: scale(1.1); }
+
+  .sh-foot { display: grid; justify-items: center; gap: 12px; padding-top: 6px; }
+  .heard { min-height: 24px; font-size: 18px; text-align: center; }
+  .heard .caret { display: inline-block; width: 2px; height: 1em; background: var(--green); vertical-align: -3px; margin-left: 2px; animation: blink 1s steps(1) infinite; }
+  .mic { width: 76px; height: 76px; border-radius: 50%; border: 0; background: var(--green); color: #0a0a09; cursor: pointer; display: grid; place-items: center; position: relative; touch-action: none; transition: transform .25s var(--ease), background-color .3s; }
+  .mic::before { content: ""; position: absolute; inset: 0; border-radius: 50%; animation: ring 2.4s var(--ease) infinite; }
+  .mic.on { transform: scale(1.12); background: var(--fg); }
+  .wave { display: none; gap: 4px; align-items: center; height: 40px; }
+  .listening .wave { display: flex; }
+  .wave i { width: 4px; border-radius: 4px; background: var(--green); animation: eq .9s var(--ease) infinite; }
+  .hint { font-size: 13px; color: var(--dim); } .hint button { background: none; border: 0; padding: 0; color: var(--fg); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font-size: 13px; }
+
+  /* the open card: a sheet over the say column */
+  .sheet { position: absolute; inset: 0; border-radius: 30px; padding: 22px; display: flex; flex-direction: column; z-index: 20; opacity: 0; transform: translateY(24px); pointer-events: none; transition: opacity .4s, transform .6s var(--ease); --glass: rgba(14, 14, 12, .9); }
+  .sheet.on { opacity: 1; transform: none; pointer-events: auto; }
+  .sheet .shut { align-self: flex-end; }
+  .sheet .money { font: 800 64px var(--display); font-stretch: 82%; letter-spacing: -.045em; line-height: .9; margin: 18px 0 6px; }
+  .sheet dl { margin: 18px 0 0; display: grid; gap: 1px; border-radius: 14px; overflow: hidden; background: var(--hair); }
+  .sheet dl div { display: flex; justify-content: space-between; gap: 12px; padding: 11px 14px; background: rgba(10, 10, 9, .5); font-size: 13px; }
+  .sheet dt { color: var(--dim); } .sheet dd { margin: 0; text-align: right; }
+  .sheet .actions { margin-top: 20px; } .sheet .actions .btn { flex: 1; justify-content: center; height: 50px; }
+
+  /* what Sayso decided */
+  .dp { border-radius: 30px; padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+  .dp-head { display: flex; justify-content: space-between; align-items: center; }
+  .dp-head b { font: 700 20px var(--display); font-stretch: 88%; letter-spacing: -.02em; }
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .stats div { border-radius: 16px; padding: 16px; background: rgba(255, 255, 255, .05); box-shadow: inset 0 0 0 1px var(--hair); }
+  .stats b { display: block; font: 700 32px var(--mono); font-variant-numeric: tabular-nums; }
+  .stats span { font-size: 12px; color: var(--dim); }
+  .latest { text-decoration: none; color: inherit; border-radius: 22px; padding: 24px; min-height: 290px; display: flex; flex-direction: column; justify-content: flex-end; text-align: left; border: 0; cursor: pointer; --scrim: rgba(6, 6, 5, .5); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); }
+  .latest .word { font: 900 clamp(90px, 11vw, 150px) var(--display); font-stretch: 75%; letter-spacing: -.045em; line-height: .8; margin: 12px 0 14px; color: var(--green); display: flex; }
+  .latest .word span { display: inline-block; animation: rise .8s var(--ease) both; }
+  .latest p { margin: 0; font-size: 15px; max-width: 46ch; }
+  .feed { list-style: none; margin: 0; padding: 0; }
+  .feed li { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 13px 4px; border-top: 1px solid var(--hair); animation: rise .6s var(--ease) both; }
+  .feed .tag { font: 600 11px var(--mono); text-align: center; padding: 6px 0; border-radius: 7px; background: rgba(255, 255, 255, .07); }
+  .tag.pay { color: var(--green); } .tag.hold { color: var(--red); } .tag.wait { color: var(--amber); }
+  .feed .who { font-weight: 600; font-size: 15px; } .feed small { display: block; color: var(--dim); font-size: 12px; font-weight: 400; margin-top: 2px; }
+  .feed .m { font: 500 14px var(--mono); text-align: right; } .feed .m small { font-family: "Figtree"; }
+
+  @keyframes ring { 0% { box-shadow: 0 0 0 0 rgba(156, 196, 154, .5); } 100% { box-shadow: 0 0 0 20px rgba(156, 196, 154, 0); } }
+  @keyframes eq { 0%, 100% { height: 6px; } 50% { height: 36px; } }
+  @media (max-width: 900px) { .home-split { grid-template-columns: minmax(0, 1fr); } .say { position: relative; top: 0; min-height: auto; } .sh-main { padding-top: 34px; } }
+  @media (max-width: 520px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .feed li { grid-template-columns: 54px minmax(0, 1fr) auto; gap: 10px; } }
+</style>
+</head>
+<body data-tab="home">
+<div class="home-split">
+  <section class="say glass" id="say">
+    <header class="sh-top">
+      <span class="brand"><i></i>sayso</span>
+      <div class="sh-icons"><span class="mode">Demo</span><button class="ibtn" aria-label="Passkey" title="Face ID is on" id="pk"></button><a class="ibtn" href="/mocks/app-inbox.html" aria-label="Everything" title="Everything: inbox, payments, agents" id="all"></a></div>
+    </header>
+    <main class="sh-main">
+      <span class="k">Available</span>
+      <p class="amt-big" id="bal">$0</p>
+      <div class="sh-row"><span class="k" id="left">3 need you</span><span class="k">Swipe for the next</span></div>
+      <div class="deck" id="deck"></div>
+    </main>
+    <footer class="sh-foot">
+      <p class="heard" id="heard"></p>
+      <div class="wave" aria-hidden="true" id="wave"></div>
+      <button class="mic" id="mic" aria-label="Hold to talk"></button>
+      <span class="hint">Hold to talk · <button type="button" id="typeit">type instead</button></span>
+    </footer>
+    <div class="sheet glass" id="sheet" aria-hidden="true"></div>
+  </section>
+
+  <aside class="dp glass" aria-label="What Sayso decided">
+    <div class="dp-head"><b>What Sayso decided</b><span class="mode">Offline demo</span></div>
+    <div class="stats"><div><b data-n="3">0</b><span>Delivered</span></div><div><b data-n="1">0</b><span>On the way</span></div><div><b data-n="1">0</b><span>Waiting</span></div><div><b data-n="2">0</b><span>Held or blocked</span></div></div>
+    <a class="latest photo" href="/mocks/app-inbox.html#rechenzentrum">
+      <span class="ph"><img src="/people/compute.jpg" alt=""></span>
+      <span class="k">Latest · from an agent · 8 hours ago</span>
+      <span class="word"><span>P</span><span style="animation-delay:.07s">A</span><span style="animation-delay:.14s">Y</span></span>
+      <p><b>€95.50 to Rechenzentrum Nord GmbH.</b> It costs 108.59 USDZ, inside codex's budget, and the payee checks out.</p>
+    </a>
+    <ul class="feed" id="feed"></ul>
+  </aside>
+</div>
+<script src="/mocks/app-shell.js"></script>
+<script>
+  const { icon, flaps, toast, count } = M, $ = (s) => document.querySelector(s);
+  $("#pk").innerHTML = icon("face"); $("#all").innerHTML = icon("ledger", 20); $("#mic").innerHTML = icon("mic", 28);
+  count($("#bal"), 1496.03, 1500, (v) => { const [a, b] = v.toFixed(2).split("."); return `$${Number(a).toLocaleString("en-US")}<small>.${b}</small>`; });
+  document.querySelectorAll("[data-n]").forEach((el) => count(el, +el.dataset.n, 900, (v) => Math.round(v)));
+  $("#wave").innerHTML = Array.from({ length: 18 }, (_, i) => `<i style="animation-delay:-${((i * .137) % 1).toFixed(2)}s"></i>`).join("");
+
+  // the queue, in the real app's order: held first, then ready, then missing details
+  const QUEUE = [
+    { word: "HOLD", tone: "hold", from: "From the inbox · 43 min ago", money: "€340.00", to: "Kreuzberg Studio GmbH", why: "The invoice asks you to pay new bank details", img: "closing", rows: [["Bank details", "New IBAN ending 4417"], ["Paid before", "€280.00, other account"], ["Price", "386.62 USDZ"], ["Sayso sent", "1 cent with a code"]], pay: "Approve with passkey" },
+    { word: "PAY", tone: "pay", from: "claude asks · 2 hours ago", money: "€60.00", to: "Berlin Office Lettings", why: "Over the $50 claude may pay alone", img: "travel", rows: [["claude may pay alone", "up to $50"], ["Price", "68.21 USDZ"], ["Due", "Friday"], ["Rate", "0.3% dearer than usual"]], pay: "Pay €60.00" },
+    { word: "ASK", tone: "wait", from: "From the inbox · 5 hours ago", money: "£72.00", to: "Holloway Print Ltd", why: "Sayso couldn't find the sort code", img: "errands", rows: [["Reference", "INV-2291"], ["Account", "ending 0193"], ["Sort code", "missing"], ["Paid before", "Every month, £72"]], pay: "Add missing details" },
+  ];
+  const deck = $("#deck"), sheet = $("#sheet");
+  function build() {
+    deck.innerHTML = "";
+    QUEUE.forEach((q, i) => {
+      const c = document.createElement("article"); c.className = "dc photo"; c.dataset.i = i; c.style.zIndex = 10 - i;
+      c.innerHTML = `<span class="ph"><img src="/people/${q.img}.jpg" alt=""></span><div class="from"><span>${q.from}</span></div><div><div class="money">${q.money}</div><div class="to">to ${q.to}</div><div class="why">${q.why}</div></div>`;
+      c.querySelector(".from").append(flaps(q.word, q.tone, 4));
+      let x0 = null, dx = 0;
+      c.addEventListener("pointerdown", (e) => { if (c.dataset.i !== "0") return; x0 = e.clientX; dx = 0; c.style.transition = "none"; c.setPointerCapture(e.pointerId); });
+      c.addEventListener("pointermove", (e) => { if (x0 === null) return; dx = e.clientX - x0; c.style.transform = `translateX(${dx}px) rotate(${dx / 26}deg)`; });
+      c.addEventListener("pointerup", () => { if (x0 === null) return; x0 = null; c.style.transition = ""; c.style.transform = ""; if (Math.abs(dx) > 100) next(c); });
+      c.addEventListener("click", () => { if (c.dataset.i === "0" && Math.abs(dx) < 6) open(q, c); });
+      deck.append(c);
+    });
+    restack();
+  }
+  function restack() { const cs = [...deck.querySelectorAll(".dc:not(.gone)")]; cs.forEach((c, i) => { c.dataset.i = i; c.style.zIndex = 10 - i; }); $("#left").textContent = cs.length ? `${cs.length} need${cs.length === 1 ? "s" : ""} you` : "Nothing needs you"; if (!cs.length) setTimeout(build, 1800); }
+  function next(c) { c.classList.add("gone"); restack(); }
+  function open(q, c) {
+    sheet.innerHTML = `<button class="ibtn shut" aria-label="Close">${icon("x")}</button><span class="k">${q.from}</span><div class="money">${q.money}</div><div style="font-weight:600">to ${q.to}</div><div class="muted small" style="margin-top:4px">${q.why}</div><dl>${q.rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("")}</dl><div class="actions"><button class="btn">Not now</button><button class="btn pay">${q.tone === "hold" ? icon("face") : ""}${q.pay}</button></div>`;
+    sheet.querySelector("span.k").prepend(flaps(q.word, q.tone, 4), " ");
+    sheet.classList.add("on"); sheet.setAttribute("aria-hidden", "false");
+    const shut = () => { sheet.classList.remove("on"); sheet.setAttribute("aria-hidden", "true"); };
+    sheet.querySelector(".shut").onclick = shut;
+    sheet.querySelector(".btn:not(.pay)").onclick = () => { shut(); next(c); };
+    sheet.querySelector(".btn.pay").onclick = () => { shut(); next(c); toast(q.tone === "wait" ? "Opened in the inbox" : `Approved ${q.money} to ${q.to}`); };
+  }
+  build();
+
+  // hold the mic: the words appear as they're heard
+  const said = "Pay Holloway Print 72 pounds", mic = $("#mic"), say = $("#say"); let timer;
+  function listen() { say.classList.add("listening"); mic.classList.add("on"); let i = 0; clearInterval(timer); timer = setInterval(() => { $("#heard").innerHTML = said.slice(0, ++i) + '<span class="caret"></span>'; if (i >= said.length) clearInterval(timer); }, 55); }
+  function stop() { if (!mic.classList.contains("on")) return; clearInterval(timer); say.classList.remove("listening"); mic.classList.remove("on"); $("#heard").textContent = `“${said}.”`; setTimeout(() => toast("Sayso read: £72.00 to Holloway Print Ltd"), 300); }
+  mic.addEventListener("pointerdown", (e) => { e.preventDefault(); listen(); }); ["pointerup", "pointerleave"].forEach((ev) => mic.addEventListener(ev, stop));
+  $("#typeit").onclick = () => { $("#heard").innerHTML = '<input class="field" placeholder="Pay Kreuzberg Studio 280 euros" style="max-width:320px;text-align:center">'; $("#heard input").focus(); };
+
+  const FEED = [["PAY", "pay", "Rechenzentrum Nord GmbH", "codex · 8 hours ago", "€95.50", "Delivered"], ["PAY", "pay", "Lingua Freelance", "claude · 8 hours ago", "€180.00", "Delivered"], ["HOLD", "hold", "Kreuzberg Studio GmbH", "Inbox · 43 min ago", "€340.00", "Needs review"], ["WAIT", "wait", "Holloway Print Ltd", "Inbox · 5 hours ago", "£72.00", "Waiting for details"], ["HOLD", "hold", "Berlin Office Lettings", "claude · 2 hours ago", "€60.00", "Over the line"], ["PAY", "pay", "Kreuzberg Studio GmbH", "Inbox · 3 days ago", "€280.00", "Delivered"]];
+  $("#feed").innerHTML = FEED.map(([w, t, who, sub, m, st], i) => `<li style="animation-delay:${i * 60}ms"><span class="tag ${t}">${w}</span><span class="who">${who}<small>${sub}</small></span><span class="m">${m}<small>${st}</small></span></li>`).join("");
+</script>
+</body>
+</html>

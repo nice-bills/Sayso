@@ -372,6 +372,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   });
   app.use("/vendor/transformers", express.static(nodeModules + "@huggingface/transformers/dist", { immutable: true, maxAge: "30d" }));
   app.use("/vendor/ort", express.static(nodeModules + "onnxruntime-web/dist", { immutable: true, maxAge: "30d" }));
+  // Lenis: the landing page's damped smooth scroll.
+  app.use("/vendor/lenis", express.static(nodeModules + "lenis/dist", { immutable: true, maxAge: "30d" }));
   app.use("/", (req, res, next) => {
     if (req.method === "GET" && /^\/(index\.html|app\.js|app\.css|claim|c\/[\w-]+|connect\/[\w-]+|approve\/.+)?$/.test(req.path)) {
       res.setHeader("content-security-policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");

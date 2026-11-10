@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sayso mock · Night shift</title>
+<link rel="stylesheet" href="/mocks/surface.css">
+<style>
+  /* Mock 3, Night shift: the night-street film behind smoked glass, grain, one lime. Agents on live meters, press-and-hold to approve. No gradients. */
+  @font-face { font-family: "Archivo"; src: url("/archivo-vf.woff2") format("woff2"); font-weight: 100 900; font-stretch: 62% 125%; }
+  @font-face { font-family: "Figtree"; src: url("/figtree-vf.woff2") format("woff2"); font-weight: 300 900; }
+  @font-face { font-family: "Martian Mono"; src: url("/martian-mono-vf.woff2") format("woff2"); font-weight: 100 800; font-stretch: 75% 112.5%; }
+  :root { --bg: #0b0b0a; --tile: #161614; --tile2: #1f1f1c; --line: #2a2a26; --ink: #f2efe8; --dim: #8d8a82; --acc: #c6f432; --warn: #ffb547; --stop: #ff6b5a; --ease: cubic-bezier(.22, 1, .36, 1);
+    --tint: rgba(6, 6, 5, .58); --glass: rgba(14, 14, 12, .46); --glass-line: rgba(255, 255, 255, .1); --glass-lip: rgba(255, 255, 255, .14); --blur: 28px; --grain: .22; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Figtree", system-ui, sans-serif; }
+  .app { display: grid; grid-template-columns: 76px minmax(0, 1fr); min-height: 100vh; }
+  aside { border-right: 1px solid rgba(255, 255, 255, .08); background: rgba(8, 8, 7, .38); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px 0; }
+  .logo { width: 36px; height: 36px; border-radius: 10px; background: var(--acc); position: relative; margin-bottom: 18px; }
+  .logo::after { content: ""; position: absolute; left: 9px; right: 9px; top: 16px; height: 4px; background: var(--bg); }
+  aside a { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; color: var(--dim); transition: background-color .3s, color .3s; }
+  aside a.on, aside a:hover { background: rgba(255, 255, 255, .1); color: var(--ink); }
+  aside svg { width: 20px; height: 20px; }
+  main { padding: 24px clamp(18px, 3vw, 40px) 60px; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; align-content: start; }
+  .top { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .top h1 { margin: 0; font: 800 28px "Archivo"; font-stretch: 84%; letter-spacing: -.03em; }
+  .pill { font: 11px "Martian Mono", monospace; color: var(--acc); padding: 7px 12px; border-radius: 999px; }
+  .pill::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--acc); margin-right: 8px; animation: blink 1.6s infinite; }
+  .tile { border-radius: 20px; padding: 22px; animation: up .7s var(--ease) both; min-width: 0; }
+  .k { font: 11px "Martian Mono", monospace; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+
+  .bal { grid-column: span 5; }
+  .bal b { display: block; font: 800 clamp(56px, 6.4vw, 92px) "Archivo"; font-stretch: 80%; letter-spacing: -.05em; line-height: .9; margin-top: 14px; font-variant-numeric: tabular-nums; }
+  .spark { display: flex; align-items: end; gap: 5px; height: 70px; margin-top: 22px; }
+  .spark i { flex: 1; background: rgba(255, 255, 255, .14); border-radius: 4px; transform-origin: bottom; animation: grow .9s var(--ease) both; }
+  .spark i.hi { background: var(--acc); }
+
+  .ask { grid-column: span 7; animation-delay: .08s; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; }
+  .ask .who { display: flex; align-items: center; gap: 10px; font-weight: 600; margin-top: 14px; }
+  .ask .ico { width: 30px; height: 30px; border-radius: 9px; background: #D97757; display: grid; place-items: center; font: 700 13px "Archivo"; color: #1a0f0a; }
+  .ask .amt { font: 800 64px "Archivo"; font-stretch: 82%; letter-spacing: -.04em; line-height: 1; margin: 14px 0 6px; }
+  .ask .sub { color: var(--dim); font-size: 14px; }
+  .facts { margin: 16px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: rgba(255, 255, 255, .08); border-radius: 12px; overflow: hidden; }
+  .facts div { background: rgba(10, 10, 9, .55); padding: 10px 12px; font-size: 13px; } .facts dt { color: var(--dim); font-size: 11px; } .facts dd { margin: 3px 0 0; }
+  .hold { align-self: center; display: grid; justify-items: center; gap: 12px; text-align: center; }
+  .ring { position: relative; width: 132px; height: 132px; border: 0; padding: 0; background: none; cursor: pointer; color: var(--ink); touch-action: none; }
+  .ring svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+  .ring circle { fill: none; stroke-width: 6; }
+  .ring .bg { stroke: rgba(255, 255, 255, .12); } .ring .fg { stroke: var(--acc); stroke-dasharray: 377; stroke-dashoffset: 377; stroke-linecap: round; }
+  .ring span { position: absolute; inset: 14px; border-radius: 50%; background: rgba(255, 255, 255, .08); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); display: grid; place-items: center; font: 600 13px "Figtree"; transition: transform .2s var(--ease), background-color .3s, color .3s; }
+  .ring:active span { transform: scale(.94); }
+  .ring.ok span { background: var(--acc); color: var(--bg); }
+  .hold small { color: var(--dim); font-size: 12px; }
+  .deny { background: none; border: 0; color: var(--dim); font: 500 13px "Figtree"; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+
+  .agents { grid-column: span 7; animation-delay: .16s; }
+  .agent { display: grid; grid-template-columns: 34px minmax(0, 1fr) 160px 64px; gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid rgba(255, 255, 255, .08); }
+  .agent:first-of-type { margin-top: 12px; }
+  .agent .ico { width: 34px; height: 34px; border-radius: 10px; background: rgba(255, 255, 255, .1); display: grid; place-items: center; font: 700 13px "Archivo"; }
+  .agent b { font-weight: 600; display: block; } .agent small { color: var(--dim); font-size: 12px; }
+  .meter { display: grid; gap: 6px; font: 12px "Martian Mono", monospace; color: var(--dim); text-align: right; }
+  .meter span b { color: var(--ink); display: inline; font-weight: 500; }
+  .bar { height: 6px; background: rgba(255, 255, 255, .12); border-radius: 6px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--acc); border-radius: inherit; transition: width 1.4s var(--ease); }
+  .bar i.warn { background: var(--warn); }
+  .sw { width: 44px; height: 26px; border-radius: 999px; background: rgba(255, 255, 255, .14); position: relative; border: 0; cursor: pointer; justify-self: end; transition: background-color .3s; }
+  .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--dim); transition: transform .4s var(--ease), background-color .3s; }
+  .sw.on { background: var(--acc); } .sw.on::after { transform: translateX(18px); background: var(--bg); }
+  .agent.off { opacity: .45; transition: opacity .4s; }
+
+  .feed { grid-column: span 5; animation-delay: .24s; }
+  .feed ul { list-style: none; margin: 12px 0 0; padding: 0; }
+  .feed li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid rgba(255, 255, 255, .08); font-size: 14px; animation: slot .6s var(--ease) both; }
+  .feed li i { width: 8px; height: 8px; border-radius: 50%; background: var(--acc); }
+  .feed li i.warn { background: var(--warn); } .feed li i.stop { background: var(--stop); }
+  .feed li small { color: var(--dim); font: 11px "Martian Mono", monospace; }
+
+  @keyframes up { from { opacity: 0; transform: translateY(16px); } }
+  @keyframes grow { from { transform: scaleY(0); } }
+  @keyframes blink { 50% { opacity: .3; } }
+  @keyframes slot { from { opacity: 0; transform: translateY(-12px); } }
+  @media (max-width: 980px) { .bal, .ask, .agents, .feed { grid-column: 1 / -1; } }
+  @media (max-width: 640px) { .app { grid-template-columns: minmax(0, 1fr); } aside { display: none; } .ask { grid-template-columns: minmax(0, 1fr); } .agent { grid-template-columns: 34px minmax(0, 1fr) 54px; } .meter { grid-column: 2 / -1; grid-row: 2; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"><video src="/film/night.mp4" poster="/film/night.jpg" autoplay muted loop playsinline></video></div><div class="grain" aria-hidden="true"></div>
+<div class="app">
+  <aside>
+    <span class="logo"></span>
+    <a class="on" href="#" aria-label="Home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 11 12 4l8 7v9H4Z"/></svg></a>
+    <a href="#" aria-label="Inbox"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4ZM4 13h5l1 2h4l1-2h5"/></svg></a>
+    <a href="#" aria-label="Agents"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg></a>
+    <a href="#" aria-label="Payments"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h18v10H3ZM3 11h18"/></svg></a>
+  </aside>
+  <main>
+    <div class="top"><h1>Tonight</h1><span class="pill glass">Offline demo · live</span></div>
+    <section class="tile glass bal">
+      <span class="k">Available</span><b id="bal">$1,496.03</b>
+      <div class="spark" id="spark"></div>
+      <div class="k" style="margin-top:12px">Spent this week · $142.18</div>
+    </section>
+    <section class="tile glass ask">
+      <div>
+        <span class="k">Needs you · 43 min left</span>
+        <div class="who"><span class="ico">C</span>claude wants to pay</div>
+        <div class="amt">€340.00</div>
+        <div class="sub">to Kreuzberg Studio GmbH · new bank details</div>
+        <dl class="facts"><div><dt>claude may pay alone</dt><dd>up to $50</dd></div><div><dt>Kreuzberg Studio</dt><dd>Paid before, other account</dd></div><div><dt>Sayso sent</dt><dd>0.01 test to new account</dd></div><div><dt>Approving</dt><dd>This payment only</dd></div></dl>
+      </div>
+      <div class="hold">
+        <button class="ring" id="ring" aria-label="Hold to approve"><svg viewBox="0 0 132 132"><circle class="bg" cx="66" cy="66" r="60"/><circle class="fg" id="fg" cx="66" cy="66" r="60"/></svg><span id="ring-l">Hold to<br>approve</span></button>
+        <small>Hold for a second, then your passkey</small>
+        <button class="deny" id="deny">Deny</button>
+      </div>
+    </section>
+    <section class="tile glass agents">
+      <span class="k">Agents · limits reset at midnight</span>
+      <div id="agents"></div>
+    </section>
+    <section class="tile glass feed">
+      <span class="k">What Sayso decided</span>
+      <ul id="feed"></ul>
+    </section>
+  </main>
+</div>
+<script>
+  const $ = (s) => document.querySelector(s);
+  // the week as bars, today lit
+  [38, 62, 30, 80, 54, 92, 46].forEach((h, i) => { const b = document.createElement("i"); b.style.height = `${h}%`; b.style.animationDelay = `${i * 60}ms`; if (i === 5) b.className = "hi"; $("#spark").append(b); });
+
+  // press and hold: the ring fills over a second; let go early and it drains
+  const ring = $("#ring"), fg = $("#fg"), L = 377; let p = 0, dir = 0, raf;
+  function tick() {
+    p = Math.max(0, Math.min(1, p + dir * 0.022));
+    fg.style.strokeDashoffset = L * (1 - p);
+    if (p >= 1) { dir = 0; ring.classList.add("ok"); $("#ring-l").innerHTML = "Approved"; push("go", "Approved €340.00 to Kreuzberg Studio", "now"); setTimeout(resetRing, 2600); return; }
+    if (dir !== 0 && !(dir < 0 && p === 0)) raf = requestAnimationFrame(tick);
+  }
+  function resetRing() { p = 0; ring.classList.remove("ok"); fg.style.strokeDashoffset = L; $("#ring-l").innerHTML = "Hold to<br>approve"; }
+  const start = (e) => { e.preventDefault(); if (ring.classList.contains("ok")) return; dir = 1; cancelAnimationFrame(raf); tick(); };
+  const stop = () => { if (dir === 1) { dir = -1.6; cancelAnimationFrame(raf); tick(); } };
+  ring.addEventListener("pointerdown", start); ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => ring.addEventListener(ev, stop));
+  $("#deny").onclick = () => push("stop", "Denied €340.00, nothing moved", "now");
+
+  const AGENTS = [["C", "#D97757", "claude", "Up to $50, then asks", 42, 60], ["O", "#f2efe8", "codex", "Compute only", 18.4, 25], ["Cu", "#f2efe8", "cursor", "Invoices from the inbox", 4, 40]];
+  $("#agents").innerHTML = AGENTS.map(([ic, col, name, rule, used, cap]) => `<div class="agent"><span class="ico" style="color:${col}">${ic}</span><span><b>${name}</b><small>${rule}</small></span><span class="meter"><span><b>$${used.toFixed(2)}</b> of $${cap}</span><span class="bar"><i class="${used / cap > .66 ? "warn" : ""}" data-w="${Math.round((used / cap) * 100)}"></i></span></span><button class="sw on" aria-label="Allow ${name} to pay"></button></div>`).join("");
+  requestAnimationFrame(() => setTimeout(() => document.querySelectorAll(".bar i").forEach((i) => (i.style.width = `${i.dataset.w}%`)), 300));
+  document.querySelectorAll(".sw").forEach((s) => (s.onclick = () => { s.classList.toggle("on"); s.closest(".agent").classList.toggle("off", !s.classList.contains("on")); }));
+
+  // new decisions arrive at the top, one every few seconds
+  const FEED = [["go", "Paid €95.50 to Rechenzentrum Nord", "8h"], ["go", "Delivered €180.00 to Lingua Freelance", "8h"], ["warn", "Held €60.00, over Berlin Office's line", "8h"], ["warn", "Waiting: £72.00 to Holloway Print", "8h"], ["go", "Delivered €280.00 to Kreuzberg Studio", "3d"]];
+  const LIVE = [["go", "Tipped $1.00 to a writer you read", "now"], ["stop", "Refused $40, over cursor's budget", "now"], ["go", "Topped up GPU credits, $10.00", "now"], ["warn", "Held a paper at $18, over $15", "now"]];
+  function push(cls, text, when) {
+    const li = document.createElement("li"); li.innerHTML = `<i class="${cls}"></i><span>${text}</span><small>${when}</small>`;
+    $("#feed").prepend(li); while ($("#feed").children.length > 6) $("#feed").lastChild.remove();
+  }
+  FEED.slice().reverse().forEach((f) => push(...f));
+  let n = 0; setInterval(() => { if (!document.hidden) push(...LIVE[n++ % LIVE.length]); }, 4200);
+</script>
+</body>
+</html>

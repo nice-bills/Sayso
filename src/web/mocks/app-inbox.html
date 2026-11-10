@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sayso app mock · Inbox</title>
+<link rel="stylesheet" href="/mocks/surface.css">
+<link rel="stylesheet" href="/mocks/app.css">
+<style>
+  /* Inbox, as the real app has it: the active invoices as cards (held first), each with its one action,
+     then Done as rows you open. Opening a card shows its decision: verdict, reason, what it weighed. */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
+  .inv { display: flex; flex-direction: column; cursor: default; transition: transform .5s var(--ease); }
+  .inv:hover { transform: translateY(-3px); }
+  .inv .meta { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; color: var(--dim); }
+  .via { display: inline-flex; align-items: center; gap: 6px; }
+  .what { margin: 18px 0 4px; }
+  .what .amt { display: block; font: 800 48px var(--display); font-stretch: 82%; letter-spacing: -.04em; line-height: .95; }
+  .what .to { font-size: 16px; font-weight: 600; }
+  .sub { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--dim); margin-top: 8px; }
+  .inv .actions { margin-top: auto; padding-top: 16px; }
+  .inv .link { background: none; border: 0; padding: 0; color: var(--dim); font-size: 13px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; margin-left: auto; align-self: center; }
+  .inv.photo { --scrim: rgba(8, 8, 7, .62); }
+  .inv.paid { opacity: .55; transform: scale(.98); pointer-events: none; }
+  .note-line { font-size: 13px; color: var(--amber); margin-top: 14px; }
+
+  .rows { display: grid; gap: 8px; }
+  .row { border-radius: 18px; overflow: hidden; }
+  .row-head { width: 100%; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 16px; background: none; border: 0; cursor: pointer; text-align: left; }
+  .mark { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font: 700 15px var(--display); background: rgba(156, 196, 154, .16); color: var(--green); }
+  .rh-who { display: block; font-weight: 600; } .rh-meta { font-size: 12px; color: var(--dim); }
+  .rh-end { display: flex; gap: 12px; align-items: center; font: 500 14px var(--mono); }
+  .row-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .5s var(--ease); }
+  .row.open .row-body { grid-template-rows: 1fr; }
+  .row-body > div { overflow: hidden; padding: 0 16px; }
+  .row.open .row-body > div { padding-bottom: 16px; }
+  .steps { list-style: none; margin: 4px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .step { font-size: 12px; color: var(--dim); padding-top: 12px; position: relative; }
+  .step::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 3px; background: rgba(255, 255, 255, .1); }
+  .step.done::before { background: var(--green); } .step.done { color: var(--fg); }
+  .row.open .step.done::before { animation: fill .9s var(--ease) both; transform-origin: left; }
+  .row.open .step:nth-child(2)::before { animation-delay: .15s; } .row.open .step:nth-child(3)::before { animation-delay: .3s; }
+
+  /* the detail drawer: the decision for one invoice */
+  .scrimbg { position: fixed; inset: 0; z-index: 30; background: rgba(0, 0, 0, .35); opacity: 0; pointer-events: none; transition: opacity .4s; }
+  .drawer { position: fixed; top: 12px; right: 12px; bottom: 12px; width: min(520px, calc(100vw - 24px)); z-index: 31; border-radius: 28px; padding: 22px; overflow-y: auto; transform: translateX(110%); transition: transform .7s var(--ease); --glass: rgba(14, 14, 12, .7); }
+  body.detail .scrimbg { opacity: 1; pointer-events: auto; } body.detail .drawer { transform: none; }
+  .d-hero { border-radius: 20px; padding: 20px; min-height: 200px; display: flex; flex-direction: column; justify-content: flex-end; --scrim: rgba(6, 6, 5, .5); margin: 14px 0 18px; }
+  .d-hero .amt { font: 800 56px var(--display); font-stretch: 82%; letter-spacing: -.04em; line-height: .9; }
+  .dc-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .dc-head .flaps { font-size: 22px; }
+  .dc-reason { font-size: 17px; line-height: 1.4; margin: 14px 0; }
+  .factors { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--hair); border-radius: 16px; overflow: hidden; }
+  .factors li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 13px 14px; background: rgba(10, 10, 9, .5); font-size: 14px; }
+  .factors .dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: rgba(156, 196, 154, .18); color: var(--green); }
+  .factors li.off .dot { background: rgba(236, 138, 118, .18); color: var(--red); }
+  .factors .tagd { font: 600 10px var(--mono); color: #0a0a09; background: var(--fg); padding: 3px 7px; border-radius: 999px; margin-left: 8px; }
+  .factors .v { font: 13px var(--mono); text-align: right; }
+  .meter { grid-column: 2 / -1; height: 5px; border-radius: 5px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--green); border-radius: inherit; width: 0; transition: width 1.2s var(--ease); }
+  .whatif { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--hair); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .chip { height: 34px; padding: 0 14px; border-radius: 999px; border: 0; cursor: pointer; font-size: 13px; background: rgba(255, 255, 255, .07); box-shadow: inset 0 0 0 1px var(--hair); transition: background-color .3s, color .3s; }
+  .chip.on { background: var(--green); color: #0a0a09; box-shadow: none; }
+  @keyframes fill { from { transform: scaleX(0); } }
+  @media (max-width: 560px) { .grid { grid-template-columns: minmax(0, 1fr); } .rh-end .pill { display: none; } }
+</style>
+</head>
+<body data-tab="inbox">
+<div class="wrap page">
+  <div class="head">
+    <div><h2>Inbox</h2><div class="muted small">Forwarded by email or by your agents. Nothing is paid until you tap.</div></div>
+    <button class="btn sm" id="add"></button>
+  </div>
+  <div class="grid" id="grid"></div>
+  <h3 class="group">Done <span id="ndone">3</span></h3>
+  <div class="rows" id="rows"></div>
+</div>
+<div class="scrimbg" id="scrimbg"></div>
+<aside class="drawer glass" id="drawer" aria-label="Invoice detail"></aside>
+<script src="/mocks/app-shell.js"></script>
+<script>
+  const { icon, flaps, toast } = M, $ = (s) => document.querySelector(s);
+  $("#add").innerHTML = `${icon("plus", 16)}Add`;
+  $("#add").onclick = () => toast("Forward invoices to sayso-demo@agentmail.to");
+
+  // the active invoices, held first, exactly the states the real inbox shows
+  const INV = [
+    { id: "kreuzberg", who: "Kreuzberg Studio GmbH", from: "billing@kreuzberg-studio.de", when: "43 min ago", amt: "€340.00", pill: ["Check before paying", "stop"], facts: ["Ref KS-1180", "Due 14 Nov", "IBAN ending 4417"], kind: "verify", img: "closing",
+      d: { word: "HOLD", tone: "hold", by: "risk", reason: "Hold: this invoice asks you to pay a bank account Kreuzberg Studio has never been paid at.", f: [["Price", "386.62 of 500 USDZ", true, 77], ["Balance", "1,496.03 USDZ", true], ["Payee", "New bank details", false, null, true], ["Due date", "In 7 days", true]] } },
+    { id: "berlin", who: "Berlin Office Lettings", via: "claude", when: "2 hours ago", amt: "€60.00", pill: ["Ready to pay", "coin"], facts: ["Ref NOV-RENT-DESK", "Due Friday", "IBAN ending 2208"], kind: "approve", img: "travel",
+      d: { word: "PAY", tone: "pay", by: "price", reason: "Pay: the price is good today and the payee checks out. It needs you because it's over the $50 claude may pay alone.", f: [["Price", "68.21 of 50 USDZ cap", false, 100, true], ["Balance", "1,496.03 USDZ", true], ["Payee", "Paid 6 times before", true], ["Due date", "Friday", true]] } },
+    { id: "holloway", who: "Holloway Print Ltd", from: "accounts@hollowayprint.co.uk", when: "5 hours ago", amt: "£72.00", pill: ["Needs details", "warn"], facts: ["Ref INV-2291", "Account ending 0193"], kind: "details", img: "errands",
+      d: { word: "WAIT", tone: "wait", by: "the due date", reason: "Wait: Sayso can't pay this without a sort code. Nothing is due for 12 days.", f: [["Price", "82.40 USDZ", true, 30], ["Balance", "1,496.03 USDZ", true], ["Payee", "Paid every month", true], ["Bank details", "Sort code missing", false, null, true]] } },
+  ];
+  const DONE = [
+    { id: "rechenzentrum", who: "Rechenzentrum Nord GmbH", meta: "From codex · RZ-0042 · 8 hours ago", amt: "€95.50", pill: ["Delivered", "go"], steps: 3 },
+    { id: "lingua", who: "Lingua Freelance", meta: "From claude · Oct · 8 hours ago", amt: "€180.00", pill: ["Delivered", "go"], steps: 3 },
+    { id: "kreuzberg-old", who: "Kreuzberg Studio GmbH", meta: "KS-1102 · 3 days ago", amt: "€280.00", pill: ["On its way", "info"], steps: 2 },
+  ];
+
+  $("#grid").innerHTML = INV.map((v, i) => `<article class="card inv glass enter${i === 0 ? " photo" : ""}" style="--i:${i}" data-id="${v.id}">${i === 0 ? `<span class="ph"><img src="/people/${v.img}.jpg" alt=""></span>` : ""}
+    <div class="meta"><span>${v.via ? `<span class="via">${icon("bot", 14)}Forwarded by ${v.via}</span>` : v.from} · ${v.when}</span><span class="pill ${v.pill[1]}">${v.pill[0]}</span></div>
+    <div class="what"><span class="amt">${v.amt}</span><span class="to">to ${v.who}</span></div>
+    <div class="sub">${v.facts.map((f) => `<span>${f}</span>`).join("")}</div>
+    ${v.kind === "verify" ? `<div class="alert"><b>${icon("shield", 14)} Held:</b> the invoice asks to pay new bank details. Check them with the payee.</div>
+      <p class="small" style="margin:12px 0 0">Or call Kreuzberg Studio on a number you already had (not one from this email) and read them: <code>IBAN DE89 3704 0044 0532 0144 17</code></p>
+      <label class="check"><input type="checkbox" data-ok="${v.id}"><span>I confirmed these bank details with the payee myself.</span></label>
+      <div class="actions"><button class="btn pay" data-pay="${v.id}" disabled>Pay ${v.amt}</button><button class="btn">Ignore</button><button class="link" data-open="${v.id}">Why?</button></div>` : ""}
+    ${v.kind === "approve" ? `<div class="actions"><button class="btn pay" data-pay="${v.id}">${icon("face")}Pay ${v.amt}</button><button class="btn">Ignore</button><button class="link" data-open="${v.id}">Why?</button></div>` : ""}
+    ${v.kind === "details" ? `<div class="note-line">Sayso couldn't find the sort code.</div><div class="actions"><button class="btn pay" data-fill="${v.id}">Add missing details</button><button class="btn">Ignore</button><button class="link" data-open="${v.id}">Why?</button></div>` : ""}
+  </article>`).join("");
+
+  $("#rows").innerHTML = DONE.map((r, i) => `<article class="row glass enter" style="--i:${i + 3}"><button class="row-head" aria-expanded="false"><span class="mark">${r.who[0]}</span><span><b class="rh-who">${r.who}</b><span class="rh-meta">${r.meta}</span></span><span class="rh-end">${r.amt}<span class="pill ${r.pill[1]}">${r.pill[0]}</span></span></button>
+    <div class="row-body"><div><ol class="steps">${["Approved", "Sent by Airwallex", "Delivered"].map((s, k) => `<li class="step${k < r.steps ? " done" : ""}">${s}</li>`).join("")}</ol><p class="small muted" style="margin:12px 0 0">Paid in USDZ on Metal · receipt hashed · ${r.pill[0] === "Delivered" ? "landed in EUR through Airwallex" : "Airwallex is sending it now"}</p></div></div></article>`).join("");
+  document.querySelectorAll(".row-head").forEach((b) => (b.onclick = () => { const r = b.closest(".row"); r.classList.toggle("open"); b.setAttribute("aria-expanded", r.classList.contains("open")); }));
+
+  document.querySelectorAll("[data-ok]").forEach((c) => (c.onchange = () => (document.querySelector(`[data-pay="${c.dataset.ok}"]`).disabled = !c.checked)));
+  document.querySelectorAll("[data-pay]").forEach((b) => (b.onclick = () => { const v = INV.find((x) => x.id === b.dataset.pay); b.closest(".inv").classList.add("paid"); toast(`Approved ${v.amt} to ${v.who}. Paying now.`); }));
+  document.querySelectorAll("[data-fill]").forEach((b) => (b.onclick = () => { const a = b.closest(".actions"); a.outerHTML = `<div class="actions"><input class="field" placeholder="Sort code, e.g. 20-00-00" style="flex:1;min-width:0"><button class="btn pay">Save</button></div>`; }));
+
+  // the detail drawer
+  const drawer = $("#drawer");
+  function openDetail(id) {
+    const v = INV.find((x) => x.id === id); if (!v) return;
+    const d = v.d;
+    drawer.innerHTML = `<div class="dc-head"><span class="k">${v.via ? `Forwarded by ${v.via}` : "From the inbox"} · ${v.when}</span><button class="ibtn" id="shut" aria-label="Close">${icon("x")}</button></div>
+      <div class="d-hero photo"><span class="ph"><img src="/people/${v.img}.jpg" alt=""></span><span class="amt">${v.amt}</span><b style="margin-top:6px">to ${v.who}</b></div>
+      <section><div class="dc-head"><span id="fl"></span><span class="k">Decided by <span id="by">${d.by}</span></span></div>
+      <p class="dc-reason" id="reason">${d.reason}</p>
+      <ul class="factors">${d.f.map(([k, val, ok, meter, decider]) => `<li class="${ok ? "" : "off"}"><span class="dot">${icon(ok ? "check" : "hand", 12)}</span><span>${k}${decider ? '<span class="tagd">Decided it</span>' : ""}</span><span class="v">${val}</span>${meter != null ? `<span class="meter"><i data-w="${meter}"></i></span>` : ""}</li>`).join("")}</ul>
+      <div class="whatif"><div class="dc-head"><span class="k">What if</span><span class="small muted">Try one. Nothing moves.</span></div><div class="chips">${["Rate 2% dearer", "Budget 190 USDZ", "New bank details", "Known bank details"].map((c) => `<button class="chip">${c}</button>`).join("")}</div></div></section>
+      <div class="actions">${v.kind === "details" ? `<button class="btn pay">Add missing details</button>` : `<button class="btn pay">${icon("face")}Pay ${v.amt}</button>`}<button class="btn">Ignore</button></div>`;
+    $("#fl").append(flaps(d.word, d.tone, 6));
+    document.body.classList.add("detail");
+    setTimeout(() => drawer.querySelectorAll(".meter i").forEach((i) => (i.style.width = `${i.dataset.w}%`)), 350);
+    $("#shut").onclick = closeDetail;
+    // what-if: each chip re-asks the decision; nothing moves
+    const SIM = { "Rate 2% dearer": ["WAIT", "wait", "price", "Wait: the rate is 2.1% dearer than usual, and there's time before it's due."], "Budget 190 USDZ": ["HOLD", "hold", "balance", "Hold: the price is more than the 190 USDZ left in the budget."], "New bank details": ["HOLD", "hold", "risk", "Hold: the bank details are new. Check them with the payee first."], "Known bank details": ["PAY", "pay", "price", "Pay: the payee's account is one you've paid before, and the price is good."] };
+    drawer.querySelectorAll(".chip").forEach((c) => (c.onclick = () => {
+      const on = !c.classList.contains("on"); drawer.querySelectorAll(".chip").forEach((x) => x.classList.remove("on"));
+      const [w, t, by, r] = on ? SIM[c.textContent] : [d.word, d.tone, d.by, d.reason];
+      if (on) c.classList.add("on");
+      $("#fl").replaceChildren(flaps(w, t, 6)); $("#by").textContent = by; $("#reason").textContent = r;
+    }));
+  }
+  function closeDetail() { document.body.classList.remove("detail"); }
+  $("#scrimbg").onclick = closeDetail;
+  addEventListener("keydown", (e) => e.key === "Escape" && closeDetail());
+  document.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openDetail(b.dataset.open)));
+  if (location.hash === "#rechenzentrum") { const r = document.querySelector(".row"); r.classList.add("open"); }
+</script>
+</body>
+</html>
