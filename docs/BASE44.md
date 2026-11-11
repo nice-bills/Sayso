@@ -13,17 +13,18 @@ Sayso's rules still have the final say. An app can only ask:
 
 ```
 curl -X POST $SAYSO_URL/v1/platform/apps -H "Authorization: Bearer $OWNER_TOKEN" -H 'content-type: application/json' \
-  -d '{"name":"Freelance Hub","webhook_url":"https://YOUR-APP.base44.app/functions/sayso-webhook","rules":"No more than 500 EUR per payout. Only pay EUR and GBP."}'
+  -d '{"name":"Freelance Hub","webhook_url":"https://YOUR-APP.base44.app/api/sayso-webhook","rules":"No more than 500 EUR per payout. Only pay EUR and GBP."}'
 ```
 
 You get `api_key` and `webhook_secret` once. Change rules any time: `PUT /v1/platform/apps/:id/rules {"rules":"..."}`. Disconnect: `POST /v1/platform/apps/:id/revoke`.
 
 ## Use it from Base44
 
-1. **As a backend function (the full flow).** Copy `integrations/base44/` into your app's `base44/` folder (`entities/SaysoPayout.json`, `functions/sayso-pay`, `functions/sayso-webhook`), set the secrets `SAYSO_URL`, `SAYSO_APP_KEY`, `SAYSO_WEBHOOK_SECRET`, and deploy with `npx base44 deploy`. Call `base44.functions.invoke("sayso-pay", {...})`; show `SaysoPayout` rows with `entities.SaysoPayout.subscribe`.
-2. **As a workspace custom integration.** Import `$SAYSO_URL/v1/platform/openapi.json` as a custom OpenAPI integration (Base44 requires a Builder plan), then call `base44.integrations.custom.call("sayso", "post:/v1/platform/payouts", { payload })` from any app in the workspace.
+1. **As server functions in your app (the full flow, and the one running live).** This is Base44's current TanStack Start layout: server functions in `src/lib/hub.js` plus a webhook server route at `src/routes/api/sayso-webhook.js`, with the secrets `SAYSO_URL`, `SAYSO_APP_KEY` and `SAYSO_WEBHOOK_SECRET` read with `secrets.get`. Point the app's `webhook_url` at `https://YOUR-APP.base44.app/api/sayso-webhook`. This is what Freelance Hub runs at https://freelance-hub-6ea1cb4e.base44.app.
+2. **As a Deno backend function (the full flow, not run live yet).** Copy `integrations/base44/` into your app's `base44/` folder (`entities/SaysoPayout.json`, `functions/sayso-pay`, `functions/sayso-webhook`), set the same three secrets, and deploy with `npx base44 deploy`. Call `base44.functions.invoke("sayso-pay", {...})`; show `SaysoPayout` rows with `entities.SaysoPayout.subscribe`.
+3. **As a workspace custom integration.** Import `$SAYSO_URL/v1/platform/openapi.json` as a custom OpenAPI integration (Base44 requires a Builder plan), then call `base44.integrations.custom.call("sayso", "post:/v1/platform/payouts", { payload })` from any app in the workspace.
 
-Backend functions need a Base44 Builder plan. These two function files follow Base44's documented function format but haven't been run against a live Base44 app yet.
+Backend functions need a Base44 Builder plan. The Deno function files in `integrations/base44/` follow Base44's documented function format but have not been run against a live Base44 app. The TanStack Start route is the one running live, in Freelance Hub.
 
 ## States an app sees
 
