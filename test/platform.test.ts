@@ -52,7 +52,11 @@ describe("webhook signatures", () => {
 describe("an app paying through Sayso", () => {
   it("applies the app's rules, keeps Sayso's approval, and sends signed events back", async () => {
     const received: Array<{ headers: Record<string, string>; raw: string }> = [];
-    const hook = express().use(express.text({ type: "*/*" }), (req, res) => { received.push({ headers: req.headers as Record<string, string>, raw: req.body }); res.sendStatus(200); }).listen(0);
+    const hook = express().use(express.text({ type: "*/*" }), (req, res) => {
+      // Only webhook deliveries count; anything else on this port (e.g. a local tool probing it) gets a 404.
+      if (req.method !== "POST" || req.path !== "/functions/sayso-webhook") { res.sendStatus(404); return; }
+      received.push({ headers: req.headers as Record<string, string>, raw: req.body }); res.sendStatus(200);
+    }).listen(0);
     const s = await buildSayso({ offline: true, dbPath: ":memory:" });
     const server = s.app.listen(0);
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
