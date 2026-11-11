@@ -17,6 +17,7 @@ import { PayoutError } from "../payouts/service.js";
 import type { Store } from "../store.js";
 import { toMinor } from "../treasury/money.js";
 import { checkRules, compileRules, describeRules, NO_RULES, Rules } from "./rules.js";
+import { machine, register } from "../machine.js";
 
 export const KEY_PREFIX = "Base44: ";
 
@@ -44,6 +45,22 @@ export const PlatformPayout = z.object({
   context: z.string().max(10_000).optional(),
 });
 export type PlatformPayout = z.infer<typeof PlatformPayout>;
+
+// What a connected app sees: the invoice's state until it is approved, then the payout's outcome.
+export const APP_PAYOUT = register(machine("app_payout", ["needs_details", "awaiting_approval", "needs_verification", "rejected", "duplicate"], {
+  needs_details: { means: "Something needed to pay it is missing. The owner can add it in Sayso.", waitingOn: "owner", to: ["needs_details", "awaiting_approval", "needs_verification", "rejected", "duplicate", "ignored"] },
+  awaiting_approval: { means: "Checked and ready. The owner approves it with a passkey at approval_url.", waitingOn: "owner", to: ["paying", "paid", "failed", "refunded", "ignored"] },
+  needs_verification: { means: "Held. The owner has to confirm the bank details with the payee, then approve at approval_url.", waitingOn: "owner", to: ["paying", "paid", "failed", "refunded", "ignored"] },
+  rejected: { means: "Sayso will not pay this one.", waitingOn: "nobody", to: [] },
+  duplicate: { means: "It looks like a payout that is already here, so it was not queued again.", waitingOn: "nobody", to: [] },
+  ignored: { means: "The owner set it aside. Nothing was paid.", waitingOn: "nobody", to: [] },
+  paying: { means: "Approved and on its way to the bank.", waitingOn: "bank", to: ["paid", "failed", "refunded"] },
+  // Not final: a bank can return a payout after it was paid.
+  paid: { means: "Delivered to the payee. A bank can still return it later.", waitingOn: "nobody", to: ["failed", "refunded"] },
+  failed: { means: "The bank or Airwallex refused it or returned it. The money is still in the owner's balance.", waitingOn: "nobody", to: [] },
+  refunded: { means: "It failed and the money was returned.", waitingOn: "nobody", to: [] },
+}));
+export type AppPayoutState = keyof typeof APP_PAYOUT.states;
 
 // "paid" is not final: a bank can return a payout later, and the app should hear about the refund.
 const TERMINAL = new Set(["failed", "refunded", "rejected", "ignored", "duplicate"]);
@@ -233,7 +250,7 @@ export class Platform {
     const state = stateOf(item);
     const needsOwner = state === "awaiting_approval" || state === "needs_verification";
     return {
-      ref, state, payout_id: item.payoutId,
+      ref, state, state_means: APP_PAYOUT.states[state as AppPayoutState]?.means ?? null, waiting_on: APP_PAYOUT.states[state as AppPayoutState]?.waitingOn ?? null, final: TERMINAL.has(state), payout_id: item.payoutId,
       payee: item.payout?.payee ?? item.fields.payeeName, amount: item.payout?.amount ?? item.fields.amount, currency: item.payout?.currency ?? item.fields.currency,
       reasons: item.payout?.reasons ?? [], missing: item.missing, failure: item.payout?.failure ?? null,
       // The owner's link, for showing "waiting for approval". The app can't approve: that takes the owner's passkey.
@@ -255,6 +272,8 @@ export class Platform {
         if (!item) continue;
         const state = stateOf(item);
         if (state === r.last_state) continue;
+        // Logged, never thrown, outside tests: a move the table doesn't know must not stop an event going out.
+        if (r.last_state) APP_PAYOUT.check([r.last_state as AppPayoutState], state as AppPayoutState);
         const seq = r.seq + 1;
         const data = this.shape(r.ref, item);
         const body = JSON.stringify({ id: `evt_${randomUUID()}`, type: `payout.${state}`, created: new Date(now).toISOString(), app_id: r.app_id, sequence: seq, data });

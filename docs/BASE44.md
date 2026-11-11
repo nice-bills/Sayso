@@ -29,3 +29,5 @@ Backend functions need a Base44 Builder plan. The Deno function files in `integr
 ## States an app sees
 
 `awaiting_approval` and `needs_verification` (waiting for the owner; `approval_url` is where), `paying`, `paid`, `failed`, `refunded` (a bounced payout is refunded, even after `paid`), `rejected`, `needs_details`, `duplicate`, `ignored`.
+
+Every state, what it means, who it is waiting on and whether it is final is listed at GET /v1/machines. Each payout reply carries the same three answers for its own state, so stop polling when "final" is true.

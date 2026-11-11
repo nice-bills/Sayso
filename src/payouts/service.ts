@@ -17,7 +17,7 @@ import { emit } from "../events.js";
 import type { Store } from "../store.js";
 import type { Trail } from "../trail.js";
 import { fmt, toMajor, toMinor } from "../treasury/money.js";
-import { PayoutBook, payeeHash, type Payout } from "./book.js";
+import { PayoutBook, payeeHash, PAYOUT, type Payout } from "./book.js";
 import { DEFAULT_PRICING, price, transferFee, type PricingConfig } from "./pricing.js";
 import { decide, DEFAULT_DECIDE, type DecideConfig, type Decision } from "./decide.js";
 import { assess, riskFromEnv, type RiskConfig, type RiskVerdict } from "./risk.js";
@@ -624,9 +624,11 @@ export const waitsForFunds = (p: Payout) => p.decision?.verdict === "wait" && p.
 export const WAITS_FOR_FUNDS = "this quote waits for funds: ask for a new one after the agent's next top-up";
 
 export function publicView(p: Payout) {
+  // A quote nobody paid in time reads as expired, even before anything marks it so.
+  const status = p.status === "quoted" && new Date(p.expiresAt) < new Date() ? "expired" : p.status;
+  const info = PAYOUT.states[status];
   return {
-    // A quote nobody paid in time reads as expired, even before anything marks it so.
-    id: p.id, status: p.status === "quoted" && new Date(p.expiresAt) < new Date() ? "expired" : p.status, reasons: p.reasons, amount: toMajor(p.amountMinor).toFixed(2), currency: p.currency, method: p.method,
+    id: p.id, status, status_means: info.means, waiting_on: info.waitingOn, final: PAYOUT.terminal(status), reasons: p.reasons, amount: toMajor(p.amountMinor).toFixed(2), currency: p.currency, method: p.method,
     payee: p.payeeName, reference: p.reference,
     price_usdz: toMajor(p.totalMinor).toFixed(2), fee_usdz: toMajor(p.feeMinor).toFixed(2), rate_used: p.rateUsed,
     decision: p.decision ? decisionView(p.decision) : null,

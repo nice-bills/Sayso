@@ -1,7 +1,9 @@
 // The OpenAPI spec a builder imports to give an app (a Base44 app, or any backend) the ability to pay people.
 // In Base44 it becomes a workspace custom integration, called as base44.integrations.custom.call("sayso", "post:/v1/platform/payouts", { payload }).
 
-const state = { type: "string", enum: ["awaiting_approval", "needs_verification", "needs_details", "rejected", "duplicate", "ignored", "paying", "paid", "failed", "refunded"] };
+import { APP_PAYOUT } from "./platform.js";
+
+const state = { type: "string", enum: Object.keys(APP_PAYOUT.states) };
 
 export function openApiSpec(server: string) {
   return {
@@ -33,7 +35,7 @@ export function openApiSpec(server: string) {
         Payout: {
           type: "object",
           properties: {
-            ref: { type: "string" }, state, payout_id: { type: "string", nullable: true }, payee: { type: "string" }, amount: { type: "string" }, currency: { type: "string" },
+            ref: { type: "string" }, state, state_means: { type: "string", nullable: true }, waiting_on: { type: "string", nullable: true }, final: { type: "boolean" }, payout_id: { type: "string", nullable: true }, payee: { type: "string" }, amount: { type: "string" }, currency: { type: "string" },
             reasons: { type: "array", items: { type: "string" } }, missing: { type: "array", items: { type: "string" } }, failure: { type: "string", nullable: true },
             approval_url: { type: "string", nullable: true, description: "Where the owner approves. Show it as 'waiting for approval'." }, transfer_id: { type: "string", nullable: true },
           },

@@ -24,6 +24,7 @@ import { sweepEpoch, type MetalSettlementVerifier } from "./bridge/ramp.js";
 import { dashboardRouter } from "./dashboard/server.js";
 import { emit } from "./events.js";
 import { Inbox } from "./inbox/inbox.js";
+import { machines } from "./machine.js";
 import { Platform } from "./platform/platform.js";
 import { platformRouter } from "./platform/router.js";
 import { say } from "./inbox/say.js";
@@ -294,6 +295,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   // Signed only while the quote is still open: a payout first looked at after it moved on gets no back-dated offer.
   const signOffer = async (p: Payout) => p.status === "quoted" ? offers.offer(p, payTo) : offers.recorded(p.id) ?? null;
   app.get("/healthz", (_req, res) => res.json({ ok: true, offline: opts.offline, pay_to: payTo, quote_signer: offers.address, agent_mandates: policy }));
+  // Public and read-only: every state machine, so an agent or an app never has to guess what a status means.
+  app.get("/v1/machines", (_req, res) => res.json(Object.values(machines).map((m) => m.describe())));
   // Public routes that spend Airwallex, Metal RPC or Claude calls get a per-client limit.
   const limited: [string | string[], ReturnType<typeof rateLimit>][] = [
     ["/v1/quotes", rateLimit("quote", LIMITS.quotes)],

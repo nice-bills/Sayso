@@ -16,6 +16,7 @@ import { emit } from "../events.js";
 import type { Inbox, InboxItem } from "../inbox/inbox.js";
 import type { Notifier } from "../notify.js";
 import { PayoutError, publicView, type PayoutService } from "../payouts/service.js";
+import { PAYOUT } from "../payouts/book.js";
 import { toMinor } from "../treasury/money.js";
 import { MailError, type Mailbox } from "../inbox/mailbox.js";
 import { invoiceShape, toRequest, type Invoice } from "./tools.js";
@@ -228,7 +229,7 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
   });
 
   server.registerTool("payout_status", {
-    description: "Where a payout is: quoted, needs_review, accepted, funded, submitted, paid, failed, refunded.",
+    description: `Where a payout is. status is one of: ${Object.keys(PAYOUT.states).join(", ")}. The reply also says what the status means (status_means), who it is waiting on (waiting_on) and whether it is final. Stop polling when final is true.`,
     inputSchema: { payout_id: z.string() },
   }, async ({ payout_id }) => {
     const p = d.svc.book.get(payout_id);

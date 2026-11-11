@@ -11,6 +11,14 @@ import { AGENT_REGISTRATION } from "../src/agents/authmd.js";
 import { buildSayso } from "../src/app.js";
 import { recentEvents } from "../src/events.js";
 import { studioBankChange, studioInvoice } from "../samples/invoices.js";
+import express from "express";
+import { APP_PAYOUT } from "../src/platform/platform.js";
+import { openApiSpec } from "../src/platform/openapi.js";
+import { publicView, PayoutService } from "../src/payouts/service.js";
+import { heuristicRead } from "../src/agent/reader.js";
+import { FakeAirwallex, FakeRefunder } from "../src/sim/offline.js";
+import { Store } from "../src/store.js";
+import { toMinor } from "../src/treasury/money.js";
 
 /** The three tables seen through the wide type, so one loop can read them all. */
 const all: Array<Machine<string>> = [PAYOUT, BATCH, INBOX] as unknown as Array<Machine<string>>;
@@ -139,6 +147,58 @@ describe("small machines", () => {
 
       const after = await (await fetch(`${base}/v1/inbox/${id}/penny`, { headers: { authorization: `Bearer ${cs.ownerToken}` } })).json() as { check: { status: string } };
       expect(after.check.status).toBe("confirmed");
+    } finally {
+      server.close();
+    }
+  });
+});
+
+describe("published machines", () => {
+  it("declares every app payout state reachable, and only the five that end it are terminal", () => {
+    expect(unreachable(APP_PAYOUT)).toEqual([]);
+    expect(Object.keys(APP_PAYOUT.states).filter((s) => APP_PAYOUT.terminal(s as keyof typeof APP_PAYOUT.states)).sort()).toEqual(["duplicate", "failed", "ignored", "refunded", "rejected"]);
+  });
+
+  it("explains a payout's own state in every reply", async () => {
+    const store = new Store(":memory:");
+    const svc = new PayoutService({ awx: new FakeAirwallex({ USD: toMinor(5000), EUR: toMinor(100) }), store, refunder: new FakeRefunder(), read: async (t) => heuristicRead(t) });
+    const q = await svc.quote({
+      amount: "280.00", currency: "EUR", reference: "INV-2026-114",
+      payee: { name: "Kreuzberg Studio GmbH", address: { country_code: "DE", city: "Berlin", street_address: "Oranienstr. 1", postcode: "10999" }, bank: { iban: "DE89370400440532013000" }, bank_country_code: "DE" },
+    });
+    const v = publicView(svc.book.get(q.id)!);
+    expect(typeof v.status_means).toBe("string");
+    expect(v.status_means.length).toBeGreaterThan(0);
+    expect(v.waiting_on).toBe("agent");
+    expect(v.final).toBe(false);
+  });
+
+  it("publishes the app states in the OpenAPI enum, with all ten older names still there", () => {
+    const spec = openApiSpec("http://x");
+    const enumStates = [...spec.components.schemas.Payout.properties.state.enum].sort();
+    expect(enumStates).toEqual(Object.keys(APP_PAYOUT.states).sort() as typeof enumStates);
+    expect(enumStates).toEqual(expect.arrayContaining(["awaiting_approval", "needs_verification", "needs_details", "rejected", "duplicate", "ignored", "paying", "paid", "failed", "refunded"]));
+  });
+
+  it("serves every machine at GET /v1/machines", async () => {
+    const app = express();
+    app.get("/v1/machines", (_req, res) => res.json(Object.values(machines).map((m) => m.describe())));
+    const server = app.listen(0);
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const list = await (await fetch(`http://127.0.0.1:${port}/v1/machines`)).json() as Array<{ name: string; initial: string[]; states: Array<{ state: string; means: string; waiting_on: string; terminal: boolean; to: string[] }> }>;
+      expect(list.map((m) => m.name)).toEqual(expect.arrayContaining(["payout", "batch", "invoice", "app_payout"]));
+      for (const m of list) {
+        expect(m.initial.length).toBeGreaterThan(0);
+        expect(m.states.length).toBeGreaterThan(0);
+        for (const s of m.states) {
+          expect(typeof s.means).toBe("string");
+          expect(s.means.length).toBeGreaterThan(0);
+          expect(typeof s.waiting_on).toBe("string");
+          expect(typeof s.terminal).toBe("boolean");
+          expect(Array.isArray(s.to)).toBe(true);
+        }
+      }
     } finally {
       server.close();
     }

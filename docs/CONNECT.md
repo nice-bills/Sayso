@@ -4,6 +4,8 @@ Chat apps connect by signing in with Sayso: add the URL, tap Allow, done. Other 
 
 Sayso needs a public HTTPS address for chat apps to reach it. Set `PUBLIC_URL` to it so approval links point there.
 
+Every state, what it means, who it is waiting on and whether it is final is listed at GET /v1/machines. Each payout reply carries the same three answers for its own state, so stop polling when "final" is true.
+
 | Where your agent lives | How to connect | Tested |
 | --- | --- | --- |
 | **Claude Code** | `claude mcp add --transport http sayso https://YOUR-HOST/mcp --header "Authorization: Bearer KEY"` | Yes |

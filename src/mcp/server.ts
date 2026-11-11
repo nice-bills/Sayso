@@ -20,6 +20,7 @@ import { z } from "zod";
 import { invoiceShape, toRequest, type Invoice } from "./tools.js";
 import { disputeDigest, disputeMessage } from "../payouts/dispute-auth.js";
 import { verifyOffer, type SignedOffer } from "../payouts/offer.js";
+import { PAYOUT } from "../payouts/book.js";
 
 const base = process.env.SAYSO_URL ?? "http://127.0.0.1:4021";
 const maxUsdz = process.env.SAYSO_MAX_USDZ ?? "250";
@@ -222,7 +223,7 @@ server.registerTool("dispute_payout", {
 });
 
 server.registerTool("payout_status", {
-  description: "Where a payout is: quoted, needs_review, accepted, funded, submitted, paid, failed, refunded.",
+  description: `Where a payout is. status is one of: ${Object.keys(PAYOUT.states).join(", ")}. The reply also says what the status means (status_means), who it is waiting on (waiting_on) and whether it is final. Stop polling when final is true.`,
   inputSchema: { payout_id: z.string() },
 }, async ({ payout_id }) => text(await (await fetch(`${base}/v1/payouts/${payout_id}`)).json()));
 
