@@ -646,12 +646,13 @@ function connectView() {
   );
 }
 
-/** Offered once signed in, until there's a passkey: Face ID becomes the way in and the way to pay. */
-/** A small header button until the owner has a passkey: approving with a face or fingerprint is something an agent can't fake. */
+/** Offered once signed in: the first passkey becomes the way in and the way to pay, later ones add other devices. */
+/** A small header button for the owner: approving with a face or fingerprint is something an agent can't fake. */
 function passkeyButton(iconOnly = false) {
-  if (!state.me || state.me.viewer || state.me.passkeys || !canPasskey()) return null;
-  return h("button", { class: "btn quiet small faceid", title: "Sign in and approve payments with your face or fingerprint. An agent can't fake it.", disabled: state.busy.passkey, onclick: () => act("passkey", addPasskey, "Face ID is on. You'll use it to sign in and to pay.") },
-    icon("face", iconOnly ? 20 : 16), iconOnly ? null : h("span", { class: "tab-label" }, "Turn on Face ID"));
+  if (!state.me || !state.me.owner || state.me.viewer || !canPasskey()) return null;
+  const second = state.me.passkeys;
+  return h("button", { class: "btn quiet small faceid", title: second ? "Add a passkey on this device too, so you can approve from here." : "Sign in and approve payments with your face or fingerprint. An agent can't fake it.", disabled: state.busy.passkey, onclick: () => act("passkey", addPasskey, second ? "This device can approve payments now." : "Face ID is on. You'll use it to sign in and to pay.") },
+    icon("face", iconOnly ? 20 : 16), iconOnly ? null : h("span", { class: "tab-label" }, second ? "Add this device" : "Turn on Face ID"));
 }
 
 // Things marked data-reveal fade up as they enter the screen; html.js gates it so nothing hides without script.
