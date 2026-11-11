@@ -10,6 +10,14 @@ import type { Auth } from "../auth.js";
 import type { Store } from "../store.js";
 import { emit } from "../events.js";
 import type { AgentKeys } from "./keys.js";
+import { machine, register } from "../machine.js";
+
+export const OAUTH_REQUEST = register(machine("oauth_request", ["pending"], {
+  pending: { means: "An app asked to connect. The owner has to allow or deny it.", waitingOn: "owner", to: ["allowed", "denied"] },
+  allowed: { means: "The owner allowed it. The app has a short time to exchange its code.", waitingOn: "agent", to: ["used"] },
+  used: { means: "The code was exchanged. It cannot be used again.", waitingOn: "nobody", to: [] },
+  denied: { means: "The owner said no.", waitingOn: "nobody", to: [] },
+}));
 
 const REQUEST_SECONDS = 600;
 const CODE_SECONDS = 120;
@@ -33,7 +41,7 @@ function redirectOk(u: unknown): u is string {
 
 interface Client { id: string; name: string; redirect_uris: string }
 interface AuthRequest {
-  id: string; client_id: string; redirect_uri: string; challenge: string; state: string | null; status: "pending" | "allowed" | "used" | "denied";
+  id: string; client_id: string; redirect_uri: string; challenge: string; state: string | null; status: keyof typeof OAUTH_REQUEST.states;
   code_hash: string | null; agent_id: string | null; expires: number;
 }
 
@@ -107,6 +115,7 @@ export function oauthRouter(d: { store: Store; keys: AgentKeys; auth: Auth }): {
     const name = client(q.client_id)!.name;
     const { agent } = d.keys.create(name, null);
     const code = token("ac");
+    OAUTH_REQUEST.check(["pending"], "allowed");
     db.prepare("UPDATE oauth_requests SET status = 'allowed', code_hash = ?, agent_id = ?, expires = ? WHERE id = ? AND status = 'pending'").run(sha(code), agent.id, Date.now() + CODE_SECONDS * 1000, q.id);
     emit("decide", `You connected ${name} to Sayso`);
     res.json({ redirect: back(q, { code }), client_name: name });
@@ -114,7 +123,8 @@ export function oauthRouter(d: { store: Store; keys: AgentKeys; auth: Auth }): {
   r.post("/oauth2/requests/:id/deny", d.auth.requireOwner, (req, res) => {
     const q = live(req.params.id, res);
     if (!q) return;
-    db.prepare("UPDATE oauth_requests SET status = 'denied' WHERE id = ?").run(q.id);
+    OAUTH_REQUEST.check(["pending"], "denied");
+    db.prepare("UPDATE oauth_requests SET status = 'denied' WHERE id = ? AND status = 'pending'").run(q.id);
     res.json({ redirect: back(q, { error: "access_denied" }) });
   });
 
@@ -123,7 +133,8 @@ export function oauthRouter(d: { store: Store; keys: AgentKeys; auth: Auth }): {
     if (b.grant_type === "authorization_code") {
       const q = typeof b.code === "string" ? (db.prepare("SELECT * FROM oauth_requests WHERE code_hash = ?").get(sha(b.code)) as AuthRequest | undefined) : undefined;
       if (!q || q.status !== "allowed" || q.expires < Date.now()) { err(res, 400, "invalid_grant", "The code is unknown, used or expired."); return true; }
-      db.prepare("UPDATE oauth_requests SET status = 'used' WHERE id = ?").run(q.id);
+      OAUTH_REQUEST.check(["allowed"], "used");
+      db.prepare("UPDATE oauth_requests SET status = 'used' WHERE id = ? AND status = 'allowed'").run(q.id);
       if (b.client_id !== q.client_id || b.redirect_uri !== q.redirect_uri) { err(res, 400, "invalid_grant", "client_id or redirect_uri doesn't match."); return true; }
       if (typeof b.code_verifier !== "string" || s256(b.code_verifier) !== q.challenge) { err(res, 400, "invalid_grant", "PKCE check failed."); return true; }
       res.json(tokens(q.agent_id!, q.client_id));

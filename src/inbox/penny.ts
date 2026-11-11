@@ -16,8 +16,15 @@ import { PayoutError, type PayoutService } from "../payouts/service.js";
 import type { Store } from "../store.js";
 import { emit } from "../events.js";
 import type { Inbox, InboxItem } from "./inbox.js";
+import { machine, register } from "../machine.js";
 
-export type PennyStatus = "sent" | "confirmed" | "denied" | "failed";
+export const PENNY = register(machine("bank_detail_check", ["sent"], {
+  sent: { means: "1 cent with a code went to the new account. The payee has to send the code back.", waitingOn: "payee", to: ["confirmed", "denied", "failed"] },
+  confirmed: { means: "The payee sent the right code: the account is theirs.", waitingOn: "nobody", to: [] },
+  denied: { means: "The payee says these are not their bank details. The invoice stays blocked.", waitingOn: "nobody", to: [] },
+  failed: { means: "The code was wrong too many times or the link ran out.", waitingOn: "nobody", to: [] },
+}));
+export type PennyStatus = keyof typeof PENNY.states;
 
 export interface PennyCheck {
   id: string;
@@ -142,7 +149,9 @@ export class PennyChecks {
   }
 
   private set(id: string, status: PennyStatus) {
-    this.d.store.db.prepare("UPDATE penny_checks SET status = ? WHERE id = ?").run(status, id);
+    PENNY.check(["sent"], status);
+    // Compare-and-set, so a second answer can never reopen or flip a closed check.
+    this.d.store.db.prepare("UPDATE penny_checks SET status = ? WHERE id = ? AND status = 'sent'").run(status, id);
   }
 }
 

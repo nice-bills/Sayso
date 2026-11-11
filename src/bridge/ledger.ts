@@ -4,8 +4,15 @@
 // 3. the UNIQUE constraint on that key makes a second credit impossible, even across restarts.
 
 import { DatabaseSync } from "node:sqlite";
+import { machine, register } from "../machine.js";
 
-export type SweepStatus = "recorded" | "verified" | "credited" | "rejected";
+export const SWEEP = register(machine("sweep", ["recorded"], {
+  recorded: { means: "Earnings left Metal under the sweep mandate. Waiting to see it on chain.", waitingOn: "sayso", to: ["verified", "rejected"] },
+  verified: { means: "Seen on chain. Waiting for the Airwallex deposit.", waitingOn: "sayso", to: ["credited", "rejected"] },
+  credited: { means: "The deposit is in the Airwallex balance.", waitingOn: "nobody", to: [] },
+  rejected: { means: "The sweep did not check out and was not credited.", waitingOn: "nobody", to: [] },
+}));
+export type SweepStatus = keyof typeof SWEEP.states;
 
 export interface Sweep {
   operationId: string;
@@ -47,16 +54,19 @@ export class RampLedger {
 
   /** Step 2. Attach the finalized Metal event. Throws if that event already backs another sweep. */
   markVerified(operationId: string, eventKey: string): void {
+    SWEEP.check(["recorded"], "verified");
     this.db.prepare("UPDATE sweeps SET status = 'verified', event_key = ?, updated_at = datetime('now') WHERE operation_id = ? AND status = 'recorded'").run(eventKey, operationId);
   }
 
   /** Step 3. Credit exactly once: only a verified sweep moves to credited. Returns false if it already was. */
   markCredited(operationId: string, depositId: string): boolean {
+    SWEEP.check(["verified"], "credited");
     const r = this.db.prepare("UPDATE sweeps SET status = 'credited', airwallex_deposit_id = ?, updated_at = datetime('now') WHERE operation_id = ? AND status = 'verified'").run(depositId, operationId);
     return Number(r.changes) === 1;
   }
 
   markRejected(operationId: string, reason: string): void {
+    SWEEP.check(["recorded", "verified"], "rejected");
     this.db.prepare("UPDATE sweeps SET status = 'rejected', reason = ?, updated_at = datetime('now') WHERE operation_id = ? AND status IN ('recorded','verified')").run(reason, operationId);
   }
 

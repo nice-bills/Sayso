@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
+import type { AddressInfo } from "node:net";
 import { machine, machines, type Machine } from "../src/machine.js";
 import { BATCH } from "../src/payouts/batch.js";
 import { PAYOUT } from "../src/payouts/book.js";
 import { INBOX } from "../src/inbox/inbox.js";
+import { PENNY } from "../src/inbox/penny.js";
+import { SWEEP } from "../src/bridge/ledger.js";
+import { OAUTH_REQUEST } from "../src/agents/oauth.js";
+import { AGENT_REGISTRATION } from "../src/agents/authmd.js";
+import { buildSayso } from "../src/app.js";
+import { recentEvents } from "../src/events.js";
+import { studioBankChange, studioInvoice } from "../samples/invoices.js";
 
 /** The three tables seen through the wide type, so one loop can read them all. */
 const all: Array<Machine<string>> = [PAYOUT, BATCH, INBOX] as unknown as Array<Machine<string>>;
@@ -80,5 +88,59 @@ describe("machine tables", () => {
     expect(machines.batch!.describe().states.length).toBe(5);
     expect(machines.invoice!.describe().states.length).toBe(7);
     expect(Object.values(machines)).toEqual(expect.arrayContaining([PAYOUT, BATCH, INBOX]));
+  });
+});
+
+describe("small machines", () => {
+  const small: Array<Machine<string>> = [PENNY, SWEEP, OAUTH_REQUEST, AGENT_REGISTRATION] as unknown as Array<Machine<string>>;
+
+  it("declares every state reachable, and waits on nobody in every final state", () => {
+    for (const m of small) {
+      expect({ machine: m.name, unreachable: unreachable(m) }).toEqual({ machine: m.name, unreachable: [] });
+      for (const [state, info] of Object.entries(m.states)) {
+        if (info.to.length === 0) expect({ machine: m.name, state, waitingOn: info.waitingOn }).toEqual({ machine: m.name, state, waitingOn: "nobody" });
+      }
+    }
+  });
+
+  it("never reopens a closed record", () => {
+    expect(PENNY.can("confirmed", "denied")).toBe(false);
+    expect(OAUTH_REQUEST.can("used", "allowed")).toBe(false);
+    expect(AGENT_REGISTRATION.can("issued", "claimed")).toBe(false);
+    expect(SWEEP.can("credited", "rejected")).toBe(false);
+  });
+
+  it("keeps a confirmed bank-detail check confirmed when the same link is answered again", async () => {
+    const cs = await buildSayso({ offline: true });
+    const server = cs.app.listen(0);
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const post = async (path: string, body?: unknown) => {
+      const r = await fetch(base + path, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${cs.ownerToken}` }, body: body ? JSON.stringify(body) : undefined });
+      return { status: r.status, body: (await r.json()) as Record<string, any> };
+    };
+    try {
+      // Pay the studio's first invoice, so there is a contact on file for the check to email.
+      const first = await post("/v1/inbox", { message_id: studioInvoice.messageId, from: studioInvoice.from, subject: studioInvoice.subject, body: studioInvoice.body });
+      await post(`/v1/inbox/${encodeURIComponent(first.body.id)}/approve`, { approver: "will" });
+      for (let i = 0; i < 2; i++) await cs.svc.follow();
+
+      const held = await post("/v1/inbox", { message_id: studioBankChange.messageId, from: studioBankChange.from, subject: studioBankChange.subject, body: studioBankChange.body });
+      const id = encodeURIComponent(held.body.id);
+      const check = await post(`/v1/inbox/${id}/penny`);
+      const code = check.body.simStatementReference.slice(-6);
+
+      const sent = recentEvents().filter((e) => e.title.startsWith("Email to billing@kreuzberg-studio.example")).at(-1)!;
+      const link = base + new URL(sent.title.match(/https?:\/\/\S+/)![0]).pathname;
+      const answer = (form: Record<string, string>) => fetch(link, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(form).toString() });
+
+      expect((await answer({ code })).status).toBe(200);
+      // A second answer on the same link must not flip a confirmed check to denied.
+      expect((await answer({ denied: "1" })).status).toBe(200);
+
+      const after = await (await fetch(`${base}/v1/inbox/${id}/penny`, { headers: { authorization: `Bearer ${cs.ownerToken}` } })).json() as { check: { status: string } };
+      expect(after.check.status).toBe("confirmed");
+    } finally {
+      server.close();
+    }
   });
 });

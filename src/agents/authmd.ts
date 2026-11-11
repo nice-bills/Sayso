@@ -15,6 +15,7 @@ import type { Store } from "../store.js";
 import { emit } from "../events.js";
 import type { AgentKeys } from "./keys.js";
 import { OAUTH_SCOPES, oauthMetadata, oauthRouter } from "./oauth.js";
+import { machine, register } from "../machine.js";
 
 const CLAIM_WINDOW_MS = 24 * 3_600_000;
 const CODE_SECONDS = 600;
@@ -27,8 +28,14 @@ const JWT_BEARER = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
 
+export const AGENT_REGISTRATION = register(machine("agent_registration", ["pending"], {
+  pending: { means: "The agent showed its user a code. The owner has to sign in and enter it.", waitingOn: "owner", to: ["claimed"] },
+  claimed: { means: "The owner connected the agent. The agent can now exchange its claim token.", waitingOn: "agent", to: ["issued"] },
+  issued: { means: "The agent has its credentials. The claim token cannot be used again.", waitingOn: "nobody", to: [] },
+}));
+
 interface Registration {
-  id: string; agent_name: string; login_hint: string; status: "pending" | "claimed" | "issued";
+  id: string; agent_name: string; login_hint: string; status: keyof typeof AGENT_REGISTRATION.states;
   user_code: string; attempt_token: string; code_expires: number; expires: number; tries: number; agent_id: string | null;
 }
 
@@ -152,6 +159,7 @@ export function authMdRouter(d: { store: Store; keys: AgentKeys; auth: Auth }): 
     }
     if (!(await d.auth.confirmed(req, req.body?.confirmation, "claim", reg.id))) return void res.status(401).json({ error: "Confirm with your passkey to connect it.", need: "passkey" });
     const { agent } = d.keys.create(reg.agent_name, null);
+    AGENT_REGISTRATION.check(["pending"], "claimed");
     db.prepare("UPDATE agent_registrations SET status = 'claimed', agent_id = ? WHERE id = ? AND status = 'pending'").run(agent.id, reg.id);
     emit("decide", `You connected ${reg.agent_name} to Sayso`);
     res.json({ ok: true, agent_name: reg.agent_name });
@@ -170,7 +178,8 @@ export function authMdRouter(d: { store: Store; keys: AgentKeys; auth: Auth }): 
         if (reg.code_expires < Date.now() || reg.expires < Date.now()) return void err(res, 400, "expired_token", "The code ran out. Call /agent/identity/claim for a new one.");
         return void err(res, 400, "authorization_pending", "Waiting for the user to sign in and enter the code.");
       }
-      db.prepare("UPDATE agent_registrations SET status = 'issued' WHERE id = ?").run(reg.id);
+      AGENT_REGISTRATION.check(["claimed"], "issued");
+      db.prepare("UPDATE agent_registrations SET status = 'issued' WHERE id = ? AND status = 'claimed'").run(reg.id);
       return void res.json(tokenResponse(base, reg.agent_id!, true));
     }
     if (grant === JWT_BEARER) {
