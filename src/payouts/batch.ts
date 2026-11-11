@@ -9,10 +9,18 @@ import { emit } from "../events.js";
 import { toMajor } from "../treasury/money.js";
 import { PayoutError, publicView, type PayoutService } from "./service.js";
 import type { Payout } from "./book.js";
+import { machine, register } from "../machine.js";
 
 export const MAX_BATCH = 100;
 
-export type BatchStatus = "quoted" | "rejected" | "accepted" | "funded" | "expired";
+export const BATCH = register(machine("batch", ["quoted"], {
+  quoted: { means: "Priced and ready for one payment that covers every line.", waitingOn: "agent", to: ["accepted", "expired"] },
+  rejected: { means: "Refused. Nothing was paid.", waitingOn: "nobody", to: [] },
+  accepted: { means: "The agent's payment is settling on Metal.", waitingOn: "sayso", to: ["quoted", "funded"] },
+  funded: { means: "Paid for. Each line now runs as its own payout.", waitingOn: "nobody", to: [] },
+  expired: { means: "Nobody paid the quote in time. Ask for a new one.", waitingOn: "nobody", to: [] },
+}));
+export type BatchStatus = keyof typeof BATCH.states;
 
 export interface Batch {
   id: string;
@@ -105,6 +113,7 @@ export class BatchBook {
   async onFunded(id: string, payer: string, fundingTx: string, now = new Date()): Promise<Batch> {
     const b = this.get(id);
     if (!b) return b!;
+    BATCH.check(["accepted"], "funded");
     const r = this.store.db.prepare("UPDATE batches SET status = 'funded', buyer = ?, funding_tx = ? WHERE id = ? AND status = 'accepted'").run(payer, fundingTx, id);
     if (Number(r.changes) !== 1) return b;
     emit("observe", `Batch ${id.slice(0, 8)} paid on chain; sending ${b.payoutIds.length} payouts`, {}, fundingTx);
@@ -139,6 +148,7 @@ export class BatchBook {
   }
 
   private setStatus(id: string, from: BatchStatus[], to: BatchStatus): boolean {
+    BATCH.check(from, to);
     const r = this.store.db.prepare(`UPDATE batches SET status = ? WHERE id = ? AND status IN (${from.map(() => "?").join(",")})`).run(to, id, ...from);
     return Number(r.changes) === 1;
   }

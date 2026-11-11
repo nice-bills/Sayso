@@ -7,12 +7,34 @@
 //      ├─> needs_review ──(operator)──> quoted          └──> failed (rejected by Airwallex) ──> refunded
 //      ├─> rejected
 //      └─> expired                                    funded ──decision was wait──> waiting ──rate back in band, or the wait ends──> funded
+//
+//   paid ──bank returned it──> failed
+//   failed ──> refund_failed
+//
+// The table below (PAYOUT) is the source of truth; this picture is only a reading aid.
 
 import { createHash } from "node:crypto";
 import type { Store } from "../store.js";
 import type { Decision } from "./decide.js";
+import { machine, register } from "../machine.js";
 
-export type PayoutStatus = "quoted" | "needs_review" | "rejected" | "accepted" | "funded" | "waiting" | "submitted" | "paid" | "failed" | "refunded" | "refund_failed" | "expired";
+export const PAYOUT = register(machine("payout", ["quoted", "needs_review", "rejected"], {
+  quoted: { means: "Priced and ready. It is paid when the agent pays the quote or the owner approves.", waitingOn: "agent", to: ["accepted", "expired"] },
+  needs_review: { means: "Held by a risk rule. The owner has to confirm it or reject it.", waitingOn: "owner", to: ["quoted", "rejected"] },
+  rejected: { means: "Refused. Nothing was paid and nothing will be.", waitingOn: "nobody", to: [] },
+  accepted: { means: "The agent's payment is settling on Metal.", waitingOn: "sayso", to: ["quoted", "funded"] },
+  funded: { means: "Paid for. Sayso is sending it to the bank.", waitingOn: "sayso", to: ["waiting", "submitted", "failed"] },
+  waiting: { means: "Paid for and held in escrow until the rate or the funds are right, or the due date is close.", waitingOn: "sayso", to: ["funded"] },
+  submitted: { means: "Sent to the payee's bank through Airwallex.", waitingOn: "bank", to: ["paid", "failed"] },
+  // Not final: a bank can return a payout after it was paid, and an upheld dispute reverses it.
+  paid: { means: "Delivered to the payee. A bank can still return it later.", waitingOn: "nobody", to: ["failed"] },
+  // An invoice paid from the owner's own balance stays here: the money never left, so there is nothing to refund.
+  failed: { means: "The bank or Airwallex refused it. An agent's payment is refunded; an invoice's money is still in the owner's balance.", waitingOn: "sayso", to: ["refunded", "refund_failed"] },
+  refunded: { means: "It failed and the payer has the money back.", waitingOn: "nobody", to: [] },
+  refund_failed: { means: "It failed and the refund did not go through. The owner has to step in.", waitingOn: "owner", to: [] },
+  expired: { means: "Nobody paid the quote in time. Ask for a new one.", waitingOn: "nobody", to: [] },
+}));
+export type PayoutStatus = keyof typeof PAYOUT.states;
 
 export interface Payout {
   id: string;
@@ -101,6 +123,7 @@ export class PayoutBook {
 
   /** Compare-and-set: moves the payout only if it is in one of `from`. Returns whether it moved. */
   transition(id: string, from: PayoutStatus[], to: PayoutStatus, fields: Partial<Pick<Payout, "buyer" | "fundingTx" | "transferId" | "refundTx" | "failure" | "reasons" | "expiresAt" | "decision">> = {}): boolean {
+    PAYOUT.check(from, to);
     const sets = ["status = ?", ...Object.keys(fields).map((k) => `${COLUMNS[k as keyof Payout]} = ?`)];
     const r = this.store.db.prepare(`UPDATE payouts SET ${sets.join(", ")} WHERE id = ? AND status IN (${from.map(() => "?").join(",")})`)
       .run(to, ...Object.entries(fields).map(([k, v]) => this.encode(k as keyof Payout, v)), id, ...from);

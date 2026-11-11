@@ -9,8 +9,20 @@ import { emit } from "../events.js";
 import { PayoutError, publicView, type PayoutService } from "../payouts/service.js";
 import { fmt, toMinor } from "../treasury/money.js";
 import { extractInvoice, InvoiceFields, missingFields, toPayoutRequest, type InboundEmail } from "./extract.js";
+import { machine, register } from "../machine.js";
 
-export type InboxStatus = "needs_details" | "awaiting_approval" | "needs_verification" | "rejected" | "paying" | "ignored" | "duplicate";
+export const INBOX = register(machine("invoice", ["needs_details", "awaiting_approval", "needs_verification", "rejected", "duplicate"], {
+  // Supplying the missing details runs the checks again, so it can land in any starting state, itself included.
+  needs_details: { means: "Something needed to pay it is missing.", waitingOn: "owner", to: ["needs_details", "awaiting_approval", "needs_verification", "rejected", "duplicate", "ignored"] },
+  awaiting_approval: { means: "Checked and ready. The owner approves it with one tap.", waitingOn: "owner", to: ["paying", "ignored"] },
+  needs_verification: { means: "Held. The owner has to confirm the bank details with the payee first.", waitingOn: "owner", to: ["paying", "ignored"] },
+  rejected: { means: "Sayso will not pay this one.", waitingOn: "nobody", to: [] },
+  // Final for the invoice; from here the payout behind it carries the progress.
+  paying: { means: "Approved. Follow the payout for delivery.", waitingOn: "nobody", to: [] },
+  ignored: { means: "The owner set it aside.", waitingOn: "nobody", to: [] },
+  duplicate: { means: "It looks like an invoice that is already here, so it was not queued again.", waitingOn: "owner", to: ["ignored"] },
+}));
+export type InboxStatus = keyof typeof INBOX.states;
 
 export interface InboxItem {
   id: string;
@@ -64,6 +76,7 @@ export class Inbox {
     const body = (this.store.db.prepare("SELECT body FROM inbox WHERE id = ?").get(id) as { body: string }).body;
     const e: InboundEmail = { messageId: id, from: item.from, subject: item.subject, body, receivedAt: now };
     const { status, payoutId, missing, fingerprint } = await this.triage(fields, e);
+    INBOX.check(["needs_details"], status);
     const changed = this.store.db.prepare("UPDATE inbox SET fields = ?, missing = ?, payout_id = ?, status = ?, fingerprint = ? WHERE id = ? AND status = 'needs_details'")
       .run(JSON.stringify(fields), JSON.stringify(missing), payoutId, status, fingerprint, id);
     if (Number(changed.changes) !== 1) throw new PayoutError(409, "invoice changed while you were editing it");
@@ -142,6 +155,7 @@ export class Inbox {
 
   /** Compare-and-set, so two taps can't both pay. */
   private setStatus(id: string, status: InboxStatus, from: InboxStatus[]): boolean {
+    INBOX.check(from, status);
     const r = this.store.db.prepare(`UPDATE inbox SET status = ? WHERE id = ? AND status IN (${from.map(() => "?").join(",")})`).run(status, id, ...from);
     return Number(r.changes) === 1;
   }
