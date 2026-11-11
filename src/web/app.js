@@ -1645,6 +1645,7 @@ export { h, state, brand, stage, proveSection, signinDialog, toApp, openApp, sti
 
 // ---------- start ----------
 (async () => {
+  render(); // Paint at once so the film starts; who is signed in fills in below.
   try {
     const me = await api("/auth/me");
     state.me = me;
