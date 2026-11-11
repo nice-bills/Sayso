@@ -28,6 +28,10 @@ Backend functions need a Base44 Builder plan. The Deno function files in `integr
 
 ## States an app sees
 
-`awaiting_approval` and `needs_verification` (waiting for the owner; `approval_url` is where), `paying`, `paid`, `failed`, `refunded` (a bounced payout is refunded, even after `paid`), `rejected`, `needs_details`, `duplicate`, `ignored`.
+`awaiting_approval` and `needs_verification` (waiting for the owner; `approval_url` is where), `paying`, `paid`, `failed`, `refunded`, `rejected`, `needs_details`, `duplicate`, `ignored`.
+
+A payout an app asks for is paid from the owner's Airwallex balance. If the bank bounces it, it ends as `failed`, also after `paid`, and the money is still in the owner's balance. It never becomes `refunded`: that state is reserved and is not sent to apps today.
+
+The receipt for a paid payout is at `GET /v1/payouts/{payout_id}/receipt`, with no key.
 
 Every state, what it means, who it is waiting on and whether it is final is listed at GET /v1/machines. Each payout reply carries the same three answers for its own state, so stop polling when "final" is true.

@@ -70,6 +70,12 @@ claude mcp add sayso -e SAYSO_URL=... -e SAYSO_MANDATE=.metal/agent-budget.json 
 
 Metal refuses any payment above the cap, past the budget, after the expiry, or to anyone but Sayso. The owner can revoke it at any time with `metal-agent mandate revoke`. The owner's signing keys are written to `~/.sayso-owner/` (mode 0600), never into the agent's `.metal/` folder or the host bundle: the agent gets only its credential, its own mandate key and the issuer's public key, so it can't sign itself a bigger budget. The script refuses an owner key inside the agent's folder and moves one an older run left there.
 
+## Base44 apps
+
+A Base44 app calls Sayso from its server functions, and Sayso's signed events keep the app's records in step. Freelance Hub runs this live: a job posted, delivery confirmed and payment released ends in a 20.00 EUR sandbox payout that the owner approves with a passkey, and the job then shows its receipt on Metal.
+
+Start with [docs/BASE44.md](docs/BASE44.md), the accelerator write-up [docs/BASE44-INTEGRATION.md](docs/BASE44-INTEGRATION.md), and the live app's server code in [integrations/base44/freelance-hub/](integrations/base44/freelance-hub/).
+
 ## API
 
 | Call | Price | What it does |
