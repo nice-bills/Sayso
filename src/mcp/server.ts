@@ -13,6 +13,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { createMetalPaymentClient, usdzBaseUnits } from "@metalntwx/metal-pay";
 import { createMandatePaymentClient, p256DigestSigner, parseCredential, privateKeyHex, type Es256Key } from "@metalntwx/metal-pay/mandates";
 import { privateKeyToAccount } from "viem/accounts";
@@ -104,7 +105,8 @@ function presented(): string | undefined {
   if (simMandate) return JSON.stringify({ mandate_credential: "sim", mandate_issuer: "sim" });
   const mandate = process.env.SAYSO_MANDATE;
   if (!mandate) return undefined;
-  const issuerFile = process.env.SAYSO_MANDATE_ISSUER ?? ".metal/agent-owner.issuer.public.json";
+  // The issuer key sits beside the mandate, so an agent started outside the repo still presents it.
+  const issuerFile = process.env.SAYSO_MANDATE_ISSUER ?? join(dirname(mandate), "agent-owner.issuer.public.json");
   try {
     return JSON.stringify({ mandate_credential: JSON.parse(readFileSync(mandate, "utf8")), mandate_issuer: JSON.parse(readFileSync(issuerFile, "utf8")) });
   } catch {
