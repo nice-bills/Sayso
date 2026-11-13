@@ -318,7 +318,7 @@ function stage() {
     const tok = ++railTok, i = d.inputs;
     track.classList.remove("cut");
     coin.classList.remove("parked"); coin2.classList.remove("parked"); coin2.classList.add("hidden");
-    place(coin, POS[0]); reach(POS[0]); tag(coin, `${i.price_usdz} USDZ`);
+    place(coin, POS[0]); reach(POS[0]); tag(coin, `${i.cost_usdz} USDZ`);
     if (d.verdict === "pay") {
       railNote.textContent = "Paid over x402 to Sayso's Metal account. Sayso's books hold it back from sweeps until Airwallex delivers.";
       travel(coin, [POS[1], POS[2]], tok).then(() => { if (tok === railTok) tag(coin, "€480.00"); return travel(coin, [POS[3], POS[4]], tok); })
@@ -366,7 +366,7 @@ function stage() {
     reason.replaceChildren(h("b", {}, `${lead}:`), rest.join(":"));
     for (const [k, el] of Object.entries(dial)) el.classList.toggle("decider", k === d.decided_by);
     val.price.textContent = `${st.rate_drift_pct >= 0 ? "+" : ""}${st.rate_drift_pct.toFixed(1)}% on the week's median`;
-    val.balance.textContent = `${st.spendable_usdz} of ${i.price_usdz} USDZ`;
+    val.balance.textContent = `${st.spendable_usdz} of ${i.cost_usdz} USDZ`;
     val.risk.textContent = st.risk === "allow" ? "Checks out" : "Held";
     val.deadline.textContent = st.due_in_days <= 1 ? "Tomorrow" : `In ${st.due_in_days} days`;
     for (const b of risk.children) b.setAttribute("aria-pressed", String(b.dataset.v === st.risk));
@@ -1243,7 +1243,7 @@ function paidFrom(id) {
 function approveBlock(item) {
   const p = item.payout, key = `pay:${item.id}`;
   return h("div", { class: "actions" },
-    h("button", { class: "btn pay", title: `From your Airwallex balance by ${p.method === "SWIFT" ? "SWIFT" : "local transfer"}, about ${money(p.price_usdz, "USD")}.`, disabled: state.busy[key], onclick: () => { paidFrom(item.id); act(key, () => approveInvoice(item.id)); } }, state.me?.passkeys ? icon("face", 18) : null, state.busy[key] ? "Paying…" : `Pay ${money(p.amount, p.currency)}`),
+    h("button", { class: "btn pay", title: `From your Airwallex balance by ${p.method === "SWIFT" ? "SWIFT" : "local transfer"}, about ${money(p.price_usdz, "USD")}.`, disabled: state.busy[key], onclick: () => act(key, async () => { await approveInvoice(item.id); paidFrom(item.id); }) }, state.me?.passkeys ? icon("face", 18) : null, state.busy[key] ? "Paying…" : `Pay ${money(p.amount, p.currency)}`),
     ignoreButton(item),
   );
 }
@@ -1251,7 +1251,7 @@ function approveBlock(item) {
 function verifyBlock(item, compact = false) {
   const p = item.payout, f = item.fields, key = `pay:${item.id}`, pc = item.penny, contact = item.contact_on_file;
   const ok = Boolean(state.verified[item.id]);
-  const pay = (extra) => { paidFrom(item.id); act(key, () => approveInvoice(item.id, extra)); };
+  const pay = (extra) => act(key, async () => { await approveInvoice(item.id, extra); paidFrom(item.id); });
   const why = sentence((p?.reasons ?? []).join("; ") || "check the bank details with the payee") + ".";
   const head = compact ? h("p", { class: "pc-why" }, icon("shield", 15), why) : h("div", { class: "alert" }, h("b", {}, icon("shield", 15), " Held:"), "\u00a0" + why);
   if (pc?.status === "confirmed") return [
@@ -1323,7 +1323,7 @@ function ignoreButton(item) {
 // ---------- the decision: what the agent chose from price, balance and risk, and why ----------
 const VERDICT = { pay: "Pay", wait: "Wait", split: "Split", hold: "Hold", reject: "Refuse" };
 const FLAP_TONE = { pay: "pay", wait: "wait", split: "split", hold: "hold", reject: "hold" };
-const DECIDED = { price: "price", deadline: "the due date", balance: "balance", risk: "risk" };
+const DECIDED = { price: "cost", deadline: "the due date", balance: "balance", risk: "risk" };
 // One sentence first (the verdict and its reason), then the three things it weighed as a short
 // list, the one that decided it marked. Proof and the what-if row sit under a hairline.
 function decisionCard(p) {
@@ -1337,9 +1337,9 @@ function decisionCard(p) {
     h("span", { class: "dc-fk" }, label, decider === key ? h("span", { class: "dc-tag" }, "Decided it") : null),
     h("span", { class: "dc-fv" }, value),
     extra ?? null);
-  const cap = Number(i.cap_usdz), price = Number(i.price_usdz);
+  const cap = Number(i.cap_usdz), price = Number(i.cost_usdz);
   const priceOk = !(cap && price > cap) && i.rate_drift_pct <= 1.5;
-  const priceText = cap ? [h("b", {}, i.price_usdz), ` of ${i.cap_usdz} USDZ`] : [h("b", {}, i.price_usdz), " USDZ"];
+  const priceText = cap ? [h("b", {}, i.cost_usdz), ` of ${i.cap_usdz} USDZ`] : [h("b", {}, i.cost_usdz), " USDZ"];
   const meter = cap ? h("span", { class: "dc-meter", "aria-hidden": "true" }, h("i", { style: `width:${Math.min(100, Math.max(2, (price / cap) * 100)).toFixed(1)}%` })) : null;
   const drift = i.rate_drift_pct > 0 ? h("span", { class: "dc-note" }, `Rate ${i.rate_drift_pct}% dearer than usual`) : null;
   const balOk = !i.spendable_usdz || Number(i.spendable_usdz) >= price;
@@ -1351,7 +1351,7 @@ function decisionCard(p) {
       sim ? h("span", { class: "dc-sim" }, "What if · nothing moves") : h("span", { class: "dc-by" }, `Decided by ${DECIDED[d.decided_by] ?? d.decided_by}`)),
     h("p", { class: "dc-reason" }, d.reason),
     h("ul", { class: "dc-factors" },
-      factor("price", "Price", priceText, priceOk, [meter, drift]),
+      factor("price", "Cost", priceText, priceOk, [meter, drift]),
       factor("balance", "Balance", i.spendable_usdz ? [h("b", {}, i.spendable_usdz), " USDZ"] : "No budget set", balOk),
       factor("risk", "Risk", i.risk === "allow" ? "Clear" : i.risk === "hold" ? "Held" : "Refused", i.risk === "allow")),
     d.tranches ? h("p", { class: "dc-note" }, d.tranches.map((t) => `${money(t.amount, p.currency)} ${t.when === "now" ? "now" : "once the agent tops up"}`).join(" · ")) : null,

@@ -193,7 +193,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     const client = createPublicClient({ transport: http(rpcUrl) });
     return async (address: string) => isAddress(address) ? Number((await client.readContract({ address: USDZ, abi: erc20Abi, functionName: "balanceOf", args: [address] })) / 10n ** 16n) : undefined;
   })() : undefined;
-  const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, rates, floatReserveMinor: policyConfig.reserveFloorMinor, onFinal: (p) => void receipts.issue(p), balanceOf });
+  const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, rates, floatReserveMinor: policyConfig.reserveFloorMinor, onFinal: (p) => void receipts.issue(p).catch((e) => emit("escalate", `Receipt for ${p.id.slice(0, 8)} failed: ${String(e).slice(0, 200)}`)), balanceOf });
   const inbox = new Inbox(store, svc);
   const keys = new AgentKeys(store);
   const platform = new Platform(store, keys, inbox, { offline: opts.offline, baseUrl: () => (process.env.PUBLIC_URL ?? "").replace(/\/$/, ""), approvalPath });
@@ -271,7 +271,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     await svc.follow().catch((e) => emit("escalate", `Following payouts failed: ${String(e).slice(0, 200)}`));
     await svc.releaseWaiting().catch((e) => emit("escalate", `Releasing waiting payouts failed: ${String(e).slice(0, 200)}`));
     await receipts.retry();
-    if (imap) await pollImap(imap, inbox);
+    if (imap) await pollImap(imap, inbox).catch((e) => emit("escalate", `Inbox read failed: ${String(e).slice(0, 200)}`));
     const mc = opts.offline || process.env.AGENTMAIL_WEBHOOK_SECRET ? undefined : mailbox.credentials();
     if (mc) agentMail ??= new AgentMailPoller(mc.apiKey, mc.inboxId);
     if (agentMail) await agentMail.poll((e) => inbox.receive(e)).catch((e) => emit("escalate", `AgentMail poll failed: ${String(e).slice(0, 200)}`));
@@ -288,6 +288,13 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   // ---------- HTTP ----------
   const app = express();
+  app.disable("x-powered-by");
+  // Nothing the service serves is meant to be framed elsewhere; MCP Apps get view.html as a resource, not an HTTP page.
+  app.use((_req, res, next) => {
+    res.setHeader("content-security-policy", "frame-ancestors 'self'");
+    res.setHeader("x-frame-options", "SAMEORIGIN");
+    next();
+  });
   // pay_to is Sayso's Metal address: what an owner names as the only payee of an agent's mandate.
   const payTo = (mode.kind === "x402" ? mode.payTo : SIM_PAY_TO) as Address;
   // Sayso's quote key signs every payable quote; agents check offers against this address.
@@ -310,6 +317,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     ["/v/:token", rateLimit("link", LIMITS.links)],
   ];
   for (const [path, limit] of limited) app.post(path, limit);
+  app.get("/v1/payouts/:id/proof", rateLimit("proof", LIMITS.preview));
   if (!opts.offline && process.env.AWX_WEBHOOK_SECRET) {
     app.use("/webhooks/airwallex", webhookRouter(process.env.AWX_WEBHOOK_SECRET, store, async (e) => {
       if (e.name.startsWith("payout.transfer.")) await svc.onTransfer(e.data.object as unknown as Transfer);
@@ -425,6 +433,18 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   // Everything below moves the business's money or shows its payees, so it needs the owner.
   const auth = createAuth({ offline: opts.offline, log: (l) => emit("observe", l), store, send: mailbox.sender() });
   app.use(auth.router);
+  // A viewer may look at every screen, but not the payee's bank identifiers: mask them to the last
+  // four wherever a response carries them. The owner's own session is untouched, and nothing stored changes.
+  const BANK_ID = /^(iban|accountNumber|account_number|sortCode|sort_code|routingNumber|routing_number)$/;
+  const maskBankIds = (v: unknown): unknown => Array.isArray(v) ? v.map(maskBankIds)
+    : v && typeof v === "object" ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, BANK_ID.test(k) && typeof x === "string" ? `••••${x.replace(/\s+/g, "").slice(-4)}` : maskBankIds(x)]))
+    : v;
+  app.use((req, res, next) => {
+    if (!auth.isViewer(req)) return next();
+    const json = res.json.bind(res);
+    res.json = ((body?: unknown) => json(maskBankIds(body))) as express.Response["json"];
+    next();
+  });
 
   // Agents connect over the hosted MCP endpoint, with a key the owner makes here or by signing
   // themselves up through auth.md, which the owner confirms with their passkey.
@@ -496,8 +516,10 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   // The inbox: forward an invoice here (from the app, or a mail hook holding INBOX_SECRET).
   app.post("/v1/inbox", auth.requireOwnerOrInboxSecret, express.json({ limit: "256kb" }), async (req, res) => {
-    const b = req.body as { message_id?: string; from?: string; subject?: string; body?: string };
-    if (!b?.body || !b.from) return void res.status(400).json({ error: "from and body are required" });
+    const b = req.body as { message_id?: unknown; from?: unknown; subject?: unknown; body?: unknown };
+    if (typeof b?.body !== "string" || !b.body || typeof b.from !== "string" || !b.from
+      || (b.message_id !== undefined && typeof b.message_id !== "string")
+      || (b.subject !== undefined && typeof b.subject !== "string")) return void res.status(400).json({ error: "from, subject, body and message_id must be strings" });
     try {
       const item = await inbox.receive({ messageId: b.message_id ?? `web-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, from: b.from, subject: b.subject ?? "(no subject)", body: b.body, receivedAt: new Date() });
       res.status(201).json(item);
@@ -602,7 +624,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   // Accounts agents may pay without the owner reviewing a first payout. Adding one needs the passkey.
   app.get("/v1/payees/trusted", auth.requireOwner, (_req, res) => res.json(svc.book.trustedPayees()));
   app.post("/v1/payees/trust", auth.requireOwner, express.json(), async (req, res) => {
-    const subject = String(req.body?.name ?? "");
+    // The passkey signs for this exact account: name|currency|bank country|bank ids, sorted. A swapped IBAN is a different subject.
+    const b = req.body ?? {}, subject = [b.name, b.currency, b.bank_country_code, ...Object.values(b.bank ?? {}).map(String).sort()].map((x) => String(x ?? "")).join("|");
     if (!(await auth.confirmed(req, req.body?.confirmation, "trust", subject))) return void res.status(401).json({ error: "Confirm with your passkey to allow agents to pay this account.", need: "passkey" });
     try { res.json(svc.trustPayee(req.body, "owner")); } catch (err) { fail(res, err); }
   });

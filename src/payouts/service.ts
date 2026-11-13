@@ -31,7 +31,7 @@ export interface Refunder {
 }
 
 export const PayoutRequest = z.object({
-  amount: z.string().regex(/^\d+(\.\d{1,2})?$/, "major units, at most 2 decimals"),
+  amount: z.string().regex(/^\d+(\.\d{1,2})?$/, "major units, at most 2 decimals").refine((a) => Number(a) > 0, "amount must be above zero"),
   currency: z.string().regex(/^[A-Z]{3}$/),
   method: z.enum(["LOCAL", "SWIFT"]).default("LOCAL"),
   payee: z.object({
@@ -643,7 +643,7 @@ export function decisionView(d: Decision) {
   return {
     verdict: d.verdict, decided_by: d.decidedBy, reason: d.reason,
     inputs: {
-      price_usdz: toMajor(d.inputs.costUsdzMinor).toFixed(2), cap_usdz: usdzOrNull(d.inputs.capUsdzMinor), rate_drift_pct: Number((d.inputs.rateDrift * 100).toFixed(2)),
+      cost_usdz: toMajor(d.inputs.costUsdzMinor).toFixed(2), cap_usdz: usdzOrNull(d.inputs.capUsdzMinor), rate_drift_pct: Number((d.inputs.rateDrift * 100).toFixed(2)),
       spendable_usdz: usdzOrNull(d.inputs.spendableUsdzMinor), risk: d.inputs.risk, due_in_days: Math.round(d.inputs.dueInDays), part_payment: d.inputs.partPaymentAllowed,
     },
     tranches: d.tranches?.map((t) => ({ amount: toMajor(t.amountMinor).toFixed(2), price_usdz: toMajor(t.costUsdzMinor).toFixed(2), when: t.when })),

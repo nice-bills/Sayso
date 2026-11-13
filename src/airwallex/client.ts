@@ -18,7 +18,8 @@ export interface AirwallexConfig {
 
 export class AirwallexError extends Error {
   constructor(readonly status: number, readonly code: string | undefined, readonly body: unknown, path: string) {
-    super(`Airwallex ${status} ${code ?? ""} on ${path}: ${JSON.stringify(body)}`);
+    // The body can echo the payee's bank details and this message ends up in a payout's public failure text.
+    super(`Airwallex ${status} ${code ?? ""} on ${path}${typeof (body as { message?: unknown })?.message === "string" ? `: ${(body as { message: string }).message.slice(0, 160)}` : ""}`);
   }
 }
 

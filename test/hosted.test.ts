@@ -67,6 +67,28 @@ describe("hosted MCP endpoint", () => {
     }
   });
 
+  it("shows the two USDZ figures on an inbox card distinctly: the quoted price (with fee) and the conversion cost the decision weighs", async () => {
+    const { cs, server, connect, call } = await setup();
+    try {
+      const agent = await connect(cs.keys.create("Card reader", null).key);
+      const { body } = await call(agent, "forward_invoice", { text: studioInvoice.body, from: studioInvoice.from });
+      const listed = await agent.callTool({ name: "list_invoices", arguments: {} });
+      const card = (listed.structuredContent as { items: Array<{ id: string; price_usdz: string; cost_usdz: string; fee_usdz: string; decision: { reason: string; inputs: { cost_usdz: string } } }> }).items.find((c) => c.id === body.invoice_id)!;
+      // Both figures are labelled, and price = cost + Sayso's fee.
+      expect(card.price_usdz).toMatch(/^\d+\.\d{2}$/);
+      expect(card.cost_usdz).toMatch(/^\d+\.\d{2}$/);
+      expect(card.fee_usdz).toMatch(/^\d+\.\d{2}$/);
+      expect(Math.round(Number(card.price_usdz) * 100)).toBe(Math.round(Number(card.cost_usdz) * 100) + Math.round(Number(card.fee_usdz) * 100));
+      expect(card.fee_usdz).not.toBe("0.00");
+      // The figure the reason quotes is the cost, not the price, and the labelled field agrees.
+      expect(card.decision.reason).toContain(card.cost_usdz);
+      expect(card.decision.inputs.cost_usdz).toBe(card.cost_usdz);
+      await agent.close();
+    } finally {
+      server.close();
+    }
+  });
+
   it("refuses missing, revoked and over-cap keys", async () => {
     const { cs, server, base, connect, call } = await setup();
     try {

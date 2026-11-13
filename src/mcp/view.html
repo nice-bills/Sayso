@@ -363,7 +363,7 @@ function renderCard(it, keep) {
 }
 
 var VERDICT = { pay: "Pay", wait: "Wait", split: "Split", hold: "Hold", reject: "Refuse" };
-var DECIDED = { price: "price", deadline: "the due date", balance: "balance", risk: "risk" };
+var DECIDED = { price: "cost", deadline: "the due date", balance: "balance", risk: "risk" };
 function flapWord(word, tone) {
   return h("span", { class: "flaps t-" + tone, role: "img", "aria-label": word }, word.toUpperCase().split("").map(function (ch, i) { return h("span", { class: "fc", "aria-hidden": "true", style: "animation-delay:" + (0.15 + i * 0.07) + "s" }, ch); }));
 }
@@ -371,7 +371,7 @@ function decision(it) {
   var d = it.decision;
   if (!d) return null;
   var i = d.inputs || {}, by = d.decided_by === "deadline" ? "price" : d.decided_by;
-  var price = Number(i.price_usdz), cap = Number(i.cap_usdz);
+  var price = Number(i.cost_usdz), cap = Number(i.cap_usdz);
   var f = function (key, label, value, ok) {
     return h("div", { class: "dc-f" + (ok ? "" : " off") + (by === key ? " by" : "") }, [
       h("span", { class: "dc-dot" }, svg(ok ? "M6 12.5l4 4L18 8.5" : "M12 7v6M12 17h.01", "#ffffff", 12, 3)),
@@ -382,7 +382,7 @@ function decision(it) {
   return h("div", { class: "dc blur d1", role: "group", "aria-label": "Decision: " + (VERDICT[d.verdict] || d.verdict) }, [
     h("div", { class: "dc-head" }, [flapWord(VERDICT[d.verdict] || d.verdict, d.verdict), h("span", { class: "dc-by" }, "Decided by " + (DECIDED[d.decided_by] || d.decided_by))]),
     h("p", { class: "dc-r" }, d.reason),
-    f("price", "Price", [h("b", {}, i.price_usdz), cap ? " of " + i.cap_usdz + " USDZ" : " USDZ"], !(cap && price > cap) && !(i.rate_drift_pct > 1.5)),
+    f("price", "Cost", [h("b", {}, i.cost_usdz), cap ? " of " + i.cap_usdz + " USDZ" : " USDZ"], !(cap && price > cap) && !(i.rate_drift_pct > 1.5)),
     f("balance", "Balance", i.spendable_usdz ? [h("b", {}, i.spendable_usdz), " USDZ"] : "No budget set", !i.spendable_usdz || Number(i.spendable_usdz) >= price),
     f("risk", "Risk", i.risk === "allow" ? "Clear" : i.risk === "hold" ? "Held" : "Refused", i.risk === "allow"),
   ]);

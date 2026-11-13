@@ -53,4 +53,51 @@ describe("Sayso service (offline)", () => {
       server.close();
     }
   });
+
+  it("rejects zero amounts and non-string inbox fields, and sends clickjacking headers", async () => {
+    const cs = await buildSayso({ offline: true });
+    const server = cs.app.listen(0);
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const owner = { authorization: `Bearer ${cs.ownerToken}`, "content-type": "application/json" };
+    const post = (path: string, body: unknown, headers: Record<string, string> = owner) =>
+      fetch(base + path, { method: "POST", headers, body: JSON.stringify(body) });
+    try {
+      // A payout of zero is not a payout: quotes, app payouts and inbox invoices all refuse it.
+      const zeroQuote = await post("/v1/quotes", {
+        amount: "0.00", currency: "EUR", reference: "zero",
+        payee: { name: "Nobody", address: { country_code: "DE", city: "Berlin", street_address: "Street 1", postcode: "10115" }, bank: { iban: "DE89370400440532013000" }, bank_country_code: "DE" },
+      }, { "content-type": "application/json" });
+      expect(zeroQuote.status).toBe(400);
+
+      const created = await post("/v1/platform/apps", { name: "Zero App", rules: "" });
+      expect(created.status).toBe(201);
+      const app = await created.json() as { api_key: string };
+      const zeroPayout = await post("/v1/platform/payouts", {
+        ref: "zero", payee_name: "Nobody", amount: "0.00", currency: "EUR", reference: "zero",
+        bank: { iban: "DE89370400440532013000" },
+      }, { authorization: `Bearer ${app.api_key}`, "content-type": "application/json" });
+      expect(zeroPayout.status).toBe(400);
+
+      const zeroInvoice = await (await post("/v1/inbox", {
+        message_id: "zero-invoice", from: "billing@example.test", subject: "Invoice",
+        body: "Pay to: Nobody Ltd\nInvoice total: EUR 0.00\nIBAN: DE89370400440532013000",
+      })).json() as { status: string; missing: string[] };
+      expect(zeroInvoice.status).toBe("needs_details");
+      expect(zeroInvoice.missing).toContain("amount");
+
+      // Non-string inbox fields are a bad request, not a 500.
+      const valid = { message_id: "bad-field", from: "billing@example.test", subject: "Invoice", body: "Pay to: Nobody Ltd\nInvoice total: EUR 10.00\nIBAN: DE89370400440532013000" };
+      for (const bad of [{ from: 1 }, { subject: 1 }, { body: {} }, { message_id: 1 }]) {
+        expect((await post("/v1/inbox", { ...valid, ...bad })).status).toBe(400);
+      }
+
+      // Clickjacking protection, without advertising Express.
+      const r = await fetch(base + "/healthz");
+      expect(r.headers.get("x-powered-by")).toBeNull();
+      expect(r.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+      expect(r.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
+    } finally {
+      server.close();
+    }
+  });
 });

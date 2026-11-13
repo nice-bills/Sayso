@@ -29,7 +29,7 @@ export interface PlatformApp {
 export const PlatformPayout = z.object({
   ref: z.string().min(1).max(100).regex(/^[\w.:-]+$/, "letters, digits and . _ : - only"),
   payee_name: z.string().min(1).max(140),
-  amount: z.string().regex(/^\d+(\.\d{1,2})?$/, "major units, at most 2 decimals"),
+  amount: z.string().regex(/^\d+(\.\d{1,2})?$/, "major units, at most 2 decimals").refine((a) => Number(a) > 0, "amount must be above zero"),
   currency: z.string().regex(/^[A-Za-z]{3}$/),
   reference: z.string().max(35).optional(),
   due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),

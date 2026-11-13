@@ -66,7 +66,11 @@ export function cardOf(item: Listed, base: string) {
     id: item.id, status: item.status, from: item.from, subject: item.subject, received_at: item.receivedAt,
     payee: p?.payee ?? f.payeeName, amount: p?.amount ?? f.amount, currency: p?.currency ?? f.currency,
     reference: p?.reference ?? f.reference, due: f.dueDate, account: account.length >= 4 ? account.slice(-4) : null,
-    reasons: p?.reasons ?? [], missing: item.missing, price_usdz: p?.price_usdz ?? null, forwarded_by: via,
+    reasons: p?.reasons ?? [], missing: item.missing,
+    // Two different USDZ figures, on purpose: price_usdz is what a buyer-agent is quoted (Sayso's fee
+    // included); cost_usdz is what the payout conversion actually costs, which is what the decision
+    // weighs — an inbox quote is paid from the float, and nobody is charged the fee on it.
+    price_usdz: p?.price_usdz ?? null, fee_usdz: p?.fee_usdz ?? null, cost_usdz: p?.decision?.inputs.cost_usdz ?? null, forwarded_by: via,
     approval_url: `${base}${approvalPath(item.id)}`,
     // What Sayso decided and why, so the card can lead with it.
     decision: p?.decision ? { verdict: p.decision.verdict, decided_by: p.decision.decided_by, reason: p.decision.reason, inputs: p.decision.inputs } : null,
@@ -273,7 +277,7 @@ export function hostedMcpRouter(d: HostedDeps): express.Router {
     // Stateless: a fresh server and transport per request, so nothing leaks between agents.
     const server = buildServer(d, agent, baseUrl(req));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-    res.on("close", () => { void transport.close(); void server.close(); });
+    res.on("close", () => { void transport.close().catch(() => {}); void server.close().catch(() => {}); });
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
   });

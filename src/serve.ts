@@ -14,7 +14,7 @@ cs.app.listen(port, async () => {
   if (offline && process.env.SEED !== "0") await seed().catch((e) => emit("escalate", `Seeding failed: ${String(e)}`));
 });
 const every = Number(process.env.TICK_MS ?? (offline ? 3000 : 30_000));
-setInterval(() => void cs.tick(), every);
+setInterval(() => void cs.tick().catch((e) => emit("escalate", `Tick failed: ${String(e).slice(0, 200)}`)), every);
 
 async function seed() {
   const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000);

@@ -34,6 +34,8 @@ export interface Auth {
   router: express.Router;
   requireOwner: (req: Request, res: Response, next: NextFunction) => void;
   isOwner: (req: Request) => boolean;
+  /** A read-only visitor session (SAYSO_VIEWER, or the offline demo). */
+  isViewer: (req: Request) => boolean;
   /** Owner, or a read-only viewer: for pure POSTs that move nothing (a what-if). */
   requireOwnerOrViewer: (req: Request, res: Response, next: NextFunction) => void;
   /** For the inbox forwarding endpoint: owner, or a mail hook holding INBOX_SECRET. */
@@ -173,7 +175,8 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
   }
 
   const confirmed = async (req: Request, confirmation: unknown, purpose: string, subject: string) => {
-    if (!hasPasskey()) return true;
+    // Live, money moves only on a passkey: an email or Google session alone is not enough.
+    if (!hasPasskey()) return opts.offline;
     const c = confirmation as { challenge_id?: unknown; response?: AuthenticationResponseJSON } | undefined;
     const ch = take(c?.challenge_id, purpose, subject);
     return Boolean(ch && c?.response && (await checkAssertion(req, c.response, ch.challenge)));
@@ -299,5 +302,5 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
     }
   });
 
-  return { ownerToken, router, requireOwner, requireOwnerOrViewer, isOwner, requireOwnerOrInboxSecret, hasPasskey, confirmed, base: baseUrl };
+  return { ownerToken, router, requireOwner, requireOwnerOrViewer, isOwner, isViewer, requireOwnerOrInboxSecret, hasPasskey, confirmed, base: baseUrl };
 }

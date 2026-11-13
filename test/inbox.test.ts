@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { heuristicRead } from "../src/agent/reader.js";
 import { extractByPattern } from "../src/inbox/extract.js";
 import { Inbox } from "../src/inbox/inbox.js";
-import { PayoutService } from "../src/payouts/service.js";
+import { PayoutService, publicView } from "../src/payouts/service.js";
 import { FakeAirwallex, FakeRefunder } from "../src/sim/offline.js";
 import { Store } from "../src/store.js";
 import { toMinor } from "../src/treasury/money.js";
@@ -75,5 +75,20 @@ describe("Inbox", () => {
     const taps = await Promise.allSettled([inbox.approve(item.id, "will"), inbox.approve(item.id, "will")]);
     expect(taps.filter((t) => t.status === "fulfilled")).toHaveLength(1);
     expect(() => inbox.ignore(item.id)).toThrow(/paying/);
+  });
+
+  it("names the decision's USDZ cost apart from the payout's fee-inclusive price", async () => {
+    const { svc } = setup();
+    // An inbox quote decides on Sayso's own float: the fee-exclusive cost, not the fee-inclusive price.
+    const p = await svc.quote({
+      amount: "140.00", currency: "EUR", reference: "INV-140", due_date: "2026-11-20",
+      payee: { name: "Kreuzberg Studio GmbH", address: { country_code: "DE", city: "Berlin", street_address: "Oranienstr. 1", postcode: "10999" }, bank: { iban: "DE89370400440532013000" }, bank_country_code: "DE" },
+    }, new Date("2026-11-13T09:00:00Z"), { fromFloat: true });
+    const view = publicView(p);
+    // The reason quotes the cost, so the decision's field must say cost, never the payout's price_usdz.
+    expect(view.decision?.inputs).toHaveProperty("cost_usdz");
+    expect(view.decision?.inputs).not.toHaveProperty("price_usdz");
+    expect(Number(view.price_usdz)).toBeGreaterThan(Number(view.decision?.inputs.cost_usdz));
+    expect(view.decision?.reason).toContain(`${view.decision?.inputs.cost_usdz} USDZ`);
   });
 });

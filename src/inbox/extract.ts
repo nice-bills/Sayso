@@ -102,7 +102,7 @@ export async function extractInvoice(e: InboundEmail): Promise<InvoiceFields & {
 export function missingFields(f: InvoiceFields): string[] {
   const missing: string[] = [];
   if (!f.payeeName) missing.push("payee name");
-  if (!f.amount) missing.push("amount");
+  if (!f.amount || !(Number(f.amount) > 0)) missing.push("amount");
   if (!f.currency) missing.push("currency");
   if (!f.bankCountry) missing.push("bank country");
   if (!f.iban && !f.accountNumber) missing.push("bank account");

@@ -22,4 +22,11 @@ describe("passkey checks bound to one action", () => {
       expect(bad.status).toBe(400);
     } finally { server.close(); }
   });
+  it("live, with no passkey enrolled, a signed-in session alone confirms nothing; offline (the demo) it still does", async () => {
+    const req = {} as express.Request;
+    const live = createAuth({ offline: false, log: () => {}, store: new Store(":memory:") });
+    expect(await live.confirmed(req, undefined, "approve", "x")).toBe(false);
+    const demo = createAuth({ offline: true, log: () => {}, store: new Store(":memory:") });
+    expect(await demo.confirmed(req, undefined, "approve", "x")).toBe(true);
+  });
 });

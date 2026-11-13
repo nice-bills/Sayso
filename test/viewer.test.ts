@@ -32,6 +32,34 @@ describe("a read-only look around, for judges", () => {
     }
   });
 
+  it("sees the payee's bank details only to their last four", async () => {
+    const cs = await buildSayso({ offline: true });
+    const server = cs.app.listen(0);
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const owner = { authorization: `Bearer ${cs.ownerToken}`, "content-type": "application/json" };
+    try {
+      const iban = "DE89370400440532013000";
+      const created = await fetch(`${base}/v1/inbox`, {
+        method: "POST", headers: owner,
+        body: JSON.stringify({ message_id: "viewer-bank", from: "billing@example.test", subject: "Invoice", body: `Pay to: Kreuzberg Studio\nInvoice total: EUR 480.00\nIBAN: ${iban}` }),
+      });
+      expect(created.status).toBe(201);
+
+      const mine = await (await fetch(`${base}/v1/inbox`, { headers: owner })).text();
+      expect(mine).toContain(iban);
+
+      const login = await fetch(`${base}/auth/viewer`, { method: "POST" });
+      const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
+      const theirs = await (await fetch(`${base}/v1/inbox`, { headers: { cookie } })).text();
+      expect(theirs).not.toContain(iban);
+      expect(theirs).toContain("••••3000");
+      // The operator's state view is masked too, since a viewer can read it.
+      expect(await (await fetch(`${base}/ops/state`, { headers: { cookie } })).text()).not.toContain(iban);
+    } finally {
+      server.close();
+    }
+  });
+
   it("is off on a live deploy unless SAYSO_VIEWER=on", async () => {
     const { createAuth } = await import("../src/auth.js");
     const { Store } = await import("../src/store.js");

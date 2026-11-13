@@ -16,7 +16,7 @@ test('live: the landing board asks the real decide() and flips to hold on a name
 
 test('live: the newest receipt hashes to what Sayso recorded, and an edited one does not', async ({ app, browser }) => {
   await app.open('/#prove');
-  await expect(browser.locator('.receipt .r-head')).toContainText(/Anchored on Metal|Simulated anchor/, { timeout: 30_000 });
+  await expect(browser.locator('.receipt .r-head')).toContainText(/Live, on Metal|Simulated anchor/, { timeout: 30_000 });
   await browser.locator('button:has-text("Hash the receipt and compare")').click();
   await expect(browser.locator('#prove .v-line')).toContainText('Matches the hash Sayso recorded');
   await browser.locator('#r-amount').fill('9999.00');
