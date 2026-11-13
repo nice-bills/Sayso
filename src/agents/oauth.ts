@@ -133,10 +133,12 @@ export function oauthRouter(d: { store: Store; keys: AgentKeys; auth: Auth }): {
     if (b.grant_type === "authorization_code") {
       const q = typeof b.code === "string" ? (db.prepare("SELECT * FROM oauth_requests WHERE code_hash = ?").get(sha(b.code)) as AuthRequest | undefined) : undefined;
       if (!q || q.status !== "allowed" || q.expires < Date.now()) { err(res, 400, "invalid_grant", "The code is unknown, used or expired."); return true; }
-      OAUTH_REQUEST.check(["allowed"], "used");
-      db.prepare("UPDATE oauth_requests SET status = 'used' WHERE id = ? AND status = 'allowed'").run(q.id);
       if (b.client_id !== q.client_id || b.redirect_uri !== q.redirect_uri) { err(res, 400, "invalid_grant", "client_id or redirect_uri doesn't match."); return true; }
       if (typeof b.code_verifier !== "string" || s256(b.code_verifier) !== q.challenge) { err(res, 400, "invalid_grant", "PKCE check failed."); return true; }
+      // Only a fully checked code is burned, and just one exchange can win.
+      OAUTH_REQUEST.check(["allowed"], "used");
+      const claimed = db.prepare("UPDATE oauth_requests SET status = 'used' WHERE id = ? AND status = 'allowed'").run(q.id);
+      if (Number(claimed.changes) !== 1) { err(res, 400, "invalid_grant", "The code is unknown, used or expired."); return true; }
       res.json(tokens(q.agent_id!, q.client_id));
       return true;
     }

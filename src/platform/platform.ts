@@ -103,6 +103,8 @@ export interface PlatformOpts { offline: boolean; baseUrl: () => string; approva
 
 export class Platform {
   private readonly send: typeof fetch;
+  /** Submits still queueing their payout, so a duplicate ref can wait for the first one. */
+  private readonly running = new Map<string, Promise<void>>();
   constructor(private readonly store: Store, private readonly keys: AgentKeys, private readonly inbox: Inbox, private readonly o: PlatformOpts) {
     this.send = o.fetch ?? fetch;
     store.db.exec(`
@@ -188,6 +190,7 @@ export class Platform {
     if (prior) {
       // The same ref with the same body is a retry. A different body would let an app swap bank details after the fact.
       if (prior.request_hash !== hash) throw new PayoutError(409, "that ref was already used for a different payout; use a new ref");
+      await this.running.get(`${app.id}:${p.ref}`); // the first submit may still be queueing it
       return { created: false, payout: this.view(app, p.ref)! };
     }
 
@@ -218,11 +221,24 @@ export class Platform {
       iban ? `IBAN: ${iban}` : `Account number: ${p.bank.account_number}${p.bank.sort_code ? `, sort code ${p.bank.sort_code}` : ""}`,
       p.context ? `\nContext from the app:\n${p.context}` : "",
     ].join("\n");
-    const item = await this.inbox.receiveFields({ messageId: inboxId, from: `${app.name} <app@platform.sayso>`, subject: `Base44 payout ${p.ref}`, body, receivedAt: new Date() }, fields);
-
-    this.store.db.prepare("INSERT INTO platform_refs (app_id, ref, inbox_id, request_hash, amount_minor, currency, created_at) VALUES (?,?,?,?,?,?,?)")
-      .run(app.id, p.ref, item.id, hash, amountMinor, currency, new Date().toISOString());
-    await this.tick(); // the first event goes out now, not at the next timer
+    // The ref row is the claim: two submits of one ref can't both queue a payout.
+    const claimed = this.store.db.prepare("INSERT OR IGNORE INTO platform_refs (app_id, ref, inbox_id, request_hash, amount_minor, currency, created_at) VALUES (?,?,?,?,?,?,?)")
+      .run(app.id, p.ref, inboxId, hash, amountMinor, currency, new Date().toISOString());
+    if (!Number(claimed.changes)) {
+      const row = this.store.db.prepare("SELECT request_hash FROM platform_refs WHERE app_id = ? AND ref = ?").get(app.id, p.ref) as { request_hash: string };
+      if (row.request_hash !== hash) throw new PayoutError(409, "that ref was already used for a different payout; use a new ref");
+      await this.running.get(`${app.id}:${p.ref}`); // the first submit may still be queueing it
+      return { created: false, payout: this.view(app, p.ref)! };
+    }
+    const work = this.inbox.receiveFields({ messageId: inboxId, from: `${app.name} <app@platform.sayso>`, subject: `Base44 payout ${p.ref}`, body, receivedAt: new Date() }, fields)
+      .then(() => this.tick()) // the first event goes out now, not at the next timer
+      .catch((err) => {
+        // Nothing was queued, so give the ref back and let the app try it again.
+        this.store.db.prepare("DELETE FROM platform_refs WHERE app_id = ? AND ref = ? AND inbox_id = ?").run(app.id, p.ref, inboxId);
+        throw err;
+      });
+    this.running.set(`${app.id}:${p.ref}`, work);
+    try { await work; } finally { this.running.delete(`${app.id}:${p.ref}`); }
     return { created: true, payout: this.view(app, p.ref)! };
   }
 

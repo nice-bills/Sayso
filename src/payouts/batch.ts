@@ -99,6 +99,7 @@ export class BatchBook {
       this.setStatus(id, ["accepted"], "quoted");
       throw err;
     }
+    this.svc.watchSettlement(id, "batch", now);
     return this.get(id)!;
   }
 

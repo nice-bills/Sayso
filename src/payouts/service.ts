@@ -18,6 +18,7 @@ import type { Store } from "../store.js";
 import type { Trail } from "../trail.js";
 import { fmt, toMajor, toMinor } from "../treasury/money.js";
 import { PayoutBook, payeeHash, PAYOUT, type Payout } from "./book.js";
+import type { BatchBook } from "./batch.js";
 import { DEFAULT_PRICING, price, transferFee, type PricingConfig } from "./pricing.js";
 import { decide, DEFAULT_DECIDE, type DecideConfig, type Decision } from "./decide.js";
 import { assess, riskFromEnv, type RiskConfig, type RiskVerdict } from "./risk.js";
@@ -93,10 +94,16 @@ export interface PayoutDeps {
   floatReserveMinor?: number;
   /** What an address holds in USDZ cents, read from Metal. Undefined when it can't be read. */
   balanceOf?: (address: string) => Promise<number | undefined>;
+  /** How long a payout or batch may sit in `accepted` before it is called stuck. Ten minutes unless set. */
+  stuckSettlingMs?: number;
+  /** The batch book, so follow() can speak for a batch stranded in `accepted` too. */
+  batches?: () => BatchBook | undefined;
 }
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
+/** How long `accepted` is normal: Metal settles in seconds, and only a restart leaves a row there. */
+const STUCK_SETTLING_MS = 10 * 60_000;
 const isAmbiguous = (err: unknown) => !(err instanceof AirwallexError) || err.status >= 500 || err.status === 408 || err.status === 429;
 
 export class PayoutService {
@@ -117,6 +124,10 @@ export class PayoutService {
     d.store.db.exec("CREATE TABLE IF NOT EXISTS split_parts (parent TEXT PRIMARY KEY, child TEXT NOT NULL UNIQUE)");
     // The fee Airwallex last charged per method and currency, read off its own transfers.
     d.store.db.exec("CREATE TABLE IF NOT EXISTS observed_fees (method TEXT NOT NULL, currency TEXT NOT NULL, fee_minor INTEGER NOT NULL, transfer_id TEXT, at TEXT NOT NULL, PRIMARY KEY (method, currency))");
+    // Accepted payouts and batches, watched until they settle, so one a restart stranded is said out loud once.
+    d.store.db.exec("CREATE TABLE IF NOT EXISTS settling (id TEXT PRIMARY KEY, kind TEXT NOT NULL, accepted_at TEXT NOT NULL, escalated_at TEXT)");
+    // A payout already accepted when this watch was added is watched from the best date the book has.
+    d.store.db.prepare("INSERT OR IGNORE INTO settling (id, kind, accepted_at) SELECT id, 'payout', created_at FROM payouts WHERE status = 'accepted'").run();
   }
 
   /** Pricing, with each transfer fee replaced by the one Airwallex actually charged last, once seen. */
@@ -360,7 +371,14 @@ export class PayoutService {
       throw new PayoutError(410, "quote expired; ask for a new one");
     }
     if (!this.book.transition(id, ["quoted"], "accepted")) throw new PayoutError(409, `quote is ${p.status}`, p);
+    this.watchSettlement(id, "payout", now);
     return this.book.get(id)!;
+  }
+
+  /** Watches a payout or batch while it settles, so one a restart stranded is said out loud in follow(). */
+  watchSettlement(id: string, kind: "payout" | "batch", at = new Date()): void {
+    this.d.store.db.prepare("INSERT INTO settling (id, kind, accepted_at) VALUES (?, ?, ?) ON CONFLICT (id) DO UPDATE SET kind = excluded.kind, accepted_at = excluded.accepted_at, escalated_at = NULL")
+      .run(id, kind, at.toISOString());
   }
 
   /** Settlement failed or the request was cancelled: the quote can be paid again until it expires. */
@@ -577,11 +595,65 @@ export class PayoutService {
     return this.fail(p, `disputed: ${reason}`, ["paid"]);
   }
 
-  /** Poll in-flight payouts (webhooks do this in production). */
+  /** Poll in-flight payouts (webhooks do this in production). Also names a payout or batch left in `accepted` too long. */
   async follow(now = new Date()): Promise<void> {
+    await this.resumeFundedBatches(now);
+    this.escalateStuck(now);
     for (const p of this.book.list(500).filter((x) => x.status === "submitted")) {
       const t = await this.d.awx.transferByRequestId(p.id).catch(() => undefined);
       if (t) await this.onTransfer(t, now);
+    }
+  }
+
+  /**
+   * A restart can stop a batch after its one payment was recorded but before every line was started.
+   * The batch row holds the payment and each line's funding id is its index under that tx, so the
+   * remaining lines can be started again: funding_tx is unique, and onFunded only moves a line once.
+   */
+  private async resumeFundedBatches(now: Date): Promise<void> {
+    const book = this.d.batches?.();
+    if (!book) return;
+    // Only a batch whose recorded payment is real has lines worth starting: funded means the payment settled.
+    const rows = this.d.store.db.prepare("SELECT id FROM batches b WHERE b.status = 'funded' AND b.funding_tx IS NOT NULL AND EXISTS (SELECT 1 FROM payouts p WHERE p.status = 'accepted' AND instr(b.payout_ids, p.id) > 0)").all() as Array<{ id: string }>;
+    for (const row of rows) {
+      const b = book.get(row.id);
+      // Without the payer the lines could not be refunded if they failed, so say nothing rather than guess.
+      if (!b?.fundingTx || !b.buyer) continue;
+      const left = b.payoutIds.filter((pid) => this.book.get(pid)?.status === "accepted");
+      if (!left.length) continue;
+      emit("observe", `Batch ${b.id.slice(0, 8)} was paid before Sayso restarted; starting the ${left.length} lines it had not reached`, { batch: b.id }, b.fundingTx);
+      for (const [n, pid] of b.payoutIds.entries()) {
+        if (!left.includes(pid)) continue;
+        await this.onFunded(pid, b.buyer, `${b.fundingTx}#${n + 1}`, now)
+          .catch((e) => emit("escalate", `Batch line ${pid.slice(0, 8)} could not be started from its recorded payment: ${String(e).slice(0, 200)}`, { payout: pid }));
+      }
+    }
+  }
+
+  /**
+   * Says out loud, once, that a payout or batch has been settling on Metal too long. Nothing moves: the
+   * funding transaction was only ever in memory, so neither paying nor refunding it can be a safe guess.
+   */
+  private escalateStuck(now: Date): void {
+    const cutoff = new Date(now.getTime() - (this.d.stuckSettlingMs ?? STUCK_SETTLING_MS)).toISOString();
+    const rows = this.d.store.db.prepare("SELECT id, kind, accepted_at FROM settling WHERE escalated_at IS NULL AND accepted_at <= ? ORDER BY accepted_at").all(cutoff) as Array<{ id: string; kind: "payout" | "batch"; accepted_at: string }>;
+    for (const row of rows) {
+      // Without a batch book there is nothing to look a batch up in, so leave its watch for a process that has one.
+      if (row.kind === "batch" && !this.d.batches) continue;
+      const p = row.kind === "payout" ? this.book.get(row.id) : undefined;
+      const b = row.kind === "batch" ? this.d.batches?.()?.get(row.id) : undefined;
+      // It moved on (or was released): only a row still settling needs saying.
+      if ((p?.status ?? b?.status) !== "accepted") { this.d.store.db.prepare("DELETE FROM settling WHERE id = ?").run(row.id); continue; }
+      const marked = this.d.store.db.prepare("UPDATE settling SET escalated_at = ? WHERE id = ? AND escalated_at IS NULL").run(now.toISOString(), row.id);
+      if (Number(marked.changes) !== 1) continue;
+      const ageMinutes = Math.max(1, Math.round((now.getTime() - new Date(row.accepted_at).getTime()) / 60_000));
+      if (p) {
+        emit("escalate", `Payout ${p.id.slice(0, 8)} has been settling on Metal for ${ageMinutes} minutes and no funding transaction is recorded, so it can be neither sent nor refunded safely`, { payout: p.id, age_minutes: ageMinutes });
+        this.d.trail?.add(p.id, "escalate", `Still settling on Metal after ${ageMinutes} minutes with no funding transaction recorded; a person has to check the payment`, { age_minutes: ageMinutes }, undefined, now);
+      } else if (b) {
+        emit("escalate", `Batch ${b.id.slice(0, 8)} has been settling on Metal for ${ageMinutes} minutes and no funding transaction is recorded, so none of its payouts started`, { batch: b.id, age_minutes: ageMinutes });
+        for (const pid of b.payoutIds) if (this.book.get(pid)?.status === "accepted") this.d.trail?.add(pid, "escalate", `Still settling on Metal after ${ageMinutes} minutes with no funding transaction recorded; a person has to check the payment`, { batch: b.id, age_minutes: ageMinutes }, undefined, now);
+      }
     }
   }
 

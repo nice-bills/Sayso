@@ -151,7 +151,13 @@ function addEvent(e) {
   state.events.push(e);
   if (state.events.length > 200) state.events.shift();
   clearTimeout(drawSoon);
-  drawSoon = setTimeout(render, 120);
+  // An event is only shown in the payments tab's feed, which sits there whether it is open or
+  // folded, so swap the feed in place; repainting the whole app for one that isn't visible is
+  // what made the decisions pane and the payments list flicker as data came in.
+  drawSoon = setTimeout(() => {
+    const box = document.querySelector(".happening"), head = box?.querySelector("summary");
+    if (box && head) { staggered = 0; box.replaceChildren(head, activityFeed()); }
+  }, 120);
 }
 
 function toast(msg) {

@@ -258,6 +258,11 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
     const now = Date.now();
     while (sent.length && sent[0]! < now - EMAIL_LINK_MS) sent.shift();
     if (!ownerEmail || email !== ownerEmail || sent.length >= 5) return void reply();
+    // A live server with no public URL would put the caller's Host header in an emailed link, so refuse to send it.
+    if (!opts.offline && !publicBase()) {
+      opts.log("Can't email a sign-in link: set PUBLIC_URL (or RENDER_EXTERNAL_URL) so the link doesn't come from the caller's Host header");
+      return void reply();
+    }
     sent.push(now);
     const token = randomBytes(24).toString("base64url");
     db.prepare("INSERT INTO owner_email_links (token_hash, expires) VALUES (?, ?)").run(sha(token), now + EMAIL_LINK_MS);

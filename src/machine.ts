@@ -2,6 +2,8 @@
 // The tables are the source of truth for the types, for the checks on every state change, and for what
 // agents and apps are told about states (GET /v1/machines).
 
+import { emit } from "./events.js";
+
 /** Who has to act before this state can change. "nobody" means the state is final. */
 export type WaitingOn = "agent" | "owner" | "payee" | "bank" | "sayso" | "nobody";
 
@@ -44,6 +46,7 @@ export function machine<const T extends Record<string, StateInfo<string>>>(name:
       const bad = from.filter((f) => !can(f, to));
       if (!bad.length) return;
       const message = `${name}: ${bad.join(", ")} -> ${to} is not a declared move`;
+      emit("escalate", `A record tried a move its table doesn't allow: ${message}`, { machine: name, from: bad, to });
       // shortcut: an undeclared move only fails under test and is logged in production, so a gap in a table cannot stop a payout; throw everywhere once the tables have run in production for a while.
       if (process.env.VITEST) throw new Error(message);
       console.error(`[machine] ${message}`);

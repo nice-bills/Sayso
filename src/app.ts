@@ -193,7 +193,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     const client = createPublicClient({ transport: http(rpcUrl) });
     return async (address: string) => isAddress(address) ? Number((await client.readContract({ address: USDZ, abi: erc20Abi, functionName: "balanceOf", args: [address] })) / 10n ** 16n) : undefined;
   })() : undefined;
-  const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, rates, floatReserveMinor: policyConfig.reserveFloorMinor, onFinal: (p) => void receipts.issue(p).catch((e) => emit("escalate", `Receipt for ${p.id.slice(0, 8)} failed: ${String(e).slice(0, 200)}`)), balanceOf });
+  const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, rates, floatReserveMinor: policyConfig.reserveFloorMinor, onFinal: (p) => void receipts.issue(p).catch((e) => emit("escalate", `Receipt for ${p.id.slice(0, 8)} failed: ${String(e).slice(0, 200)}`)), balanceOf, batches: () => batches });
   const inbox = new Inbox(store, svc);
   const keys = new AgentKeys(store);
   const platform = new Platform(store, keys, inbox, { offline: opts.offline, baseUrl: () => (process.env.PUBLIC_URL ?? "").replace(/\/$/, ""), approvalPath });

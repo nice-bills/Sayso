@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { heuristicRead } from "../src/agent/reader.js";
 import { AirwallexError } from "../src/airwallex/client.js";
 import { PayoutService, type PayoutRequest } from "../src/payouts/service.js";
+import { BatchBook } from "../src/payouts/batch.js";
+import { recentEvents } from "../src/events.js";
+import { Trail } from "../src/trail.js";
 import { price } from "../src/payouts/pricing.js";
 import { assess, DEFAULT_RISK, riskFromEnv } from "../src/payouts/risk.js";
 import { FakeAirwallex, FakeRefunder } from "../src/sim/offline.js";
@@ -19,8 +22,9 @@ function setup(opening = { USD: toMinor(5000), EUR: toMinor(100) }) {
   const awx = new FakeAirwallex(opening);
   const refunder = new FakeRefunder();
   const store = new Store(":memory:");
-  const svc = new PayoutService({ awx, store, refunder, read: async (t) => heuristicRead(t) });
-  return { awx, refunder, store, svc };
+  const trail = new Trail(store);
+  const svc = new PayoutService({ awx, store, refunder, trail, read: async (t) => heuristicRead(t) });
+  return { awx, refunder, store, svc, trail };
 }
 
 async function payThrough(svc: PayoutService, id: string) {
@@ -233,5 +237,73 @@ describe("PayoutService review", () => {
     const q = await svc.quote(req({ amount: "900.00" }));
     expect(q.status).toBe("needs_review");
     expect(q.reasons).toEqual(["large first payout to a new account"]);
+  });
+});
+
+describe("a payout stranded in accepted", () => {
+  const now = new Date("2026-11-13T12:00:00Z");
+  const at = (minutes: number) => new Date(now.getTime() - minutes * 60_000);
+  const escalations = (id: string) => recentEvents().filter((e) => e.phase === "escalate" && e.detail?.payout === id);
+  const withBatches = () => {
+    const store = new Store(":memory:");
+    let book: BatchBook | undefined;
+    const svc = new PayoutService({ awx: new FakeAirwallex({ USD: toMinor(5000), EUR: toMinor(100) }), store, refunder: new FakeRefunder(), read: async (t) => heuristicRead(t), batches: () => book });
+    book = new BatchBook(store, svc);
+    return { store, svc, book };
+  };
+
+  it("says so once when it has been settling for 11 minutes, and changes nothing", async () => {
+    const { svc, refunder, trail } = setup();
+    const q = await svc.quote(req(), at(12));
+    svc.accept(q.id, at(11));
+    for (let i = 0; i < 3; i++) await svc.follow(now);
+    expect(escalations(q.id)).toHaveLength(1);
+    expect(escalations(q.id)[0]!.title).toContain("11 minutes");
+    expect(svc.book.get(q.id)!.status).toBe("accepted");
+    expect(svc.book.get(q.id)!.fundingTx).toBeNull();
+    expect(refunder.refunds).toHaveLength(0);
+    expect(trail.for(q.id).filter((s) => s.kind === "escalate")).toHaveLength(1);
+    expect(trail.for(q.id).at(-1)!.title).toContain("11 minutes");
+  });
+
+  it("leaves a payout accepted a minute ago alone", async () => {
+    const { svc, refunder } = setup();
+    const q = await svc.quote(req(), at(2));
+    svc.accept(q.id, at(1));
+    await svc.follow(now);
+    await svc.follow(now);
+    expect(escalations(q.id)).toHaveLength(0);
+    expect(svc.book.get(q.id)!.status).toBe("accepted");
+    expect(refunder.refunds).toHaveLength(0);
+  });
+
+  it("says so once for a batch stranded the same way", async () => {
+    const { svc, book } = withBatches();
+    const b = await book.create([req()], "Batch payout", at(12));
+    book.accept(b.id, at(11));
+    for (let i = 0; i < 3; i++) await svc.follow(now);
+    const said = recentEvents().filter((e) => e.phase === "escalate" && e.detail?.batch === b.id);
+    expect(said).toHaveLength(1);
+    expect(said[0]!.title).toContain("11 minutes");
+    expect(book.get(b.id)!.status).toBe("accepted");
+    expect(svc.book.get(b.payoutIds[0]!)!.status).toBe("accepted");
+  });
+
+  it("starts the rest of a batch whose one payment was recorded before a restart", async () => {
+    const { store, svc, book } = withBatches();
+    const b = await book.create([req()], "Batch payout", at(12));
+    book.accept(b.id, at(11));
+    // The crash: the batch recorded its one payment, then the process died before the line loop ran.
+    store.db.prepare("UPDATE batches SET status = 'funded', buyer = ?, funding_tx = ? WHERE id = ?").run(BUYER, "0xfundbatch", b.id);
+    await svc.follow(now);
+    const line = svc.book.get(b.payoutIds[0]!)!;
+    expect(line.status).toBe("submitted");
+    expect(line.fundingTx).toBe("0xfundbatch#1");
+    expect(line.buyer).toBe(BUYER);
+    // A second tick finds nothing left to start, so no line is started twice.
+    const transferId = line.transferId;
+    await svc.follow(now);
+    expect(svc.book.get(b.payoutIds[0]!)!.transferId).toBe(transferId);
+    expect(escalations(line.id)).toHaveLength(0);
   });
 });

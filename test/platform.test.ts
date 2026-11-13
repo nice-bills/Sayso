@@ -2,8 +2,15 @@ import express from "express";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import { buildSayso } from "../src/app.js";
-import { checkWebhookUrl, signWebhook, verifyWebhook } from "../src/platform/platform.js";
+import { AgentKeys } from "../src/agents/keys.js";
+import { Inbox } from "../src/inbox/inbox.js";
+import { Platform, checkWebhookUrl, signWebhook, verifyWebhook } from "../src/platform/platform.js";
 import { checkRules, describeRules, NO_RULES, parseRulesByPattern, RulesError, compileRules } from "../src/platform/rules.js";
+import { PayoutService } from "../src/payouts/service.js";
+import { FakeAirwallex, FakeRefunder } from "../src/sim/offline.js";
+import { Store } from "../src/store.js";
+import { toMinor } from "../src/treasury/money.js";
+import { heuristicRead } from "../src/agent/reader.js";
 
 const OWNER = { authorization: "Bearer sayso-demo", "content-type": "application/json" };
 const payout = (over: Record<string, unknown> = {}) => ({
@@ -109,4 +116,21 @@ describe("an app paying through Sayso", () => {
       server.close(); hook.close();
     }
   }, 30_000);
+
+  it("queues one payout when two identical submits race for the same ref", async () => {
+    const store = new Store(":memory:");
+    const keys = new AgentKeys(store);
+    const svc = new PayoutService({ awx: new FakeAirwallex({ USD: toMinor(5000), EUR: toMinor(100) }), store, refunder: new FakeRefunder(), read: async (t) => heuristicRead(t) });
+    const inbox = new Inbox(store, svc);
+    const platform = new Platform(store, keys, inbox, { offline: true, baseUrl: () => "http://sayso.test", approvalPath: (id) => `/approve/${id}` });
+    const { app } = await platform.createApp("Race Co", null, "");
+    const input = payout({ ref: "race-1" });
+    // Started in the same tick, so both pass the "has this ref been seen?" read before either queues it.
+    const [a, b] = await Promise.all([platform.submit(app, input), platform.submit(app, input)]);
+    expect([a.created, b.created].sort()).toEqual([false, true]);
+    // Both answers name the payout the first one queued, and only one reached the inbox.
+    expect(a.payout?.payout_id).toBeTruthy();
+    expect(a.payout?.payout_id).toBe(b.payout?.payout_id);
+    expect(inbox.list().filter((i) => i.id.startsWith("b44:"))).toHaveLength(1);
+  });
 });

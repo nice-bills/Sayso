@@ -40,11 +40,16 @@ describe("Sign in with Sayso (MCP authorization for chat apps)", () => {
       expect(back.searchParams.get("state")).toBe("xyz");
       const code = back.searchParams.get("code")!;
 
-      // A wrong verifier fails, and burns the code.
+      // A wrong verifier or client fails without burning the code, so seeing a code can't block the real app.
       const bad = await fetch(`${base}/oauth2/token`, form({ grant_type: "authorization_code", code, client_id: reg.client_id, redirect_uri: redirect, code_verifier: "nope" }));
       expect(bad.status).toBe(400);
-      const again = await fetch(`${base}/oauth2/token`, form({ grant_type: "authorization_code", code, client_id: reg.client_id, redirect_uri: redirect, code_verifier: verifier }));
-      expect(again.status).toBe(400);
+      const wrongClient = await fetch(`${base}/oauth2/token`, form({ grant_type: "authorization_code", code, client_id: "sayso_someone_else", redirect_uri: redirect, code_verifier: verifier }));
+      expect(wrongClient.status).toBe(400);
+      // The real exchange still works, exactly once.
+      const exchanged = await fetch(`${base}/oauth2/token`, form({ grant_type: "authorization_code", code, client_id: reg.client_id, redirect_uri: redirect, code_verifier: verifier }));
+      expect(exchanged.status).toBe(200);
+      const replay = await fetch(`${base}/oauth2/token`, form({ grant_type: "authorization_code", code, client_id: reg.client_id, redirect_uri: redirect, code_verifier: verifier }));
+      expect(replay.status).toBe(400);
 
       // The proper run: a fresh request, the right verifier, then MCP with the token.
       const auth2 = await fetch(`${base}/oauth2/authorize?${new URLSearchParams({ response_type: "code", client_id: reg.client_id, redirect_uri: redirect, code_challenge: challenge, code_challenge_method: "S256" })}`, { redirect: "manual" });

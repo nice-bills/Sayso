@@ -54,6 +54,18 @@ describe("machine tables", () => {
     expect(() => local.check(["a", "c"], "b")).toThrow("local: c -> b is not a declared move");
   });
 
+  it("escalates an undeclared move as well as throwing under vitest", () => {
+    const local = machine("local-escalate", ["a"], {
+      a: { means: "A", waitingOn: "agent", to: ["b"] },
+      b: { means: "B", waitingOn: "nobody", to: [] },
+    });
+    expect(() => local.check(["b"], "a")).toThrow("local-escalate: b -> a is not a declared move");
+    const event = recentEvents().at(-1)!;
+    expect(event.phase).toBe("escalate");
+    expect(event.title).toContain("local-escalate: b -> a is not a declared move");
+    expect(event.detail).toMatchObject({ machine: "local-escalate", from: ["b"], to: "a" });
+  });
+
   it("knows the payout moves the old picture in book.ts left out", () => {
     expect(PAYOUT.can("paid", "failed")).toBe(true);
     expect(PAYOUT.can("paid", "quoted")).toBe(false);
