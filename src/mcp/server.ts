@@ -18,7 +18,8 @@ import { createMetalPaymentClient, usdzBaseUnits } from "@metalntwx/metal-pay";
 import { createMandatePaymentClient, p256DigestSigner, parseCredential, privateKeyHex, type Es256Key } from "@metalntwx/metal-pay/mandates";
 import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
-import { invoiceShape, toRequest, type Invoice } from "./tools.js";
+import { invoiceShape, toRequest, usdzLimit, type Invoice } from "./tools.js";
+import { failed, SaysoClient, type Failure, type PayOutcome, type Reply } from "./sayso.js";
 import { disputeDigest, disputeMessage } from "../payouts/dispute-auth.js";
 import { verifyOffer, type SignedOffer } from "../payouts/offer.js";
 import { PAYOUT } from "../payouts/book.js";
@@ -67,33 +68,44 @@ async function signDispute(payoutId: string, claim: string): Promise<{ signature
 
 const text = (o: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(o, null, 2) }] });
 
+/** A call that could not be completed. isError is set so the agent does not read it as a result. */
+const failure = (f: Failure, extra: Record<string, unknown> = {}) => ({
+  isError: true as const,
+  content: [{ type: "text" as const, text: JSON.stringify({ ...extra, ...f }, null, 2) }],
+});
+
+const unexpected = (what: string, err: unknown): Failure =>
+  failed(`${what}: ${err instanceof Error ? err.message : String(err)}`, { retryable: true, next: "Retry in about a minute." });
+
+const api = new SaysoClient({ base, payingFetch });
+
 type Decision = { verdict: "pay" | "wait" | "split" | "hold" | "reject"; decided_by: string; reason: string };
 
 type Quote = { id: string; status: string; amount: string; currency: string; reference: string; price_usdz: string; pay_url: string | null; reasons: string[]; decision?: Decision | null; offer?: SignedOffer | null };
 
-async function quote(i: Invoice, limits: { max_usdz?: string; spendable_usdz?: string } = {}) {
+async function quote(i: Invoice, limits: { max_usdz?: string; spendable_usdz?: string } = {}): Promise<Reply<Quote>> {
   // Name the paying address, so Sayso checks what it really holds on Metal, not just what the agent says.
   const key = process.env.SAYSO_BUYER_KEY as `0x${string}` | undefined;
   const buyer = simPayer ?? (key ? privateKeyToAccount(key).address : undefined);
-  const res = await fetch(`${base}/v1/quotes`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...toRequest(i), ...limits, ...(buyer ? { buyer } : {}) }) });
-  return (await res.json()) as Quote;
+  return api.post<Quote>("/v1/quotes", { ...toRequest(i), ...limits, ...(buyer ? { buyer } : {}) }, "quoting the payout");
 }
 
-// Sayso's published quote key and payee address, read once.
-let published: Promise<{ quote_signer: `0x${string}`; pay_to: string }> | undefined;
-const healthz = () => (published ??= fetch(`${base}/healthz`).then((r) => r.json() as Promise<{ quote_signer: `0x${string}`; pay_to: string }>));
+/** What is wrong with a signed offer, and whether waiting would fix it. */
+type Doubt = { reason: string; retryable: boolean };
 
 /** Before paying: Sayso's own key signed exactly this invoice, at this price, payable to its published address. Returns why not. */
-async function checkOffer(q: Quote, i: Invoice): Promise<string | undefined> {
-  if (!q.offer) return "Sayso sent no signed offer with this quote";
-  const h = await healthz();
-  if (!(await verifyOffer(q.offer, h.quote_signer))) return "the offer is not signed by Sayso's published quote key";
+async function checkOffer(q: Quote, i: Invoice): Promise<Doubt | undefined> {
+  if (!q.offer) return { reason: "Sayso sent no signed offer with this quote", retryable: false };
+  const h = await api.healthz();
+  if (!h.ok) return { reason: `couldn't check Sayso's signing key: ${h.error}`, retryable: true };
+  const published = h.data;
+  if (!(await verifyOffer(q.offer, published.quote_signer))) return { reason: "the offer is not signed by Sayso's published quote key", retryable: false };
   const t = q.offer.terms;
-  if (t.quote !== q.id) return "the signed offer is for another quote";
-  if ((Number(t.priceUsdzMinor) / 100).toFixed(2) !== q.price_usdz) return `the signed price (${t.priceUsdzMinor} cents) is not the quoted price ${q.price_usdz}`;
-  if (t.payTo.toLowerCase() !== h.pay_to.toLowerCase()) return "the signed offer pays an address Sayso doesn't publish";
-  if (t.currency !== i.currency.toUpperCase() || (q.decision?.verdict !== "split" && Number(t.amountMinor) !== Math.round(Number(i.amount) * 100))) return "the signed offer is for a different amount or currency than this invoice";
-  if (Number(t.expiresAt) * 1000 < Date.now()) return "the signed offer has expired";
+  if (t.quote !== q.id) return { reason: "the signed offer is for another quote", retryable: false };
+  if ((Number(t.priceUsdzMinor) / 100).toFixed(2) !== q.price_usdz) return { reason: `the signed price (${t.priceUsdzMinor} cents) is not the quoted price ${q.price_usdz}`, retryable: false };
+  if (t.payTo.toLowerCase() !== published.pay_to.toLowerCase()) return { reason: "the signed offer pays an address Sayso doesn't publish", retryable: false };
+  if (t.currency !== i.currency.toUpperCase() || (q.decision?.verdict !== "split" && Number(t.amountMinor) !== Math.round(Number(i.amount) * 100))) return { reason: "the signed offer is for a different amount or currency than this invoice", retryable: false };
+  if (Number(t.expiresAt) * 1000 < Date.now()) return { reason: "the signed offer has expired", retryable: false };
   return undefined;
 }
 
@@ -114,119 +126,163 @@ function presented(): string | undefined {
   }
 }
 
-async function pay(id: string) {
-  try {
-    const body = presented();
-    const res = await payingFetch()(`${base}/v1/payouts/${id}/pay`, { method: "POST", signal: AbortSignal.timeout(90_000), ...(body ? { body, headers: { "content-type": "application/json" } } : {}) });
-    return { http_status: res.status, ...((await res.json().catch(() => ({}))) as object) };
-  } catch (err) {
-    // A timeout is unconfirmed, not failed: the payment may have settled. Look it up before anyone pays again.
-    const status = await fetch(`${base}/v1/payouts/${id}`).then((r) => (r.ok ? (r.json() as Promise<{ status: string; funding_tx: string | null }>) : undefined)).catch(() => undefined);
-    const settled = status && !["quoted", "expired", "rejected", "needs_review"].includes(status.status);
-    return settled
-      ? { http_status: 200, unconfirmed_then_found: true, status: status.status, funding_tx: status.funding_tx }
-      : { http_status: 504, unconfirmed: true, error: `No answer from Sayso (${String(err).slice(0, 120)}). Check payout_status for ${id} before paying again; the same quote can't be paid twice.` };
-  }
+/** Both pay tools answer the same way, including an unconfirmed payment that must be looked up, not retried. */
+function payReply(q: Quote, r: PayOutcome) {
+  const split = q.decision?.verdict === "split" && r.http_status < 400;
+  return text({
+    paid: r.http_status < 400, quote_id: q.id, decision: q.decision, ...r,
+    ...(split ? { remainder: `Only part of the invoice was paid. After your next top-up, call pay_remainder with payout_id ${q.id} to pay the rest.` } : {}),
+  });
 }
 
-const server = new McpServer({ name: "sayso", version: "0.1.0" });
+const server = new McpServer({ name: "sayso", version: "0.1.0" }, {
+  instructions: [
+    "Sayso pays real-world invoices in the payee's own currency through Airwallex. Agents pay Sayso in USDZ on Metal.",
+    "Flow: quote_payout (free) to see the price and Sayso's decision, then pay_invoice (or pay_batch), then payout_status until final is true.",
+    "Units: amount, currency, and every amount inside bank details are in the payee's local currency (e.g. EUR), never USDZ. max_usdz and every *_usdz field are USDZ (the agent's money), as a decimal string.",
+    "Required invoice fields: amount, currency, payee_name, payee_country, payee_city, payee_street, payee_postcode, bank_country, bank, reference. payee_state is required for US and Canadian payees. method, payee_type, invoice_text, due_date and part_payment are optional.",
+    "A quote expires. Never pay the same invoice twice: if a pay times out or its answer is unclear, call payout_status first. If it is still quoted, pay that same quote with pay_quote; if it is paid or submitted, it went through.",
+    "payout_status returns status (a machine state), status_means (plain English), waiting_on (agent, owner, bank, sayso or nobody) and final. Stop polling when final is true.",
+    "Errors say whether they are retryable. A Sayso that is restarting answers HTTP 502: wait about a minute and retry; nothing was charged.",
+  ].join("\n"),
+});
 
 server.registerTool("quote_payout", {
-  description: "Price a real-world payout in local currency (free). Returns the USDZ price, or why Sayso will not pay it as asked.",
+  description: "Price a real-world payout in the payee's local currency, free and without paying anything. Returns the USDZ price, a pay_url, Sayso's decision (pay, wait, split, hold or reject) and why. Required: amount, currency, payee_name, payee_country, payee_city, payee_street, payee_postcode, bank_country, bank, reference; payee_state is required for US and Canadian payees.",
   inputSchema: invoiceShape,
-}, async (i) => text(await quote(i as Invoice)));
+}, async (i) => {
+  const q = await quote(i as Invoice);
+  return q.ok ? text(q.data) : failure(q, { paid: false });
+});
 
 server.registerTool("pay_invoice", {
-  description: "Pay a real-world invoice in local currency through Airwallex, paying Sayso in USDZ over x402 on Metal. Quotes first and pays only if the price is at most max_usdz. Suspicious invoices are held for a human, and failed payouts are refunded in full.",
-  inputSchema: { ...invoiceShape, max_usdz: z.string().describe("The most this agent will pay in USDZ, fees included") },
+  description: "Pay a real-world invoice in the payee's local currency through Airwallex, paying Sayso in USDZ over x402 on Metal. Quotes first and pays only if the price is at most max_usdz (USDZ, fees included); amount and currency are the payee's local currency. Suspicious invoices are held for a human, and a failed payout is refunded in full. If this times out or the answer is unclear, call payout_status before paying again: the payment may have gone through and a quote can't be paid twice.",
+  inputSchema: { ...invoiceShape, max_usdz: usdzLimit("The most this agent will pay, in USDZ (not the payee's currency)") },
 }, async (i) => {
-  const q = await quote(i as Invoice, { max_usdz: i.max_usdz, spendable_usdz: process.env.SAYSO_SPENDABLE_USDZ });
-  if (q.status !== "quoted" || !q.pay_url) return text({ paid: false, ...q });
+  const q = await quote(i as Invoice, { max_usdz: String(i.max_usdz), spendable_usdz: process.env.SAYSO_SPENDABLE_USDZ });
+  if (!q.ok) return failure(q, { paid: false });
+  const quoted = q.data;
+  if (quoted.status !== "quoted" || !quoted.pay_url) return text({ paid: false, ...quoted });
   // Waiting for funds means there is nothing to pay with yet; ask again after the next top-up.
-  if (q.decision?.verdict === "wait" && q.decision.decided_by === "balance") return text({ paid: false, decision: q.decision, quote: q });
-  if (Number(q.price_usdz) > Number(i.max_usdz)) return text({ paid: false, reason: `price ${q.price_usdz} USDZ is above max_usdz ${i.max_usdz}`, quote: q });
-  const bad = await checkOffer(q, i as Invoice);
-  if (bad) return text({ paid: false, reason: `Not paying: ${bad}`, quote: q });
+  if (quoted.decision?.verdict === "wait" && quoted.decision.decided_by === "balance") return text({ paid: false, decision: quoted.decision, quote: quoted });
+  if (Number(quoted.price_usdz) > Number(i.max_usdz)) return text({ paid: false, reason: `price ${quoted.price_usdz} USDZ is above max_usdz ${i.max_usdz}`, quote: quoted });
+  const bad = await checkOffer(quoted, i as Invoice);
+  if (bad) return text({ paid: false, reason: `Not paying: ${bad.reason}`, ...(bad.retryable ? { retryable: true, next: "Nothing was charged. Retry in about a minute." } : {}), quote: quoted });
   // A price wait is still paid now: the USDZ waits in escrow at this price and Airwallex pays once the rate is back in band.
-  const r = await pay(q.id);
-  const split = q.decision?.verdict === "split" && r.http_status < 400;
-  return text({ paid: r.http_status < 400, quote_id: q.id, decision: q.decision, ...r,
-    ...(split ? { remainder: `Only part of the invoice was paid. After your next top-up, call pay_remainder with payout_id ${q.id} to pay the rest.` } : {}) });
+  let body: string | undefined;
+  try {
+    body = presented();
+  } catch (err) {
+    return failure(unexpected("reading the payment credential", err), { paid: false });
+  }
+  return payReply(quoted, await api.pay(quoted.id, body));
 });
 
 server.registerTool("pay_remainder", {
-  description: "Pay the rest of an invoice Sayso split because the agent's budget was short. Quotes what is left, to the same payee, checks Sayso's signed offer, and pays it if it is at most max_usdz.",
-  inputSchema: { payout_id: z.string().describe("The first part's payout id"), max_usdz: z.string() },
+  description: "Pay the rest of an invoice Sayso split because the agent's budget was short. Pass the first part's payout_id; Sayso quotes what is left to the same payee, checks its signed offer, and pays it if it is at most max_usdz (USDZ, not the payee's currency).",
+  inputSchema: {
+    payout_id: z.string().describe("The first part's payout id, from pay_invoice's reply when Sayso decided to split"),
+    max_usdz: usdzLimit("The most this agent will pay for the remainder, in USDZ (not the payee's currency)"),
+  },
 }, async ({ payout_id, max_usdz }) => {
-  const first = (await (await fetch(`${base}/v1/payouts/${payout_id}`)).json()) as { amount: string; currency: string; remainder?: { amount: string } };
-  if (!first.remainder) return text({ paid: false, reason: "that payout was not split; nothing is left to pay" });
-  const res = await fetch(`${base}/v1/payouts/${payout_id}/remainder`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-  const q = (await res.json()) as Quote & { error?: string };
+  const first = await api.get<{ amount: string; currency: string; remainder?: { amount: string } }>(`/v1/payouts/${encodeURIComponent(payout_id)}`, "reading the split payout");
+  if (!first.ok) return failure(first, { paid: false });
+  if (!first.data.remainder) return text({ paid: false, reason: "that payout was not split; nothing is left to pay" });
+  const rest = await api.post<Quote & { error?: string }>(`/v1/payouts/${encodeURIComponent(payout_id)}/remainder`, {}, "quoting the rest");
+  if (!rest.ok) return failure(rest, { paid: false });
+  const q = rest.data;
   if (!q.pay_url) return text({ paid: false, ...q });
   if (Number(q.price_usdz) > Number(max_usdz)) return text({ paid: false, reason: `price ${q.price_usdz} USDZ is above max_usdz ${max_usdz}`, quote: q });
-  const bad = await checkOffer(q, { amount: first.remainder.amount, currency: first.currency } as Invoice);
-  if (bad) return text({ paid: false, reason: `Not paying: ${bad}`, quote: q });
-  const r = await pay(q.id);
-  return text({ paid: r.http_status < 400, quote_id: q.id, decision: q.decision, ...r });
+  const bad = await checkOffer(q, { amount: first.data.remainder.amount, currency: first.data.currency } as Invoice);
+  if (bad) return text({ paid: false, reason: `Not paying: ${bad.reason}`, ...(bad.retryable ? { retryable: true, next: "Nothing was charged. Retry in about a minute." } : {}), quote: q });
+  return payReply(q, await api.pay(q.id));
 });
 
 server.registerTool("pay_batch", {
-  description: "Pay many people at once (e.g. a marketplace's sellers or a team of contractors) with ONE USDZ payment over x402. Each line is checked like a single payout; lines Sayso won't pay are set aside with reasons and not charged. Pays only if the batch price is at most max_usdz. A line that bounces is refunded on its own.",
-  inputSchema: { items: z.array(z.object(invoiceShape)).min(1).max(100), reference: z.string().optional(), max_usdz: z.string().describe("The most this agent will pay for the whole batch, fees included") },
+  description: "Pay many people at once (e.g. a marketplace's sellers or a team of contractors) with ONE USDZ payment over x402. Each line is an invoice with the same required fields as pay_invoice; lines Sayso won't pay are set aside with reasons and not charged. Pays only if the batch price is at most max_usdz (USDZ, fees included). A line that bounces is refunded on its own. If this times out, call batch_status before paying again: the payment may have gone through.",
+  inputSchema: {
+    items: z.array(z.object(invoiceShape)).min(1).max(100).describe("The invoices to pay, one object per payee. Each needs the same required fields as pay_invoice."),
+    reference: z.string().trim().max(35).optional().describe("Optional. A label for the whole batch, at most 35 characters."),
+    max_usdz: usdzLimit("The most this agent will pay for the whole batch, in USDZ (not the payee's currency)"),
+  },
 }, async ({ items, reference, max_usdz }) => {
-  const res = await fetch(`${base}/v1/batches`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reference: reference ?? "Batch payout", items: items.map((i) => toRequest(i as Invoice)) }) });
-  const b = (await res.json()) as { id?: string; price_usdz?: string; pay_url?: string | null; set_aside?: unknown[]; error?: string };
+  const created = await api.post<{ id?: string; status?: string; price_usdz?: string; pay_url?: string | null; set_aside?: unknown[]; error?: string }>(
+    "/v1/batches", { reference: reference ?? "Batch payout", items: items.map((i) => toRequest(i as Invoice)) }, "creating the batch",
+  );
+  if (!created.ok) return failure(created, { paid: false });
+  const b = created.data;
   if (!b.pay_url) return text({ paid: false, ...b });
   if (Number(b.price_usdz) > Number(max_usdz)) return text({ paid: false, reason: `batch price ${b.price_usdz} USDZ is above max_usdz ${max_usdz}`, batch: b });
-  const paid = await payingFetch()(`${base}${b.pay_url}`, { method: "POST" });
-  return text({ paid: paid.status < 400, http_status: paid.status, ...((await paid.json().catch(() => ({}))) as object) });
+  if (!b.id) return failure(failed("Sayso created a batch without an id; nothing was charged.", { retryable: true }), { paid: false });
+  const r = await api.payBatch(b.id, b.pay_url);
+  return text({ paid: r.http_status < 400, batch_id: b.id, ...r });
 });
 
 server.registerTool("batch_status", {
-  description: "Progress of a batch payout: how many lines are paid, on their way, or refunded.",
-  inputSchema: { batch_id: z.string() },
-}, async ({ batch_id }) => text(await (await fetch(`${base}/v1/batches/${batch_id}`)).json()));
+  description: "Progress of a batch payout: overall status, a count per status (progress), every line's payout, and the lines Sayso set aside and why. Pass the batch_id from pay_batch, and stop when each line is final.",
+  inputSchema: { batch_id: z.string().describe("The batch id from pay_batch") },
+}, async ({ batch_id }) => {
+  const r = await api.get(`/v1/batches/${encodeURIComponent(batch_id)}`, "reading the batch");
+  return r.ok ? text(r.data) : failure(r);
+});
 
 server.registerTool("pay_quote", {
-  description: "Pay an existing Sayso quote by id, if Sayso signed it and its price is within this agent's limit.",
-  inputSchema: { quote_id: z.string() },
+  description: "Pay an existing Sayso quote by id, if Sayso signed it and its price is at most this agent's limit (SAYSO_MAX_USDZ, USDZ). Use it to retry the same quote after an unclear pay result; do not create a new quote for the same invoice, because a quote can't be paid twice.",
+  inputSchema: { quote_id: z.string().describe("The quote id (a UUID) from quote_payout or a payout reply") },
 }, async ({ quote_id }) => {
   // A quote id can come from anywhere (an invoice, another agent), so it gets the same checks pay_invoice makes
   // on its own quotes: Sayso's signature over exactly this quote, its published payee, and the agent's cap.
-  const q = (await (await fetch(`${base}/v1/payouts/${encodeURIComponent(quote_id)}`)).json()) as Quote & { error?: string };
+  const found = await api.get<Quote & { error?: string }>(`/v1/payouts/${encodeURIComponent(quote_id)}`, "reading the quote");
+  if (!found.ok) return failure(found, { paid: false });
+  const q = found.data;
   if (!q.offer || q.status !== "quoted") return text({ paid: false, reason: q.error ?? `quote is ${q.status}`, quote: q });
-  if (Number(q.price_usdz) > Number(maxUsdz)) return text({ paid: false, reason: `price ${q.price_usdz} USDZ is above this agent's limit of ${maxUsdz}`, quote: q });
+  const cap = Number(maxUsdz);
+  if (!Number.isFinite(cap) || cap <= 0) return failure(failed(`This agent's SAYSO_MAX_USDZ limit (${maxUsdz}) is not a USDZ amount; not paying.`, { retryable: false }), { paid: false });
+  if (Number(q.price_usdz) > cap) return text({ paid: false, reason: `price ${q.price_usdz} USDZ is above this agent's limit of ${maxUsdz}`, quote: q });
   const bad = await checkOffer(q, { amount: (Number(q.offer.terms.amountMinor) / 100).toFixed(2), currency: q.currency } as Invoice);
-  if (bad) return text({ paid: false, reason: `Not paying: ${bad}`, quote: q });
-  const r = await pay(quote_id);
-  return text({ paid: r.http_status < 400, quote_id, ...r });
+  if (bad) return text({ paid: false, reason: `Not paying: ${bad.reason}`, ...(bad.retryable ? { retryable: true, next: "Nothing was charged. Retry in about a minute." } : {}), quote: q });
+  return payReply(q, await api.pay(quote_id));
 });
 
 server.registerTool("payout_receipt", {
-  description: "A final payout's receipt and the Metal transaction anchoring its hash, so the agent can prove the money was delivered (or refunded) without trusting Sayso.",
-  inputSchema: { payout_id: z.string() },
-}, async ({ payout_id }) => text(await (await fetch(`${base}/v1/payouts/${payout_id}/receipt`)).json()));
+  description: "A final payout's receipt and the Metal transaction anchoring its hash, so the agent can prove the money was delivered (or refunded) without trusting Sayso. A receipt exists only once the payout is paid or refunded; until then Sayso answers that it is not final yet.",
+  inputSchema: { payout_id: z.string().describe("The payout id (a UUID)") },
+}, async ({ payout_id }) => {
+  const r = await api.get(`/v1/payouts/${encodeURIComponent(payout_id)}/receipt`, "reading the receipt");
+  return r.ok ? text(r.data) : failure(r);
+});
 
 server.registerTool("prove_payout", {
   description: "Everything Sayso can prove about a payout, as the seller: the order the agent placed, the Metal mandate that allowed it, the owner's approval if it was held, the Metal payment, the Airwallex transfer and the receipt on chain. Each piece is proven, missing, or against.",
-  inputSchema: { payout_id: z.string() },
-}, async ({ payout_id }) => text(await (await fetch(`${base}/v1/payouts/${payout_id}/proof`)).json()));
+  inputSchema: { payout_id: z.string().describe("The payout id (a UUID)") },
+}, async ({ payout_id }) => {
+  const r = await api.get(`/v1/payouts/${encodeURIComponent(payout_id)}/proof`, "reading the proof");
+  return r.ok ? text(r.data) : failure(r);
+});
 
 server.registerTool("dispute_payout", {
   description: "Dispute a delivered payout. Name what went wrong; Sayso's rules check the claim against the proof. Denied: the proof answers it, and that answer is anchored on Metal. Upheld: Sayso's record shows it got it wrong, and the agent's USDZ is refunded on Metal. Review: the owner decides. Signed with the agent's own key; only the agent that paid can dispute.",
   inputSchema: {
-    payout_id: z.string(),
+    payout_id: z.string().describe("The payout id (a UUID) of the payout you paid"),
     claim: z.enum(["not_authorized", "wrong_amount", "not_delivered", "wrong_payee", "other"]),
-    note: z.string().max(200).optional(),
+    note: z.string().max(200).optional().describe("Optional. A short explanation of what went wrong, at most 200 characters."),
   },
 }, async ({ payout_id, claim, note }) => {
-  const res = await fetch(`${base}/v1/payouts/${payout_id}/disputes`, { method: "POST", headers: { "content-type": "application/json", ...simHeaders() }, body: JSON.stringify({ claim, note, ...(await signDispute(payout_id, claim)) }) });
-  return text(await res.json());
+  let r: Reply<unknown>;
+  try {
+    r = await api.post(`/v1/payouts/${encodeURIComponent(payout_id)}/disputes`, { claim, note, ...(await signDispute(payout_id, claim)) }, "filing the dispute", simHeaders());
+  } catch (err) {
+    return failure(unexpected("signing the dispute", err));
+  }
+  return r.ok ? text(r.data) : failure(r);
 });
 
 server.registerTool("payout_status", {
-  description: `Where a payout is. status is one of: ${Object.keys(PAYOUT.states).join(", ")}. The reply also says what the status means (status_means), who it is waiting on (waiting_on) and whether it is final. Stop polling when final is true.`,
-  inputSchema: { payout_id: z.string() },
-}, async ({ payout_id }) => text(await (await fetch(`${base}/v1/payouts/${payout_id}`)).json()));
+  description: `Where a payout is. status is one of: ${Object.keys(PAYOUT.states).join(", ")}. The reply also says what the status means (status_means), who it is waiting on (waiting_on) and whether it is final. Stop polling when final is true. After a timed-out payment, call this before paying again.`,
+  inputSchema: { payout_id: z.string().describe("The payout id (a UUID) from pay_invoice, pay_quote or pay_remainder") },
+}, async ({ payout_id }) => {
+  const r = await api.get(`/v1/payouts/${encodeURIComponent(payout_id)}`, "reading the payout");
+  return r.ok ? text(r.data) : failure(r);
+});
 
 await server.connect(new StdioServerTransport());
