@@ -30,6 +30,8 @@ describe("sweepEpoch", () => {
     expect(r.outcome === "pending" && r.reason).toContain("finality timeout");
     expect(calls()).toBe(0);
     expect(ledger.unfinished()?.epoch).toBe("e2");
+    expect(ledger.unfinished()?.amountMinor).toBe(100);
+    expect(typeof ledger.unfinished()?.operationId).toBe("string");
   });
 
   it("rejects a movement proven wrong", async () => {
@@ -53,6 +55,19 @@ describe("sweepEpoch", () => {
     expect(second.outcome).toBe("credited");
     expect(calls()).toBe(1);
     expect(seen).toEqual(["e5", "e5"]);
+  });
+
+  it("a retry driven by unfinished() hands the stored amount to verify", async () => {
+    const ledger = new RampLedger(":memory:");
+    const { awx } = counting();
+    const args: Array<[string, number]> = [];
+    let n = 0;
+    const flaky: MetalSettlementVerifier = { verify: async (epoch, amt) => { args.push([epoch, amt]); if (++n === 1) throw new Error("rpc down"); return { eventKey: "63825:0xok2:0" }; } };
+    await sweepEpoch({ epoch: "e8", amountMinor: 777, currency: "USD" }, ledger, flaky, awx);
+    const open = ledger.unfinished()!;
+    expect(open.amountMinor).toBe(777);
+    await sweepEpoch({ epoch: open.epoch, amountMinor: open.amountMinor, currency: "USD" }, ledger, flaky, awx);
+    expect(args).toEqual([["e8", 777], ["e8", 777]]);
   });
 
   it("a verified sweep whose credit failed is credited on the next try", async () => {

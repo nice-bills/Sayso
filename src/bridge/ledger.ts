@@ -67,7 +67,7 @@ export class RampLedger {
 
   /** The oldest sweep that is neither credited nor rejected; it must finish before a new epoch starts. */
   unfinished(): Sweep | undefined {
-    return this.db.prepare("SELECT * FROM sweeps WHERE status IN ('recorded','verified') ORDER BY rowid LIMIT 1").get() as unknown as Sweep | undefined;
+    return this.row(this.db.prepare("SELECT * FROM sweeps WHERE status IN ('recorded','verified') ORDER BY rowid LIMIT 1").get());
   }
 
   markRejected(operationId: string, reason: string): void {
