@@ -2,6 +2,19 @@
 
 **Any AI agent can pay any real-world invoice.** An agent holding USDZ on **Metal** asks Sayso to pay "€480 to this IBAN", pays the quoted price over x402, and Sayso delivers the money in local currency through **Airwallex**. Businesses get the same thing without writing code: forward an invoice to Sayso's inbox, tap once, and it's paid.
 
+**Live:** [sayso-mp5d.onrender.com](https://sayso-mp5d.onrender.com) (choose "Look around, read-only"). Airwallex sandbox and Metal testnet, so no real money moves.
+
+| | |
+|---|---|
+| ![Every request gets a verdict: pay, wait or hold](docs/film/verdict.jpg) | ![A real Claude Code session asks Sayso to pay an invoice over MCP](docs/film/agent.jpg) |
+| **Rules are code.** Each request gets a verdict (pay, wait or hold) with the reason. | **An agent asks.** Claude Code forwards an invoice over MCP. It can ask, never approve. |
+| ![The decision card: price, balance and risk all checked](docs/film/decision.jpg) | ![Paid: Airwallex sends the transfer](docs/film/paid.jpg) |
+| **The owner decides.** Price, balance and the payee's bank all checked before the passkey tap. | **Airwallex pays.** The transfer goes out on the real sandbox API. |
+| ![Freelance Hub on Base44 shows the job paid with a receipt](docs/film/hub.jpg) | ![The receipt anchored on Metal testnet](docs/film/proof.jpg) |
+| **Apps plug in.** Freelance Hub (built on Base44) uses Sayso as its payout layer, and signed webhooks mark the job paid. | **Proof on chain.** Every receipt is anchored on Metal, and anyone can rehash it and compare. |
+
+**Run live on 13 Nov 2026:** a Claude agent paid a EUR 20 invoice from its owner's account under a Metal mandate (cap 60 USDZ, Sayso as the only payee), and the payout reached `paid` with all six proof items proven ([tx](https://testnet.metalntwx.com/tx/0xf1d1bb00e8609a1080d204690327b96b841275a7b1d674b7206fc78393e78e0f), [proof](https://sayso-mp5d.onrender.com/v1/payouts/6f90fabf-1b35-431a-a53a-66a69f345433/proof)).
+
 The rails decide what is allowed, not the prompt:
 - **Fiat moves only after the agent's payment settles on Metal.** An unsettled or failed payment releases the quote, and nothing is paid.
 - **Every quote is single-use.** Each payout id doubles as Airwallex's `request_id`, so nothing is paid twice.
