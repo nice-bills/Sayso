@@ -102,8 +102,11 @@
     $("approvals").innerHTML = pending.length ? pending.map((p) =>
       `<div class="approval"><span>${esc(p.label)}</span><button data-id="${esc(p.obligationId)}">Approve</button></div>`).join("") : "Nothing to approve.";
     $("approvals").querySelectorAll("button").forEach((b) => b.onclick = async () => {
-      await fetch(`approve/${encodeURIComponent(b.dataset.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approver: "dashboard" }) });
-      refresh();
+      const res = await fetch(`approve/${encodeURIComponent(b.dataset.id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ approver: "dashboard" }) });
+      if (res.ok) return refresh();
+      const note = document.createElement("small");
+      note.textContent = (await res.json().catch(() => ({}))).error ?? "Could not approve.";
+      b.after(note);
     });
     if (s.reconcile) {
       $("reconcile").className = "";

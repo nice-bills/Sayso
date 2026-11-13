@@ -89,7 +89,8 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
   db.exec(`CREATE TABLE IF NOT EXISTS owner_passkeys (
       id TEXT PRIMARY KEY, public_key BLOB NOT NULL, counter INTEGER NOT NULL, transports TEXT, created_at TEXT NOT NULL, last_used_at TEXT
     );
-    CREATE TABLE IF NOT EXISTS owner_email_links (token_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0);`);
+    CREATE TABLE IF NOT EXISTS owner_email_links (token_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE IF NOT EXISTS owner_sessions (id_hash TEXT PRIMARY KEY, expires INTEGER NOT NULL, created_at TEXT NOT NULL);`);
   const passkeys = () => db.prepare("SELECT id, public_key, counter, transports FROM owner_passkeys").all() as Array<{ id: string; public_key: Uint8Array; counter: number; transports: string | null }>;
   const hasPasskey = () => (db.prepare("SELECT COUNT(*) AS n FROM owner_passkeys").get() as { n: number }).n > 0;
 
@@ -117,9 +118,14 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
   const isOwner = (req: Request) => {
     const bearer = req.header("authorization")?.match(/^Bearer (.+)$/)?.[1];
     if (bearer) return same(bearer, ownerToken);
-    const [exp, sig] = (cookies(req)[COOKIE] ?? "").split(".");
-    return Boolean(exp && sig && Number(exp) > Date.now() && same(sig, sign(Number(exp))));
+    const id = cookies(req)[COOKIE];
+    if (!id) return false;
+    const now = Date.now();
+    // Sweep expired rows at most once a minute so the table does not grow.
+    if (now - lastSweep > 60_000) { lastSweep = now; db.prepare("DELETE FROM owner_sessions WHERE expires <= ?").run(now); }
+    return Boolean(db.prepare("SELECT 1 FROM owner_sessions WHERE id_hash = ? AND expires > ?").get(sha(id), now));
   };
+  let lastSweep = 0;
 
   const isViewer = (req: Request) => {
     if (!viewerOn) return false;
@@ -130,8 +136,13 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
   const startSession = (req: Request, res: Response, role: "owner" | "viewer" = "owner") => {
     const expires = Date.now() + SESSION_MS;
     const secure = req.secure || req.header("x-forwarded-proto") === "https";
-    const [name, sig] = role === "owner" ? [COOKIE, sign(expires)] : [VIEWER_COOKIE, sign(expires, "viewer:")];
-    res.setHeader("set-cookie", `${name}=${expires}.${sig}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_MS / 1000}${secure ? "; Secure" : ""}`);
+    let name = VIEWER_COOKIE, value = `${expires}.${sign(expires, "viewer:")}`;
+    if (role === "owner") {
+      name = COOKIE;
+      value = randomBytes(24).toString("base64url");
+      db.prepare("INSERT INTO owner_sessions (id_hash, expires, created_at) VALUES (?,?,?)").run(sha(value), expires, new Date().toISOString());
+    }
+    res.setHeader("set-cookie", `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_MS / 1000}${secure ? "; Secure" : ""}`);
   };
 
   const requireOwner = (req: Request, res: Response, next: NextFunction) => {
@@ -193,8 +204,16 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
     startSession(req, res, "viewer");
     res.json({ ok: true, read_only: true });
   });
-  router.post("/auth/logout", (_req, res) => {
-    res.setHeader("set-cookie", [`${COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`, `${VIEWER_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`]);
+  const clearCookies = (res: Response) => res.setHeader("set-cookie", [`${COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`, `${VIEWER_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`]);
+  router.post("/auth/logout", (req, res) => {
+    const id = cookies(req)[COOKIE];
+    if (id) db.prepare("DELETE FROM owner_sessions WHERE id_hash = ?").run(sha(id));
+    clearCookies(res);
+    res.json({ ok: true });
+  });
+  router.post("/auth/logout/all", requireOwner, (_req, res) => {
+    db.prepare("DELETE FROM owner_sessions").run();
+    clearCookies(res);
     res.json({ ok: true });
   });
   router.get("/auth/me", (req, res) => res.json({
@@ -218,12 +237,19 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
   router.post("/auth/passkey/register", requireOwner, express.json({ limit: "64kb" }), async (req, res) => {
     const ch = take(req.body?.challenge_id, "register", "owner");
     if (!ch) return void res.status(400).json({ error: "That took too long. Try again." });
+    if (hasPasskey()) {
+      // Recovery: only someone with access to the host's settings can turn this on; use it after losing every device, then turn it off.
+      if (process.env.SAYSO_PASSKEY_RECOVERY === "on") opts.log("SAYSO_PASSKEY_RECOVERY is on: adding a passkey without an existing one");
+      else if (!(await confirmed(req, req.body?.confirmation, "register", "owner"))) return void res.status(401).json({ error: "Confirm with a passkey you already have to add another.", need: "passkey" });
+    }
     const { rpID, origin } = rp(req);
     try {
       const r = await verifyRegistrationResponse({ response: req.body.response as RegistrationResponseJSON, expectedChallenge: ch.challenge, expectedOrigin: origin, expectedRPID: rpID, requireUserVerification: true });
       if (!r.verified) return void res.status(400).json({ error: "The passkey didn't check out." });
       const c = r.registrationInfo.credential;
       db.prepare("INSERT OR REPLACE INTO owner_passkeys (id, public_key, counter, transports, created_at) VALUES (?,?,?,?,?)").run(c.id, c.publicKey, c.counter, c.transports ? JSON.stringify(c.transports) : null, new Date().toISOString());
+      if (opts.send && ownerEmail) await opts.send(ownerEmail, "A passkey was added to Sayso", "A new passkey can now sign in to Sayso and approve payments. If this wasn't you, sign out everywhere and remove it.").catch((e) => opts.log(`Could not email the passkey notice: ${String((e as Error).message)}`));
+      else opts.log("A passkey was added");
       res.json({ ok: true });
     } catch (err) {
       res.status(400).json({ error: `The passkey didn't check out: ${String((err as Error).message).slice(0, 120)}` });
@@ -243,7 +269,7 @@ export function createAuth(opts: { offline: boolean; log: (line: string) => void
   // A check bound to one action (approving this payment, connecting that agent), not a sign-in.
   router.post("/auth/passkey/confirm/options", requireOwner, express.json(), async (req, res) => {
     const purpose = String(req.body?.purpose ?? ""), subject = String(req.body?.subject ?? "");
-    if (!/^(approve|review|claim|connect|dispute|trust)$/.test(purpose) || !subject) return void res.status(400).json({ error: "purpose and subject are required" });
+    if (!/^(approve|review|claim|connect|dispute|trust|register)$/.test(purpose) || !subject) return void res.status(400).json({ error: "purpose and subject are required" });
     const { rpID } = rp(req);
     const options = await generateAuthenticationOptions({ rpID, userVerification: "required", allowCredentials: passkeys().map((p) => ({ id: p.id, transports: p.transports ? (JSON.parse(p.transports) as AuthenticatorTransportFuture[]) : undefined })) });
     res.json({ challenge_id: keep({ challenge: options.challenge, purpose, subject }), options });

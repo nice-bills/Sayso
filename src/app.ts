@@ -651,7 +651,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
       reconcile: lastReconcile,
     }),
     approve: async (id, approver, body) => {
-      if (auth.hasPasskey()) throw new PayoutError(403, "Approve this in the app, where your passkey confirms it.");
+      if (!opts.offline || auth.hasPasskey()) throw new PayoutError(403, "Approve this in the app, where your passkey confirms it.");
+      if (penny.forInbox(id)?.status === "denied") throw new PayoutError(409, "The payee said these are not their bank details. Sayso won't pay this invoice.");
       if (inbox.get(id)) return inbox.approve(id, approver, { verifiedWithPayee: body.verified_with_payee === true });
       return publicView(svc.approveReview(id, approver));
     },
