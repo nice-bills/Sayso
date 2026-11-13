@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { RampLedger } from "../src/bridge/ledger.js";
-import { sweepEpoch, type AirwallexCredit, type MetalSettlementVerifier } from "../src/bridge/ramp.js";
+import { sweepEpoch, SweepRejected, type AirwallexCredit, type MetalSettlementVerifier } from "../src/bridge/ramp.js";
 
 const verifier = (eventKey = "63825:0xabc:0"): MetalSettlementVerifier => ({ verify: async () => ({ eventKey }) });
 const counting = () => {
@@ -21,14 +21,49 @@ describe("sweepEpoch", () => {
     expect(ledger.creditedMinor("USD")).toBe(4210);
   });
 
-  it("never credits a movement that failed verification", async () => {
+  it("never credits a movement that is not final yet, and keeps it for a retry", async () => {
     const ledger = new RampLedger(":memory:");
     const { awx, calls } = counting();
-    const bad: MetalSettlementVerifier = { verify: async () => { throw new Error("finality timeout at block 12"); } };
-    const r = await sweepEpoch({ epoch: "e2", amountMinor: 100, currency: "USD" }, ledger, bad, awx);
-    expect(r.outcome).toBe("rejected");
-    expect(r.sweep.reason).toContain("finality timeout");
+    const slow: MetalSettlementVerifier = { verify: async () => { throw new Error("finality timeout at block 12"); } };
+    const r = await sweepEpoch({ epoch: "e2", amountMinor: 100, currency: "USD" }, ledger, slow, awx);
+    expect(r.outcome).toBe("pending");
+    expect(r.outcome === "pending" && r.reason).toContain("finality timeout");
     expect(calls()).toBe(0);
+    expect(ledger.unfinished()?.epoch).toBe("e2");
+  });
+
+  it("rejects a movement proven wrong", async () => {
+    const ledger = new RampLedger(":memory:");
+    const { awx } = counting();
+    const bad: MetalSettlementVerifier = { verify: async () => { throw new SweepRejected("mandate refused the sweep: ExceedsCap"); } };
+    const r = await sweepEpoch({ epoch: "e6", amountMinor: 100, currency: "USD" }, ledger, bad, awx);
+    expect(r.outcome).toBe("rejected");
+    expect(ledger.unfinished()).toBeUndefined();
+  });
+
+  it("retries the same epoch after a passing error and credits it once", async () => {
+    const ledger = new RampLedger(":memory:");
+    const { awx, calls } = counting();
+    const seen: string[] = [];
+    let n = 0;
+    const flaky: MetalSettlementVerifier = { verify: async (epoch) => { seen.push(epoch); if (++n === 1) throw new Error("rpc down"); return { eventKey: "63825:0xok:0" }; } };
+    const first = await sweepEpoch({ epoch: "e5", amountMinor: 100, currency: "USD" }, ledger, flaky, awx);
+    const second = await sweepEpoch({ epoch: "e5", amountMinor: 100, currency: "USD" }, ledger, flaky, awx);
+    expect(first.outcome).toBe("pending");
+    expect(second.outcome).toBe("credited");
+    expect(calls()).toBe(1);
+    expect(seen).toEqual(["e5", "e5"]);
+  });
+
+  it("a verified sweep whose credit failed is credited on the next try", async () => {
+    const ledger = new RampLedger(":memory:");
+    let n = 0;
+    const awx: AirwallexCredit = { credit: async () => { if (++n === 1) throw new Error("awx down"); return { depositId: "dep_1" }; } };
+    await expect(sweepEpoch({ epoch: "e7", amountMinor: 100, currency: "USD" }, ledger, verifier(), awx)).rejects.toThrow("awx down");
+    expect(ledger.unfinished()?.status).toBe("verified");
+    const r = await sweepEpoch({ epoch: "e7", amountMinor: 100, currency: "USD" }, ledger, verifier(), awx);
+    expect(r.outcome).toBe("credited");
+    expect(ledger.unfinished()).toBeUndefined();
   });
 
   it("refuses to back two epochs with the same on-chain event", async () => {

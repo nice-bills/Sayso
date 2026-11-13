@@ -6,7 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { AirwallexError, type AccountVerification, type Transfer } from "../airwallex/client.js";
 import type { LoopAirwallex } from "../agent/loop.js";
-import type { MetalSettlementVerifier } from "../bridge/ramp.js";
+import { SweepRejected, type MetalSettlementVerifier } from "../bridge/ramp.js";
 import { emit } from "../events.js";
 import type { EarningsSource } from "../metal/earnings.js";
 import type { PullResult } from "../metal/mandate.js";
@@ -165,7 +165,7 @@ export class FakeMandate implements MetalSettlementVerifier {
   constructor(readonly rampAddress: string, private readonly capMinor: number) {}
 
   async verify(epoch: string, amountMinor: number) {
-    if (amountMinor > this.capMinor) throw new Error("mandate refused the sweep: ExceedsCap");
+    if (amountMinor > this.capMinor) throw new SweepRejected("mandate refused the sweep: ExceedsCap");
     const tx = `sim:0x${randomUUID().replaceAll("-", "")}`;
     emit("act", `Swept ${(amountMinor / 100).toFixed(2)} USDZ to the ramp under the mandate (sim)`, { epoch }, tx);
     emit("reconcile", `Sweep for ${epoch} is final (sim)`, {}, tx);

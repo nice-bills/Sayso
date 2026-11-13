@@ -6,6 +6,9 @@ import { parseAbiItem, type Address, type Hash, type PublicClient } from "viem";
 
 const transferEvent = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
 
+/** Thrown when the transfer is proven wrong; finality timeouts and RPC errors stay plain Errors. */
+export class TransferRejected extends Error {}
+
 export interface ExpectedTransfer {
   hash: Hash;
   token: Address;
@@ -36,7 +39,7 @@ async function waitForFinality(rpcUrl: string, blockNumber: bigint, timeoutMs = 
 /** Returns the durable event key `${chainId}:${txHash}:${logIndex}` once the movement is final. */
 export async function verifyMip20Transfer(client: PublicClient, rpcUrl: string, expected: ExpectedTransfer): Promise<{ eventKey: string; blockNumber: bigint }> {
   const receipt = await client.waitForTransactionReceipt({ hash: expected.hash });
-  if (receipt.status !== "success") throw new Error(`transaction reverted: ${expected.hash}`);
+  if (receipt.status !== "success") throw new TransferRejected(`transaction reverted: ${expected.hash}`);
 
   const logs = await client.getLogs({
     address: expected.token,
@@ -46,11 +49,11 @@ export async function verifyMip20Transfer(client: PublicClient, rpcUrl: string, 
     toBlock: receipt.blockNumber,
   });
   const movement = logs.find((l) => l.transactionHash === expected.hash && l.args.value === expected.amount);
-  if (!movement || movement.logIndex === null) throw new Error("expected Transfer event was not emitted");
+  if (!movement || movement.logIndex === null) throw new TransferRejected("expected Transfer event was not emitted");
 
   await waitForFinality(rpcUrl, receipt.blockNumber);
   const block = await client.getBlock({ blockNumber: receipt.blockNumber });
-  if (block.hash !== receipt.blockHash) throw new Error("receipt block is not on the finalized chain");
+  if (block.hash !== receipt.blockHash) throw new TransferRejected("receipt block is not on the finalized chain");
 
   const chainId = await client.getChainId();
   return { eventKey: `${chainId}:${expected.hash}:${movement.logIndex}`, blockNumber: receipt.blockNumber };
