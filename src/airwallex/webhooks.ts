@@ -47,6 +47,13 @@ export function webhookRouter(secret: string, store: Store, onEvent: (e: Airwall
   const router = express.Router();
   let queue: AirwallexEvent[] = [];
   let draining = false;
+  const inFlight = new Set<string>(); // ids queued or running, so a redelivery cannot run an event twice at once
+
+  const enqueue = (e: AirwallexEvent) => {
+    if (inFlight.has(e.id)) return;
+    inFlight.add(e.id);
+    queue.push(e);
+  };
 
   const drain = async () => {
     if (draining) return;
@@ -57,8 +64,11 @@ export function webhookRouter(secret: string, store: Store, onEvent: (e: Airwall
       for (const e of batch) {
         try {
           await onEvent(e);
+          store.markEventProcessed(e.id);
         } catch (err) {
-          emit("escalate", `Webhook ${e.name} handler failed`, { event_id: e.id, error: String(err) });
+          emit("escalate", `Webhook ${e.name} handler failed, left for redelivery`, { event_id: e.id, error: String(err) });
+        } finally {
+          inFlight.delete(e.id);
         }
       }
     }
@@ -75,9 +85,19 @@ export function webhookRouter(secret: string, store: Store, onEvent: (e: Airwall
     }
     const fresh = store.recordEvent(v.event.id, v.event.name, v.event.created_at, raw.toString("utf8"));
     res.status(200).end();
-    if (!fresh) return; // duplicate delivery: already handled
-    queue.push(v.event);
+    if (!fresh && !store.unprocessedEvents().some((u) => u.eventId === v.event.id)) return; // duplicate of an event already handled
+    enqueue(v.event);
     void drain();
   });
+
+  // Events a restart or a handler error left unhandled run again on start.
+  for (const u of store.unprocessedEvents()) {
+    try {
+      enqueue(JSON.parse(u.body) as AirwallexEvent);
+    } catch (err) {
+      emit("escalate", "Stored webhook event unreadable, cannot retry", { event_id: u.eventId, error: String(err) });
+    }
+  }
+  void drain();
   return router;
 }
