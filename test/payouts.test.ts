@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { heuristicRead } from "../src/agent/reader.js";
 import { AirwallexError } from "../src/airwallex/client.js";
@@ -305,5 +306,96 @@ describe("a payout stranded in accepted", () => {
     await svc.follow(now);
     expect(svc.book.get(b.payoutIds[0]!)!.transferId).toBe(transferId);
     expect(escalations(line.id)).toHaveLength(0);
+  });
+});
+
+describe("recovering stranded payouts", () => {
+  const fund = async (svc: PayoutService, buyer: string | null = BUYER) => {
+    const q = await svc.quote(req());
+    svc.accept(q.id);
+    svc.book.transition(q.id, ["accepted"], "funded", { buyer: buyer ?? undefined, fundingTx: "0xf1" });
+    return q.id;
+  };
+  const followUntil = async (svc: PayoutService, id: string, status: string, now = () => new Date()) => {
+    for (let i = 0; i < 5 && svc.book.get(id)!.status !== status; i++) await svc.follow(now());
+  };
+
+  it("a payout funded but never sent is sent on the next follow", async () => {
+    const { svc } = setup();
+    const id = await fund(svc);
+    await followUntil(svc, id, "paid");
+    expect(svc.book.get(id)!.status).toBe("paid");
+  });
+
+  it("a transfer Airwallex has but Sayso never recorded is adopted", async () => {
+    const { svc, awx } = setup();
+    const real = awx.createTransfer;
+    let n = 0;
+    awx.createTransfer = async (b) => { const t = await real(b); if (n++ < 2) throw new Error("socket hang up"); return t; };
+    const look = awx.transferByRequestId;
+    let m = 0;
+    awx.transferByRequestId = async (id) => { if (m++ < 1) throw new Error("socket hang up"); return look(id); };
+    const q = await svc.quote(req());
+    expect((await payThrough(svc, q.id)).status).toBe("funded");
+    awx.createTransfer = real;
+    awx.transferByRequestId = look;
+    await followUntil(svc, q.id, "paid");
+    expect(svc.book.get(q.id)!.status).toBe("paid");
+    // one transfer at the fake: the resend reused the request id
+    expect(awx.balances.EUR).toBe(0);
+    expect(svc.book.get(q.id)!.transferId).toBe("sim:tfr_1");
+  });
+
+  it("a refund that failed is retried and succeeds", async () => {
+    const { awx, store, trail } = setup();
+    const refunder = { calls: 0, async refund() { if (this.calls++ === 0) throw new Error("rpc timeout"); return { tx: "0xrefund" }; } };
+    const svc = new PayoutService({ awx, store, refunder, trail, read: async (t) => heuristicRead(t) });
+    const q = await svc.quote(req({}, { iban: "DE02100100109307118603", note: "CLOSED" }));
+    await payThrough(svc, q.id);
+    await svc.follow();
+    await svc.follow();
+    expect(svc.book.get(q.id)!.status).toBe("refund_failed");
+    await svc.follow(new Date(Date.now() + 11 * 60_000));
+    const p = svc.book.get(q.id)!;
+    expect(p.status).toBe("refunded");
+    expect(p.refundTx).toBe("0xrefund");
+  });
+
+  it("a failed payout whose refund never ran is refunded", async () => {
+    const { svc, refunder } = setup();
+    const id = await fund(svc);
+    svc.book.transition(id, ["funded"], "failed", { failure: "bank returned it" });
+    await svc.follow();
+    expect(svc.book.get(id)!.status).toBe("refunded");
+    expect(refunder.refunds).toHaveLength(1);
+  });
+
+  it("an owner's own failed invoice is not refunded", async () => {
+    const { svc, refunder } = setup();
+    const id = await fund(svc, "internal:owner");
+    svc.book.transition(id, ["funded"], "failed", { failure: "bank returned it" });
+    await svc.follow();
+    expect(svc.book.get(id)!.status).toBe("failed");
+    expect(refunder.refunds).toHaveLength(0);
+  });
+
+  it("a payout with no payer stays refund_failed", async () => {
+    const { svc, refunder } = setup();
+    const id = await fund(svc, null);
+    svc.book.transition(id, ["funded"], "failed", { failure: "x" });
+    svc.book.transition(id, ["failed"], "refund_failed", { failure: "x; no payer to refund" });
+    await svc.follow(new Date(Date.now() + 11 * 60_000));
+    expect(svc.book.get(id)!.status).toBe("refund_failed");
+    expect(refunder.refunds).toHaveLength(0);
+  });
+
+  it("follow polls submitted payouts beyond the newest 500 rows", async () => {
+    const { svc } = setup();
+    const q = await svc.quote(req());
+    expect((await payThrough(svc, q.id)).status).toBe("submitted");
+    const base = svc.book.get(q.id)!;
+    for (let i = 0; i < 501; i++) svc.book.insert({ ...base, id: randomUUID(), status: "quoted", createdAt: new Date(Date.now() + 1000 + i).toISOString(), fundingTx: null, transferId: null, buyer: null });
+    await followUntil(svc, q.id, "paid");
+    expect(svc.book.get(q.id)!.status).toBe("paid");
   });
 });

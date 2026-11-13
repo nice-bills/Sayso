@@ -458,7 +458,17 @@ export class PayoutService {
     return currency === "USD" ? usd : usd + Math.floor(held(currency) / (rate || 1));
   }
 
+  // A funded payout not in this set was left by a crash or an unclear answer, so follow() may pick it up.
+  private readonly executing = new Set<string>();
+  private readonly lastRefundTry = new Map<string, number>();
+  private readonly refundEscalated = new Set<string>();
+
   private async execute(p: Payout): Promise<Payout> {
+    this.executing.add(p.id);
+    try { return await this.executeNow(p); } finally { this.executing.delete(p.id); }
+  }
+
+  private async executeNow(p: Payout): Promise<Payout> {
     try {
       await this.ensureFloat(p);
     } catch (err) {
@@ -528,11 +538,15 @@ export class PayoutService {
     return { verdict: "hold", reason: holder ? `the bank says this account belongs to ${holder}, not ${bank.account_name}` : `the account name does not fully match the bank's record (${match})`, said };
   }
 
-  private async submit(p: Payout, beneficiaryId: string): Promise<Payout> {
-    const body = {
+  private transferBody(p: Payout, beneficiaryId: string) {
+    return {
       request_id: p.id, beneficiary_id: beneficiaryId, transfer_amount: toMajor(p.amountMinor).toFixed(2), transfer_currency: p.currency,
       transfer_method: p.method, reference: p.reference, source_currency: p.currency, reason: "business_expenses" as const,
     };
+  }
+
+  private async submit(p: Payout, beneficiaryId: string): Promise<Payout> {
+    const body = this.transferBody(p, beneficiaryId);
     const fee = transferFee(p.method, p.currency, this.pricing);
     this.d.store.insertOp({ requestId: p.id, obligationId: p.id, kind: "pay", attempt: 1, status: "submitted", currency: p.currency, amountMinor: p.amountMinor, detail: JSON.stringify({ fee_minor: fee }) });
     let t: Transfer | undefined;
@@ -562,8 +576,9 @@ export class PayoutService {
   // ---------- 5. settle or refund ----------
 
   async onTransfer(t: Transfer, now = new Date()): Promise<Payout | undefined> {
-    const p = this.book.byTransferId(t.id) ?? this.book.get(t.request_id);
+    let p = this.book.byTransferId(t.id) ?? this.book.get(t.request_id);
     if (!p) return undefined;
+    if (p.status === "funded" && !this.executing.has(p.id)) p = await this.adopt(p, t);
     if (t.status === "PAID" && this.book.transition(p.id, ["submitted"], "paid")) {
       this.d.store.updateOp(p.id, "settled");
       this.book.markPayeePaid(p.payeeHash, now);
@@ -598,10 +613,73 @@ export class PayoutService {
   /** Poll in-flight payouts (webhooks do this in production). Also names a payout or batch left in `accepted` too long. */
   async follow(now = new Date()): Promise<void> {
     await this.resumeFundedBatches(now);
+    await this.resumeFunded(now);
+    await this.retryRefunds(now);
     this.escalateStuck(now);
-    for (const p of this.book.list(500).filter((x) => x.status === "submitted")) {
+    for (const p of this.book.byStatus("submitted")) {
       const t = await this.d.awx.transferByRequestId(p.id).catch(() => undefined);
       if (t) await this.onTransfer(t, now);
+    }
+  }
+
+  /** Records a transfer Airwallex has for a funded payout whose submit never finished, then follows it from `submitted`. */
+  private async adopt(p: Payout, t: Transfer): Promise<Payout> {
+    this.d.store.updateOp(p.id, "submitted", t.id, chargedFeeDetail(t, p.currency));
+    if (this.book.transition(p.id, ["funded"], "submitted", { transferId: t.id })) emit("observe", `Found the transfer for ${p.id.slice(0, 8)} at Airwallex; following it`, { payout: p.id, status: t.status }, t.id);
+    return this.book.get(p.id)!;
+  }
+
+  /** A payout left in `funded` by a crash or an unclear answer: send it if it never went out, otherwise find or resend its transfer. */
+  private async resumeFunded(now: Date): Promise<void> {
+    for (const p of this.book.byStatus("funded")) {
+      if (this.executing.has(p.id)) continue;
+      try {
+        const op = this.d.store.latestOp(p.id, "pay");
+        if (!op) {
+          emit("observe", `Payout ${p.id.slice(0, 8)} was paid for but not sent before Sayso stopped; sending it now`, { payout: p.id });
+          await this.execute(p);
+          continue;
+        }
+        let t = await this.d.awx.transferByRequestId(p.id).catch(() => undefined);
+        if (!t) {
+          // Same request_id and body: Airwallex dedupes on it, so this cannot pay twice. Not submit(): its insertOp would hit the UNIQUE (obligation, kind, attempt).
+          const beneficiaryId = this.book.payee(p.payeeHash)?.beneficiaryId;
+          if (!beneficiaryId) {
+            if (op.status !== "ambiguous") { this.d.store.updateOp(p.id, "ambiguous", null, "no beneficiary on record"); emit("escalate", `Payout ${p.id.slice(0, 8)} is funded with no transfer and no beneficiary on record; held for a person`, { payout: p.id }); }
+            continue;
+          }
+          try {
+            t = await this.d.awx.createTransfer(this.transferBody(p, beneficiaryId));
+          } catch (err) {
+            if (!isAmbiguous(err)) {
+              this.d.store.updateOp(p.id, "failed", null, String(err));
+              await this.fail(p, `Airwallex rejected the transfer: ${String(err).slice(0, 200)}`);
+            } else if (op.status !== "ambiguous") {
+              this.d.store.updateOp(p.id, "ambiguous", null, String(err));
+              emit("escalate", `Payout ${p.id.slice(0, 8)} outcome still unknown after a resend; held for a person, buyer not refunded yet`, { payout: p.id });
+            }
+            continue;
+          }
+        }
+        const adopted = await this.adopt(p, t);
+        if (adopted.status === "submitted") await this.onTransfer(t, now);
+      } catch (err) {
+        emit("escalate", `Funded payout ${p.id.slice(0, 8)} could not be resumed: ${String(err).slice(0, 200)}`, { payout: p.id });
+      }
+    }
+  }
+
+  /** Refunds a failed payout whose refund never ran (a crash between the two writes), and retries refund_failed every 10 minutes. */
+  private async retryRefunds(now: Date): Promise<void> {
+    const payable = (p: Payout) => !!p.buyer && !p.buyer.startsWith("internal:");
+    for (const p of this.book.byStatus("failed")) {
+      if (!payable(p) || p.refundTx) continue;
+      await this.refund(p, p.failure ?? "failed", ["failed"]).catch((err) => emit("escalate", `Refund for ${p.id.slice(0, 8)} could not be run: ${String(err).slice(0, 200)}`, { payout: p.id }));
+    }
+    for (const p of this.book.byStatus("refund_failed")) {
+      if (!payable(p) || now.getTime() - (this.lastRefundTry.get(p.id) ?? 0) < 10 * 60_000) continue;
+      this.lastRefundTry.set(p.id, now.getTime());
+      await this.refund(p, p.failure ?? "failed", ["refund_failed"]).catch((err) => emit("escalate", `Refund for ${p.id.slice(0, 8)} could not be run: ${String(err).slice(0, 200)}`, { payout: p.id }));
     }
   }
 
@@ -660,23 +738,31 @@ export class PayoutService {
   private async fail(p: Payout, reason: string, from: Payout["status"][] = ["funded"]): Promise<Payout> {
     if (!this.book.transition(p.id, from, "failed", { failure: reason })) return this.book.get(p.id)!;
     emit("refuse", `Payout ${p.id.slice(0, 8)} failed: ${reason}`, { payout: p.id });
+    return this.refund(p, reason, ["failed"]);
+  }
+
+  /** Pays the payer back. From `failed` a refund error is recorded as refund_failed; from refund_failed (a retry) it leaves the row alone. Metal dedupes on `refund-<id>`, so a retry pays at most once. */
+  private async refund(p: Payout, reason: string, from: Payout["status"][]): Promise<Payout> {
     const buyer = this.book.get(p.id)!.buyer;
     if (buyer?.startsWith("internal:")) {
       emit("escalate", `Your invoice payout ${p.id.slice(0, 8)} to ${p.payeeName} failed: ${reason}. The money is still in your Airwallex balance.`, { payout: p.id });
       return this.book.get(p.id)!;
     }
     if (!buyer) {
-      this.book.transition(p.id, ["failed"], "refund_failed", { failure: `${reason}; no payer to refund` });
+      this.book.transition(p.id, from, "refund_failed", { failure: `${reason}; no payer to refund` });
       emit("escalate", `Payout ${p.id.slice(0, 8)} failed with no known payer to refund`, { payout: p.id });
       return this.book.get(p.id)!;
     }
     try {
       const { tx } = await this.d.refunder.refund(buyer, p.totalMinor, p.id);
-      this.book.transition(p.id, ["failed"], "refunded", { refundTx: tx });
+      this.book.transition(p.id, from, "refunded", { refundTx: tx });
       emit("act", `Refunded ${toMajor(p.totalMinor).toFixed(2)} USDZ to ${short(buyer)} in full`, { payout: p.id }, tx);
       this.d.onFinal?.(this.book.get(p.id)!);
     } catch (err) {
-      this.book.transition(p.id, ["failed"], "refund_failed", { failure: `${reason}; refund failed: ${String(err).slice(0, 200)}` });
+      if (from[0] === "refund_failed") {
+        if (this.refundEscalated.has(p.id)) return this.book.get(p.id)!;
+        this.refundEscalated.add(p.id);
+      } else this.book.transition(p.id, from, "refund_failed", { failure: `${reason}; refund failed: ${String(err).slice(0, 200)}` });
       emit("escalate", `Refund for ${p.id.slice(0, 8)} failed; a person must return ${toMajor(p.totalMinor).toFixed(2)} USDZ to ${short(buyer)}`, { payout: p.id });
     }
     return this.book.get(p.id)!;

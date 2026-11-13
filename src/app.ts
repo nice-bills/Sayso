@@ -253,7 +253,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const simulateTransfer = "simulateTransfer" in awx ? (awx as Airwallex).simulateTransfer : undefined;
   async function sandboxBank() {
     if (opts.offline || !sandbox || !simulateTransfer || process.env.AWX_SANDBOX_DELIVER === "off") return;
-    for (const p of svc.book.list(500).filter((x) => x.status === "submitted" && x.transferId)) {
+    for (const p of svc.book.byStatus("submitted").filter((x) => x.transferId)) {
       const t = await awx.transferByRequestId(p.id).catch(() => undefined);
       if (!t || Date.now() - new Date(p.createdAt).getTime() < deliverAfterMs) continue;
       const next = t.status === "SENT" ? "PAID" : ["PROCESSING", "SCHEDULED", "SUBMITTED", "PENDING"].includes(t.status) ? "SENT" : undefined;
