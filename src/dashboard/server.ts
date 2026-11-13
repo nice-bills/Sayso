@@ -8,6 +8,9 @@ import { bus, recentEvents, type AgentEvent } from "../events.js";
 
 export interface DashboardHooks {
   state: () => unknown;
+  /** Who is asking now; undefined once the session has ended. */
+  viewFor: (req: express.Request) => "owner" | "viewer" | undefined;
+  forViewer: (v: unknown) => unknown;
   approve: (id: string, approver: string, body: Record<string, unknown>) => unknown;
 }
 
@@ -28,10 +31,15 @@ export function dashboardRouter(hooks: DashboardHooks): express.Router {
   });
   r.get("/events", (req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-    const send = (e: AgentEvent) => res.write(`data: ${JSON.stringify(e)}\n\n`);
+    const send = (e: AgentEvent) => {
+      if (hooks.viewFor(req) !== "viewer") return void res.write(`data: ${JSON.stringify(e)}\n\n`);
+      if (!e.private) res.write(`data: ${JSON.stringify(hooks.forViewer(e))}\n\n`);
+    };
     recentEvents().forEach(send);
     bus.on("event", send);
-    req.on("close", () => bus.off("event", send));
+    // A stream must not outlive its session.
+    const recheck = setInterval(() => { if (!hooks.viewFor(req)) res.end(); }, 30_000);
+    req.on("close", () => { clearInterval(recheck); bus.off("event", send); });
   });
   return r;
 }

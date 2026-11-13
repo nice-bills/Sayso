@@ -93,7 +93,7 @@ export class PennyChecks {
     const link = `${this.d.publicUrl ?? "http://127.0.0.1:4021"}/v/${token}`;
     const text = `Hi,\n\nWe received an invoice from ${payee} asking us to pay new bank details (account ending ${last4(p.beneficiary)}).\n\nIf that is really you, we've just sent 0.01 ${p.currency} to that account. Its reference holds a 6-digit code. Enter it here:\n\n${link}\n\nIf you didn't change your bank details, open the link and tell us; nothing will be paid.\n`;
     if (this.d.send) await this.d.send(contact, `Did ${payee} change its bank details?`, text).catch((e) => emit("escalate", `Could not email ${contact}: ${String(e).slice(0, 160)}`, { payout: p.id }));
-    else emit("observe", `Email to ${contact} (no mail sender configured): ${link}`, { payout: p.id });
+    else emit("observe", `Email to ${contact} (no mail sender configured): ${link}`, { payout: p.id }, undefined, { private: true });
     emit("act", `Sent 0.01 ${p.currency} with a code to the new account, and asked ${contact} (the contact on file) for it`, { payout: p.id }, t.id);
     return this.forInbox(inboxId)!;
   }

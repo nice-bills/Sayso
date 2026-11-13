@@ -132,14 +132,15 @@ async function load() {
 let pending;
 function refreshSoon() { clearTimeout(pending); pending = setTimeout(() => load().catch(() => {}), 350); }
 
-let stream;
+let stream, pollTimer, renderTimer;
 function goLive() {
   if (stream) return;
   stream = new EventSource("/ops/events");
   stream.onmessage = (m) => { try { addEvent(JSON.parse(m.data)); } catch { /* not an event */ } refreshSoon(); };
   stream.onerror = () => { if (state.signedIn === false) { stream.close(); stream = undefined; } };
-  setInterval(() => { if (state.signedIn && document.visibilityState === "visible") load().catch(() => {}); }, 8000);
-  setInterval(() => { if (state.signedIn && state.tab === "home" && document.visibilityState === "visible") render(); }, 30000);
+  clearInterval(pollTimer); clearInterval(renderTimer);
+  pollTimer = setInterval(() => { if (state.signedIn && document.visibilityState === "visible") load().catch(() => {}); }, 8000);
+  renderTimer = setInterval(() => { if (state.signedIn && state.tab === "home" && document.visibilityState === "visible") render(); }, 30000);
 }
 
 // The server replays its recent events on connect, so a reconnect sends some twice.
@@ -694,7 +695,7 @@ function appView() {
         state.me?.viewer ? h("span", { class: "mode read-only", title: "You can look, but nothing you do pays or changes anything" }, "Read-only") : null,
         s ? h("span", { class: "mode", title: s.offline ? "Airwallex and Metal are simulated" : "Real Airwallex and Metal APIs" }, h("span", { class: `dot${s.offline ? "" : " live"}` }), s.offline ? "Offline demo" : s.sandbox ? "Sandbox" : "Live") : null,
         h("a", { class: "btn quiet icon-btn", href: "/ops/", target: "_blank", rel: "noopener", title: "Back office", "aria-label": "Back office" }, icon("ledger", 18)),
-        h("button", { class: "btn quiet icon-btn", title: "Sign out", "aria-label": "Sign out", onclick: async () => { await api("/auth/logout", {}); state.me = await api("/auth/me").catch(() => state.me); state.signedIn = false; history.pushState(null, "", "/"); render(); } }, icon("out", 18)),
+        h("button", { class: "btn quiet icon-btn", title: "Sign out", "aria-label": "Sign out", onclick: async () => { await api("/auth/logout", {}); state.me = await api("/auth/me").catch(() => state.me); state.signedIn = false; stream?.close(); stream = undefined; clearInterval(pollTimer); clearInterval(renderTimer); history.pushState(null, "", "/"); render(); } }, icon("out", 18)),
       ),
     )),
     h("div", { class: "wrap" },
@@ -1485,7 +1486,7 @@ function provePanel(p) {
       h("span", { class: `pill ${DISPUTE_VERDICT[d.verdict]?.[1] ?? ""}` }, DISPUTE_VERDICT[d.verdict]?.[0] ?? d.verdict),
       h("span", {}, h("b", {}, `${proof.claims[d.claim]}. `), d.reason, d.anchor_tx?.startsWith("0x") ? h("a", { href: `https://testnet.metalntwx.com/tx/${d.anchor_tx}`, target: "_blank", rel: "noopener" }, " Anchored on Metal") : null))),
     p.status === "paid" ? h("div", { class: "actions" }, disputeButton(p), open ? h("button", { type: "button", class: "btn quiet small", disabled: state.busy[key], onclick: keep }, "Keep the payout") : null) : null,
-    p.status === "paid" && !open ? h("div", { class: "pv-try" },
+    p.status === "paid" && !open && !state.me?.viewer ? h("div", { class: "pv-try" },
       h("span", { class: "wi-hint" }, "Dispute it as the agent would. The rules answer from the proof above."),
       h("div", { class: "wi-chips" }, CLAIM_CHIPS.map(([c, label]) => h("button", { type: "button", class: "chip", disabled: state.busy[key], onclick: () => file(c) }, label)))) : null,
   );
