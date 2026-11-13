@@ -436,9 +436,6 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   // A viewer may look at every screen, but not the payee's bank identifiers: mask them to the last
   // four wherever a response carries them. The owner's own session is untouched, and nothing stored changes.
   const BANK_ID = /^(iban|accountNumber|account_number|sortCode|sort_code|routingNumber|routing_number)$/;
-  const maskBankIds = (v: unknown): unknown => Array.isArray(v) ? v.map(maskBankIds)
-    : v && typeof v === "object" ? Object.fromEntries(Object.entries(v as Record<string, unknown>).map(([k, x]) => [k, BANK_ID.test(k) && typeof x === "string" ? `••••${x.replace(/\s+/g, "").slice(-4)}` : maskBankIds(x)]))
-    : v;
   const lastFour = (s: string) => `••••${s.replace(/\s+/g, "").slice(-4)}`;
   // Quotes from an email can hold a bank number in running text: keep the last four of any long digit run or IBAN.
   const maskQuote = (s: string) => s.replace(/\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]){10,30}\b/g, lastFour).replace(/\d(?:\s?\d){5,}/g, lastFour);
