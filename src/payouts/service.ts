@@ -400,6 +400,13 @@ export class PayoutService {
 
   async onFunded(id: string, payer: string, fundingTx: string, now = new Date()): Promise<Payout> {
     if (!this.book.transition(id, ["accepted"], "funded", { buyer: payer, fundingTx })) return this.book.get(id)!;
+    // Held for the whole method so a concurrent follow() does not treat this funded payout as stranded.
+    const mine = !this.executing.has(id);
+    this.executing.add(id);
+    try { return await this.fundedStep(id, payer, fundingTx, now); } finally { if (mine) this.executing.delete(id); }
+  }
+
+  private async fundedStep(id: string, payer: string, fundingTx: string, now: Date): Promise<Payout> {
     const p = this.book.get(id)!;
     if (!payer.startsWith("internal:")) emit("observe", `Received ${toMajor(p.totalMinor).toFixed(2)} USDZ from ${short(payer)} for payout ${id.slice(0, 8)}`, { payout: id }, fundingTx);
 
@@ -462,10 +469,12 @@ export class PayoutService {
   private readonly executing = new Set<string>();
   private readonly lastRefundTry = new Map<string, number>();
   private readonly refundEscalated = new Set<string>();
+  private readonly refunding = new Set<string>();
 
   private async execute(p: Payout): Promise<Payout> {
+    const mine = !this.executing.has(p.id);
     this.executing.add(p.id);
-    try { return await this.executeNow(p); } finally { this.executing.delete(p.id); }
+    try { return await this.executeNow(p); } finally { if (mine) this.executing.delete(p.id); }
   }
 
   private async executeNow(p: Payout): Promise<Payout> {
@@ -743,6 +752,13 @@ export class PayoutService {
 
   /** Pays the payer back. From `failed` a refund error is recorded as refund_failed; from refund_failed (a retry) it leaves the row alone. Metal dedupes on `refund-<id>`, so a retry pays at most once. */
   private async refund(p: Payout, reason: string, from: Payout["status"][]): Promise<Payout> {
+    // A refund can take minutes; a second pull for the same payout must not race the first.
+    if (this.refunding.has(p.id)) return this.book.get(p.id)!;
+    this.refunding.add(p.id);
+    try { return await this.refundNow(p, reason, from); } finally { this.refunding.delete(p.id); }
+  }
+
+  private async refundNow(p: Payout, reason: string, from: Payout["status"][]): Promise<Payout> {
     const buyer = this.book.get(p.id)!.buyer;
     if (buyer?.startsWith("internal:")) {
       emit("escalate", `Your invoice payout ${p.id.slice(0, 8)} to ${p.payeeName} failed: ${reason}. The money is still in your Airwallex balance.`, { payout: p.id });

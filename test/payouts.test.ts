@@ -398,4 +398,41 @@ describe("recovering stranded payouts", () => {
     await followUntil(svc, q.id, "paid");
     expect(svc.book.get(q.id)!.status).toBe("paid");
   });
+
+  it("a follow during a slow refund does not pull a second refund", async () => {
+    const { awx, store, trail } = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const refunder = { calls: 0, async refund() { this.calls++; await gate; return { tx: "0xslow" }; } };
+    const svc = new PayoutService({ awx, store, refunder, trail, read: async (t) => heuristicRead(t) });
+    const id = await fund(svc);
+    const failing = (svc as unknown as { fail(p: unknown, r: string): Promise<unknown> }).fail(svc.book.get(id)!, "bank returned it");
+    await svc.follow();
+    release();
+    await failing;
+    expect(refunder.calls).toBe(1);
+    expect(svc.book.get(id)!.status).toBe("refunded");
+  });
+
+  it("a follow while onFunded is still deciding does not send the payout twice", async () => {
+    const { awx, svc, store } = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const real = awx.currentBalances;
+    awx.currentBalances = async () => { await gate; return real(); };
+    let sends = 0;
+    const create = awx.createTransfer;
+    awx.createTransfer = async (b) => { sends++; return create(b); };
+    const q = await svc.quote(req());
+    svc.accept(q.id);
+    // An owner's invoice that waits for the float is the path that awaits currentBalances before execute().
+    const decision = { verdict: "wait", decidedBy: "balance", reason: "float", until: { fundsUsdzMinor: 1 } };
+    store.db.prepare("UPDATE payouts SET decision = ? WHERE id = ?").run(JSON.stringify(decision), q.id);
+    const funding = svc.onFunded(q.id, "internal:owner", "0xfund1");
+    await new Promise((r) => setTimeout(r, 0));
+    await svc.follow();
+    release();
+    await funding;
+    expect(sends).toBe(1);
+  });
 });
