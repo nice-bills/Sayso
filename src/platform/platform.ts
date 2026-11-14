@@ -8,6 +8,8 @@
 // own UI (a Base44 entity, say) shows it live.
 
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { BlockList, isIP } from "node:net";
 import { z } from "zod";
 import type { AgentKey, AgentKeys } from "../agents/keys.js";
 import { emit } from "../events.js";
@@ -88,6 +90,24 @@ export function verifyWebhook(secret: string, header: string, body: string, tole
   return want.length === got.length && timingSafeEqual(want, got);
 }
 
+const PRIVATE = new BlockList();
+for (const [a, n] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 4], ["240.0.0.0", 4]] as const) PRIVATE.addSubnet(a, n, "ipv4");
+for (const [a, n] of [["::", 128], ["::1", 128], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8]] as const) PRIVATE.addSubnet(a, n, "ipv6");
+
+/** True for an address on the public internet: not loopback, private, link-local (cloud metadata), CGNAT or reserved. */
+export function isPublicAddress(ip: string): boolean {
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
+  if (mapped) return isPublicAddress(mapped[1]!);
+  const v = isIP(ip);
+  return v !== 0 && !PRIVATE.check(ip, v === 4 ? "ipv4" : "ipv6");
+}
+
+/** True only if the name resolves, and every address it resolves to is public. */
+export async function resolvesPublic(hostname: string, lookup = dnsLookup): Promise<boolean> {
+  const all = await lookup(hostname, { all: true, verbatim: true });
+  return all.length > 0 && all.every((a) => isPublicAddress(a.address));
+}
+
 /** A webhook must be https and must not point at the machine's own network (unless running offline). */
 export function checkWebhookUrl(raw: string, offline: boolean): string {
   let u: URL;
@@ -95,7 +115,7 @@ export function checkWebhookUrl(raw: string, offline: boolean): string {
   if (offline) return u.toString();
   if (u.protocol !== "https:") throw new PayoutError(400, "webhook_url must be https");
   const h = u.hostname.toLowerCase();
-  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal") || /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h) || h.includes(":") || /^\d+$/.test(h)) throw new PayoutError(400, "webhook_url must be a public host");
+  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal") || /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h) || h.includes(":") || /^\d+$/.test(h) || (isIP(h) !== 0 && !isPublicAddress(h))) throw new PayoutError(400, "webhook_url must be a public host");
   return u.toString();
 }
 
@@ -306,6 +326,8 @@ export class Platform {
     for (const e of due) {
       if (!e.webhook_url) { this.store.db.prepare("UPDATE platform_events SET delivered_at = ?, last_error = 'no webhook configured' WHERE id = ?").run(new Date().toISOString(), e.id); continue; }
       try {
+        // shortcut: the name can resolve differently between this check and the connection (DNS rebinding); pinning needs a custom dispatcher.
+        if (!this.o.offline && !(await resolvesPublic(new URL(e.webhook_url).hostname))) throw new Error("webhook host resolves to a private address");
         const res = await this.send(e.webhook_url, {
           method: "POST", redirect: "error", signal: AbortSignal.timeout(8000),
           headers: { "content-type": "application/json", "sayso-signature": signWebhook(e.webhook_secret, e.body, Math.floor(now / 1000)), "sayso-event-id": e.id },

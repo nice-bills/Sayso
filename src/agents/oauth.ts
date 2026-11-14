@@ -93,6 +93,7 @@ export function oauthRouter(d: { store: Store; keys: AgentKeys; auth: Auth }): {
     const r0 = { id: randomBytes(18).toString("base64url"), client_id: c.id, redirect_uri: q.redirect_uri, challenge: q.code_challenge ?? "", state: q.state ?? null, status: "pending", code_hash: null, agent_id: null, expires: Date.now() + REQUEST_SECONDS * 1000 } as AuthRequest;
     if (q.response_type !== "code") return void res.redirect(302, back(r0, { error: "unsupported_response_type" }));
     if (!q.code_challenge || q.code_challenge_method !== "S256") return void res.redirect(302, back(r0, { error: "invalid_request", error_description: "PKCE with S256 is required" }));
+    db.prepare("DELETE FROM oauth_requests WHERE expires < ?").run(Date.now() - 86_400_000); // keep a day of history, drop the rest
     db.prepare("INSERT INTO oauth_requests (id, client_id, redirect_uri, challenge, state, status, expires) VALUES (?,?,?,?,?,?,?)").run(r0.id, r0.client_id, r0.redirect_uri, r0.challenge, r0.state, r0.status, r0.expires);
     res.redirect(302, `/connect/${r0.id}`);
   });

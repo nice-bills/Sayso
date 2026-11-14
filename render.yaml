@@ -17,6 +17,8 @@ services:
       - { key: SESSION_SECRET, generateValue: true }
       # Anyone (judges) can look around read-only: every view, nothing that pays or changes anything.
       - { key: SAYSO_VIEWER, value: "on" }
+      # Render sits behind Cloudflare, so CF-Connecting-IP is the real client address.
+      - { key: SAYSO_TRUST_CF, value: "on" }
       # Agents paying over x402 must sign Sayso's exact offer under an owner-bound Metal mandate, checked before
       # settlement. A bare agent key is refused. "verify" only records the mandate after the money has moved.
       - { key: SAYSO_AGENT_MANDATES, value: required }

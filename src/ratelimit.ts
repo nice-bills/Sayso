@@ -7,12 +7,13 @@ import type { NextFunction, Request, Response } from "express";
 export interface Limit { /** Requests allowed per window. */ max: number; windowMs: number }
 
 /**
- * Who is calling. Render sits behind Cloudflare, which overwrites CF-Connecting-IP with the real client.
+ * Who is calling. Render sits behind Cloudflare, which overwrites CF-Connecting-IP with the real client, so
+ * render.yaml sets SAYSO_TRUST_CF=on. Anywhere else a caller could write that header, so it is ignored.
  * Otherwise the last X-Forwarded-For hop is the one our own proxy appended; earlier hops are whatever the
  * caller wrote, so they are never trusted. With no proxy at all, the socket address.
  */
 export function clientOf(req: Request): string {
-  const cf = req.header("cf-connecting-ip")?.trim();
+  const cf = process.env.SAYSO_TRUST_CF === "on" ? req.header("cf-connecting-ip")?.trim() : undefined;
   if (cf) return cf;
   const fwd = req.header("x-forwarded-for")?.split(",").map((s) => s.trim()).filter(Boolean).at(-1);
   return fwd || req.socket.remoteAddress || "unknown";

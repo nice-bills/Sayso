@@ -53,9 +53,10 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
     };
   };
   const linesOf = (x: { kind: "payout" | "batch"; id: string }) => (x.kind === "payout" ? [x.id] : batches.get(x.id)?.payoutIds ?? []);
-  r.use(express.json({ limit: "1mb" }));
+  // Only payout routes parse JSON here: the router is mounted at the root, so a router-wide parser would run for every path.
+  const json = express.json({ limit: "1mb" });
 
-  r.post("/v1/batches", async (req, res) => {
+  r.post("/v1/batches", json, async (req, res) => {
     try {
       const b = await batches.create(req.body?.items, String(req.body?.reference ?? "Batch payout"));
       res.status(b.status === "rejected" ? 422 : 201).json(batches.view(b.id));
@@ -68,14 +69,14 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
     if (!v) return void res.status(404).json({ error: "no such batch" });
     res.json(v);
   });
-  r.post("/v1/batches/:id/pay", (req, res, next) => {
+  r.post("/v1/batches/:id/pay", json, (req, res, next) => {
     const b = batches.get(req.params.id);
     if (!b) return void res.status(404).json({ error: "no such batch" });
     if (!batches.priceOf(b.id)) return void res.status(b.status === "quoted" ? 410 : 409).json({ error: b.status === "quoted" ? "batch quote expired" : `batch is ${b.status}`, batch: batches.view(b.id) });
     next();
   });
 
-  r.post("/v1/quotes", async (req, res) => {
+  r.post("/v1/quotes", json, async (req, res) => {
     try {
       const p = await svc.quote(req.body);
       res.status(p.status === "rejected" ? 422 : 201).json({ ...(await withOffer(p)), pay_url: p.status === "quoted" && !waitsForFunds(p) ? `/v1/payouts/${p.id}/pay` : null });
@@ -85,7 +86,7 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
   });
 
   // A split's second part: a quote for what is left, to the same payee, paid like any other.
-  r.post("/v1/payouts/:id/remainder", async (req, res) => {
+  r.post("/v1/payouts/:id/remainder", json, async (req, res) => {
     try {
       const q = await svc.quoteRemainder(req.params.id);
       res.status(201).json({ ...(await withOffer(q)), pay_url: q.status === "quoted" && !waitsForFunds(q) ? `/v1/payouts/${q.id}/pay` : null });
@@ -101,7 +102,7 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
   });
 
   // Only a payable quote ever gets a 402; anything else is answered before payment is asked for.
-  r.post("/v1/payouts/:id/pay", (req, res, next) => {
+  r.post("/v1/payouts/:id/pay", json, (req, res, next) => {
     const p = svc.book.get(req.params.id);
     if (!p) return void res.status(404).json({ error: "no such quote" });
     if (p.status === "quoted" && waitsForFunds(p)) return void res.status(409).json({ error: WAITS_FOR_FUNDS, payout: publicView(p) });

@@ -314,13 +314,15 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     [["/v1/payouts/:id/pay", "/v1/batches/:id/pay", "/v1/payouts/:id/remainder"], rateLimit("payment", LIMITS.pay)],
     ["/v1/payouts/:id/disputes", rateLimit("dispute", LIMITS.disputes)],
     [["/v1/decide/preview", "/v1/payouts/:id/what-if"], rateLimit("preview", LIMITS.preview)],
-    [["/auth/login", "/auth/email", "/auth/passkey/login", "/auth/passkey/login/options", "/auth/viewer", "/agent/identity", "/agent/identity/claim", "/oauth2/token"], rateLimit("sign-in", LIMITS.auth)],
+    [["/auth/login", "/auth/email", "/auth/passkey/login", "/auth/passkey/login/options", "/auth/viewer", "/agent/identity", "/agent/identity/claim", "/oauth2/token", "/oauth2/register"], rateLimit("sign-in", LIMITS.auth)],
     [["/mcp", "/mcp/k/:key", "/v1/agent/invoices"], rateLimit("agent", LIMITS.mcp)],
     [["/v1/platform/payouts"], rateLimit("platform", LIMITS.mcp)],
     ["/v/:token", rateLimit("link", LIMITS.links)],
   ];
   for (const [path, limit] of limited) app.post(path, limit);
   app.get("/v1/payouts/:id/proof", rateLimit("proof", LIMITS.preview));
+  app.get("/oauth2/authorize", rateLimit("sign-in", LIMITS.auth));
+  app.get("/v1/receipts/latest", rateLimit("receipt", LIMITS.preview));
   if (!opts.offline && process.env.AWX_WEBHOOK_SECRET) {
     app.use("/webhooks/airwallex", webhookRouter(process.env.AWX_WEBHOOK_SECRET, store, async (e) => {
       if (e.name.startsWith("payout.transfer.")) await svc.onTransfer(e.data.object as unknown as Transfer);
