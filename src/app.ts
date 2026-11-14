@@ -272,6 +272,13 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     await svc.releaseWaiting().catch((e) => emit("escalate", `Releasing waiting payouts failed: ${String(e).slice(0, 200)}`));
     try { inbox.rescueStranded(); } catch (e) { emit("escalate", `Rescuing stranded invoices failed: ${String(e).slice(0, 200)}`); }
     await receipts.retry();
+    try {
+      for (const d of disputes.unanchored()) {
+        // A denied dispute rests on its anchored proof; one that failed to anchor is tried again here.
+        const a = await anchorer.anchor(d.proof_hash as `0x${string}`).catch(() => undefined);
+        if (a) disputes.anchored(d.id, a.tx);
+      }
+    } catch (e) { emit("escalate", `Retrying dispute anchors failed: ${String(e).slice(0, 200)}`); }
     if (imap) await pollImap(imap, inbox).catch((e) => emit("escalate", `Inbox read failed: ${String(e).slice(0, 200)}`));
     const mc = opts.offline || process.env.AGENTMAIL_WEBHOOK_SECRET ? undefined : mailbox.credentials();
     if (mc) agentMail ??= new AgentMailPoller(mc.apiKey, mc.inboxId);
@@ -319,7 +326,8 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   ];
   for (const [path, limit] of limited) app.post(path, limit);
   app.get("/v1/payouts/:id/proof", rateLimit("proof", LIMITS.preview));
-  if (!opts.offline && process.env.AWX_WEBHOOK_SECRET) {
+  // Offline too, so tests can drive the real path; the signature check is what guards it.
+  if (process.env.AWX_WEBHOOK_SECRET) {
     app.use("/webhooks/airwallex", webhookRouter(process.env.AWX_WEBHOOK_SECRET, store, async (e) => {
       if (e.name.startsWith("payout.transfer.")) await svc.onTransfer(e.data.object as unknown as Transfer);
     }));
@@ -506,7 +514,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
       if (j.verdict === "upheld") await svc.dispute(p.id, "Sayso's dispute rules", `${CLAIMS[claim].toLowerCase()}; upheld from the proof`);
       else if (j.verdict === "review") emit("escalate", `A dispute on ${p.payeeName}'s payout needs you: ${CLAIMS[claim]}. ${j.reason}`, { payout: p.id });
       else {
-        // Denied: the proof it rests on is anchored on Metal, so the answer can't be rewritten later.
+        // Denied: the proof it rests on is anchored on Metal (the tick retries if this fails), so the answer can't be rewritten later.
         const a = await anchorer.anchor(proof.hash as `0x${string}`).catch(() => undefined);
         if (a) disputes.anchored(d.id, a.tx);
         emit("refuse", `Dispute on ${p.payeeName}'s payout denied: ${j.reason}`, { payout: p.id }, a?.explorer);

@@ -2,6 +2,7 @@ import express from "express";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import { buildSayso } from "../src/app.js";
+import { sign } from "../src/airwallex/webhooks.js";
 import { AgentKeys } from "../src/agents/keys.js";
 import { Inbox } from "../src/inbox/inbox.js";
 import { Platform, checkWebhookUrl, signWebhook, verifyWebhook } from "../src/platform/platform.js";
@@ -149,4 +150,74 @@ describe("an app paying through Sayso", () => {
     expect(a.payout?.payout_id).toBe(b.payout?.payout_id);
     expect(inbox.list().filter((i) => i.id.startsWith("b44:"))).toHaveLength(1);
   });
+});
+
+// Builds an offline app with a receiver, one approved payout taken to paid, and hands back what a test needs.
+async function paidApp(ref: string) {
+  const received: Array<{ headers: Record<string, string>; raw: string }> = [];
+  const hook = express().use(express.text({ type: "*/*" }), (req, res) => {
+    if (req.method !== "POST" || req.path !== "/functions/sayso-webhook") { res.sendStatus(404); return; }
+    received.push({ headers: req.headers as Record<string, string>, raw: req.body }); res.sendStatus(200);
+  }).listen(0);
+  const s = await buildSayso({ offline: true, dbPath: ":memory:" });
+  const server = s.app.listen(0);
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const hookUrl = `http://127.0.0.1:${(hook.address() as AddressInfo).port}/functions/sayso-webhook`;
+  const created = await fetch(`${base}/v1/platform/apps`, { method: "POST", headers: OWNER, body: JSON.stringify({ name: "Freelance Hub", webhook_url: hookUrl, rules: "" }) });
+  const app = await created.json() as { api_key: string; webhook_secret: string };
+  const asApp = { authorization: `Bearer ${app.api_key}`, "content-type": "application/json" };
+  expect((await fetch(`${base}/v1/platform/payouts`, { method: "POST", headers: asApp, body: JSON.stringify(payout({ ref })) })).status).toBe(201);
+  const item = s.inbox.list().find((i) => i.id.startsWith("b44:"))!;
+  await s.inbox.approve(item.id, "owner", {});
+  for (let i = 0; i < 4; i++) { await s.svc.follow(); await s.tick(); }
+  const done = await (await fetch(`${base}/v1/platform/payouts/${ref}`, { headers: asApp })).json() as { state: string };
+  expect(done.state).toBe("paid");
+  const payoutId = s.inbox.view(item.id)!.payoutId!;
+  const p = s.svc.book.get(payoutId)!;
+  const events = () => received.map((r) => ({ ...JSON.parse(r.raw), sig: r.headers["sayso-signature"], raw: r.raw }));
+  const bounce = () => ({ id: `evt_bounce_${ref}`, name: "payout.transfer.failed", created_at: new Date().toISOString(), data: { object: { id: p.transferId, request_id: payoutId, status: "FAILED", transfer_amount: 120, transfer_currency: "EUR", failure_type: "BENEFICIARY_BANK_RETURNED" } } });
+  return { s, base, app, p, payoutId, events, bounce, close: () => { server.close(); hook.close(); } };
+}
+
+describe("returns after paid", () => {
+  it("hears a bounce after paid through the real Airwallex webhook", async () => {
+    process.env.AWX_WEBHOOK_SECRET = "whsec_test";
+    const h = await paidApp("job-1");
+    try {
+      const raw = JSON.stringify(h.bounce());
+      const ts = String(Date.now());
+      const res = await fetch(`${h.base}/webhooks/airwallex`, { method: "POST", headers: { "content-type": "application/json", "x-timestamp": ts, "x-signature": sign("whsec_test", ts, raw) }, body: raw });
+      expect(res.status).toBe(200);
+      for (let i = 0; i < 40 && !["failed", "refunded"].includes(h.s.svc.book.get(h.payoutId)!.status); i++) await new Promise((r) => setTimeout(r, 50));
+      const final = h.s.svc.book.get(h.payoutId)!.status;
+      expect(["failed", "refunded"]).toContain(final);
+      await h.s.tick(); await h.s.tick();
+      const events = h.events();
+      const types = events.map((e) => e.type);
+      expect(types.indexOf("payout.paid")).toBeGreaterThan(-1);
+      expect(types.indexOf(`payout.${final}`)).toBeGreaterThan(types.indexOf("payout.paid"));
+      expect(events.map((e) => e.sequence)).toEqual(events.map((_e, i) => i + 1));
+      for (const e of events) expect(verifyWebhook(h.app.webhook_secret, e.sig, e.raw)).toBe(true);
+    } finally {
+      delete process.env.AWX_WEBHOOK_SECRET;
+      h.close();
+    }
+  }, 30_000);
+
+  it("stops watching a ref 120 days after it was paid, but not one paid 10 days ago", async () => {
+    for (const [days, heard] of [[121, false], [10, true]] as const) {
+      const h = await paidApp("job-1");
+      try {
+        const before = h.events().length;
+        (h.s.svc.book as unknown as { store: Store }).store.db.prepare("UPDATE platform_refs SET state_at = ? WHERE ref = 'job-1'").run(new Date(Date.now() - days * 86_400_000).toISOString());
+        await h.s.svc.onTransfer({ id: h.p.transferId!, request_id: h.payoutId, status: "FAILED", transfer_amount: 120, transfer_currency: "EUR", failure_type: "BENEFICIARY_BANK_RETURNED" } as never);
+        await h.s.tick(); await h.s.tick();
+        const added = h.events().slice(before).map((e) => e.type);
+        if (heard) expect(added.some((t) => t === "payout.failed" || t === "payout.refunded")).toBe(true);
+        else expect(added).toEqual([]);
+      } finally {
+        h.close();
+      }
+    }
+  }, 60_000);
 });
