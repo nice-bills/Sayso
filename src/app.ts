@@ -23,6 +23,7 @@ import { RampLedger } from "./bridge/ledger.js";
 import { SimulatedDepositCredit } from "./bridge/deposit-credit.js";
 import { sweepEpoch, type MetalSettlementVerifier } from "./bridge/ramp.js";
 import { dashboardRouter } from "./dashboard/server.js";
+import { forViewer, viewerMask } from "./routes/viewer.js";
 import { emit } from "./events.js";
 import { Inbox } from "./inbox/inbox.js";
 import { machines } from "./machine.js";
@@ -460,22 +461,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   // Everything below moves the business's money or shows its payees, so it needs the owner.
   const auth = createAuth({ offline: opts.offline, log: (l) => emit("observe", l, undefined, undefined, { private: true }), store, send: mailbox.sender() });
   app.use(auth.router);
-  // A viewer may look at every screen, but not the payee's bank identifiers: mask them to the last
-  // four wherever a response carries them. The owner's own session is untouched, and nothing stored changes.
-  const BANK_ID = /^(iban|accountNumber|account_number|sortCode|sort_code|routingNumber|routing_number)$/;
-  const lastFour = (s: string) => `••••${s.replace(/\s+/g, "").slice(-4)}`;
-  // Quotes from an email can hold a bank number in running text: keep the last four of any long digit run or IBAN.
-  const maskQuote = (s: string) => s.replace(/\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]){10,30}\b/g, lastFour).replace(/\d(?:\s?\d){5,}/g, lastFour);
-  const forViewer = (v: unknown): unknown => Array.isArray(v) ? v.map(forViewer)
-    : v && typeof v === "object" ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([k]) => k !== "simLink" && k !== "simStatementReference").map(([k, x]) => [k,
-      BANK_ID.test(k) && typeof x === "string" ? lastFour(x) : k === "citations" && Array.isArray(x) ? x.map((q) => (typeof q === "string" ? maskQuote(q) : forViewer(q))) : forViewer(x)]))
-    : v;
-  app.use((req, res, next) => {
-    if (!auth.isViewer(req)) return next();
-    const json = res.json.bind(res);
-    res.json = ((body?: unknown) => json(forViewer(body))) as express.Response["json"];
-    next();
-  });
+  app.use(viewerMask((req) => auth.isViewer(req)));
 
   // Agents connect over the hosted MCP endpoint, with a key the owner makes here or by signing
   // themselves up through auth.md, which the owner confirms with their passkey.
