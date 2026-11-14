@@ -29,8 +29,7 @@ test('the app header fits at tablet widths', async ({ app, screen, browser }) =>
         const right = document.querySelector('[aria-label="Sign out everywhere"]')!.getBoundingClientRect().right;
         return Math.max(right - innerWidth, right - document.querySelector('.top .wrap')!.getBoundingClientRect().right);
       });
-      // Payments also has the filter strip (checked in its own test), so only its header is judged here.
-      if ((tab !== 'Payments' && over > 0) || out > 0) bad.push(`${tab}@${width}: overflow ${over}, sign-out past edge by ${Math.round(out)}`);
+      if (over > 0 || out > 0) bad.push(`${tab}@${width}: overflow ${over}, sign-out past edge by ${Math.round(out)}`);
     }
   }
   expect(bad).toEqual([]);
@@ -51,3 +50,20 @@ for (const width of [320, 360]) {
     expect(Object.entries(m).filter(([, px]) => px > 0)).toEqual([]);
   });
 }
+
+test('the payment filters stay inside the page', async ({ app, screen, browser }) => {
+  await browser.setViewport({ width: 768, height: 1024 });
+  await app.open('/');
+  await screen.getByRole('button', 'Look around, read-only').tap();
+  await expect(screen.getByRole('button', 'Talk')).toBeVisible();
+  await screen.getByRole('button', 'Everything').tap();
+  await screen.getByRole('tab', 'Payments').tap();
+  const bad: string[] = [];
+  for (const width of [740, 768, 1024, 1140, 1280, 1600]) {
+    await browser.setViewport({ width, height: 1024 });
+    const over = await overflow(browser);
+    const right = await browser.evaluate(() => document.querySelector('.filters')!.getBoundingClientRect().right - innerWidth);
+    if (over > 0 || right > 0) bad.push(`${width}: overflow ${over}, filters past edge by ${right}`);
+  }
+  expect(bad).toEqual([]);
+});

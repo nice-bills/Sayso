@@ -24,7 +24,7 @@ body.film .top .wrap { max-width: 1168px; height: auto; padding: 8px 8px 8px 18p
 }
 body.film .top-right { gap: 8px; margin-left: 0; }
 @media (max-width: 860px) { body.film .top .bal { display: none; } body.film .top .wrap { gap: 8px; } }
-body.film .shell .wrap:not(.top .wrap) { max-width: 1240px; padding-inline: clamp(16px, 3vw, 36px); }
+body.film .shell .wrap:not(.top .wrap) { --margin: clamp(16px, 3vw, 36px); max-width: 1240px; padding-inline: var(--margin); }
 body.film .shell .page { max-width: none; padding-top: 14px; padding-bottom: 80px; }
 body.film .head h2 { font-size: clamp(44px, 6vw, 72px); line-height: .9; }
 
