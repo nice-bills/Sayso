@@ -36,8 +36,6 @@ test('pressing Enter in the token field signs in', async ({ app, screen, browser
 });
 
 test('opening a decision from Home focuses that exact payment and keeps it on screen', async ({ app, screen, browser }) => {
-  // Server events re-render the page and drop focus (a separate app bug), and other tests fire them in parallel; this test is about the click.
-  await browser.addInitScript(() => { (window as any).EventSource = class { close() {} }; });
   await signIn(app, screen);
   // Short, so the later rows start below the fold.
   await browser.setViewport({ width: 1280, height: 600 });
@@ -248,4 +246,31 @@ test('the landing stays at / after signing in, and opens the app from there', as
   await expect(browser.locator('.v-hero')).toBeVisible();
   await screen.getByRole('link', 'Open the app').first().tap();
   await expect(screen.getByRole('button', 'Talk')).toBeVisible();
+});
+
+test('a background update keeps keyboard focus where it was', async ({ app, screen, browser }) => {
+  await openEverything(app, screen);
+  await screen.getByRole('tab', 'Payments').tap();
+  const head = browser.locator('article.row[data-id] button.row-head').first();
+  await head.focus();
+  const id = await browser.evaluate(() => (document.activeElement?.closest('.row') as HTMLElement).dataset.id);
+  const H = { authorization: 'Bearer sayso-demo', 'content-type': 'application/json' };
+  const res = await fetch(new URL('/v1/inbox', app.baseUrl), {
+    method: 'POST', headers: H,
+    body: JSON.stringify({ message_id: `e2e-refocus-${Date.now()}`, from: 'Acme <billing@acme.example>', subject: `Refocus ${Date.now()}`, body: 'Please pay invoice 9 for EUR 75.00. Thanks, Acme Ltd' }),
+  });
+  expect(res.status).toBe(201);
+  const item = (await res.json()) as { id: string };
+  try {
+    // Wait for the app to rebuild the page: the node that had focus is gone from the document.
+    await browser.evaluate(async () => {
+      const el = document.activeElement;
+      for (let i = 0; i < 150 && el?.isConnected; i++) await new Promise((r) => setTimeout(r, 100));
+      if (el?.isConnected) throw new Error('page was not re-rendered');
+    });
+    const now = await browser.evaluate(() => ({ tag: document.activeElement?.tagName ?? null, cls: document.activeElement?.className ?? null, id: (document.activeElement?.closest('.row') as HTMLElement | null)?.dataset.id ?? null }));
+    expect(now).toEqual({ tag: 'BUTTON', cls: 'row-head', id });
+  } finally {
+    await fetch(new URL(`/v1/inbox/${encodeURIComponent(item.id)}/ignore`, app.baseUrl), { method: 'POST', headers: H, body: '{}' });
+  }
 });

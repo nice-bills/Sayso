@@ -191,22 +191,36 @@ function render() {
   dirty = false;
   staggered = 0;
   const y = window.scrollY;
+  const keep = focusKey(focused);
   $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn && (inApp() || state.claim || state.connect || state.focus) ? (state.claim ? claimView() : state.connect ? connectView() : appView()) : !state.signedIn && (state.claim || state.connect) ? claimGate() : landing(), state.signedIn ? whyDrawer() : null, state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].flat().filter(Boolean));
   window.scrollTo(0, y);
   filmBehindApp();
   afterRender();
-  settleFocus();
+  settleFocus(keep);
   watchReveals();
 }
 // Where focus goes after the next render: a selector, set by whatever opened or closed a dialog.
 let focusAfter = null;
-function settleFocus() {
+// A selector for the focused control, only if it is unique now; never an index, which could land on another payment's button after the list changes.
+function focusKey(f) {
+  if (!f || f === document.body || !$root.contains(f)) return null;
+  const q = (a, v) => `[${a}="${CSS.escape(v)}"]`;
+  const own = f.id ? `#${CSS.escape(f.id)}` : f.dataset.why ? q("data-why", f.dataset.why) : f.dataset.id ? q("data-id", f.dataset.id) : f.tagName.toLowerCase() + [...f.classList].map((c) => `.${CSS.escape(c)}`).join("");
+  const row = f.id ? null : f.closest("[data-id]");
+  const key = row && row !== f ? `${q("data-id", row.dataset.id)} ${own}` : own;
+  return $root.querySelectorAll(key).length === 1 ? key : null;
+}
+function settleFocus(keep) {
   const dialog = $root.querySelector(".why-drawer, .osheet[role=dialog]");
   const want = focusAfter ? $root.querySelector(focusAfter) : null;
   focusAfter = null;
-  if (want) return want.focus();
+  // Instant scroll: a smooth one can be cut short by a background render's scrollTo, leaving the row off screen.
+  if (want) { want.focus({ preventScroll: true }); want.scrollIntoView({ block: "nearest", behavior: "instant" }); return; }
   // A re-render while a dialog is open puts focus back inside it.
-  if (dialog && !dialog.contains(document.activeElement)) dialog.querySelector("button, [href], input, [tabindex]:not([tabindex='-1'])")?.focus();
+  if (dialog && !dialog.contains(document.activeElement)) { dialog.querySelector("button, [href], input, [tabindex]:not([tabindex='-1'])")?.focus(); return; }
+  // A background update rebuilds the page; put keyboard focus back on the same control.
+  const back = keep && (!document.activeElement || document.activeElement === document.body) ? $root.querySelectorAll(keep) : [];
+  if (back.length === 1) back[0].focus({ preventScroll: true });
 }
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
