@@ -25,6 +25,35 @@ export const OFFER_TYPES = {
   ],
 } as const;
 
+/** A batch: these quotes, in this order, for this total, to this address, until this time. Each line also carries its own Offer. */
+export const BATCH_OFFER_TYPES = {
+  BatchOffer: [
+    { name: "batch", type: "string" },
+    { name: "quotes", type: "string" },
+    { name: "priceUsdzMinor", type: "uint256" },
+    { name: "payTo", type: "address" },
+    { name: "expiresAt", type: "uint64" },
+  ],
+} as const;
+
+export interface BatchTerms {
+  batch: string;
+  /** The line payout ids in order, joined by "," (UUIDs never contain one). */
+  quotes: string;
+  priceUsdzMinor: string;
+  payTo: Address;
+  /** Unix seconds. */
+  expiresAt: string;
+}
+export interface SignedBatchOffer { signer: Address; terms: BatchTerms; signature: Hex }
+
+const batchMessage = (t: BatchTerms) => ({ ...t, priceUsdzMinor: BigInt(t.priceUsdzMinor), expiresAt: BigInt(t.expiresAt) });
+
+export async function verifyBatchOffer(o: SignedBatchOffer, signer: Address): Promise<boolean> {
+  if (o.signer.toLowerCase() !== signer.toLowerCase()) return false;
+  return verifyTypedData({ address: signer, domain: OFFER_DOMAIN, types: BATCH_OFFER_TYPES, primaryType: "BatchOffer", message: batchMessage(o.terms), signature: o.signature }).catch(() => false);
+}
+
 /** What the signature covers, in the API's shape (strings, so JSON carries it unchanged). */
 export interface OfferTerms {
   quote: string;
@@ -89,6 +118,12 @@ export class OfferSigner {
   async sign(p: Payout, payTo: Address): Promise<SignedOffer> {
     const terms = termsOf(p, payTo);
     const signature = await this.account.signTypedData({ domain: OFFER_DOMAIN, types: OFFER_TYPES, primaryType: "Offer", message: message(terms) });
+    return { signer: this.address, terms, signature };
+  }
+
+  /** Signs a batch's terms. Deterministic, so the same batch at the same price always gets the same signature. */
+  async signBatch(terms: BatchTerms): Promise<SignedBatchOffer> {
+    const signature = await this.account.signTypedData({ domain: OFFER_DOMAIN, types: BATCH_OFFER_TYPES, primaryType: "BatchOffer", message: batchMessage(terms) });
     return { signer: this.address, terms, signature };
   }
 

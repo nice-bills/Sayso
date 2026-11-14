@@ -51,7 +51,7 @@ import type { Payout, PayoutBook } from "./payouts/book.js";
 import { booksBefore, flowsFromBooks, rampSince, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
 import { FakeAirwallex, FakeMandate, FakeRefunder } from "./sim/offline.js";
 import { buildProof, CLAIMS, Disputes, judge, type Claim } from "./payouts/proof.js";
-import { OfferSigner, storedKey } from "./payouts/offer.js";
+import { OfferSigner, storedKey, type BatchTerms } from "./payouts/offer.js";
 import { chainPayerCheck, DISPUTE_SIGNATURE_TTL_MS, disputeMessage, simPayerCheck, type PayerCheck } from "./payouts/dispute-auth.js";
 import { Store } from "./store.js";
 import { fmt, toMinor } from "./treasury/money.js";
@@ -312,6 +312,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   // Sayso's quote key signs every payable quote; agents check offers against this address.
   const offers = new OfferSigner(store);
   // Signed only while the quote is still open: a payout first looked at after it moved on gets no back-dated offer.
+  const signBatch = (t: Omit<BatchTerms, "payTo">) => offers.signBatch({ ...t, payTo });
   const signOffer = async (p: Payout) => p.status === "quoted" ? offers.offer(p, payTo) : offers.recorded(p.id) ?? null;
   app.get("/healthz", (_req, res) => res.json({ ok: true, offline: opts.offline, pay_to: payTo, quote_signer: offers.address, agent_mandates: policy }));
   // Public and read-only: every state machine, so an agent or an app never has to guess what a status means.
@@ -340,7 +341,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   }
   if (process.env.AGENTMAIL_WEBHOOK_SECRET) app.use(agentMailRouter(process.env.AGENTMAIL_WEBHOOK_SECRET, (e) => inbox.receive(e)));
   const batches = new BatchBook(store, svc);
-  app.use(payoutApi(svc, mode, batches, { policy, record: (ids, proof) => ids.forEach((id) => trail.add(id, "mandate", describeMandate(proof), proof as unknown as Record<string, unknown>)) }, signOffer));
+  app.use(payoutApi(svc, mode, batches, { policy, record: (ids, proof) => ids.forEach((id) => trail.add(id, "mandate", describeMandate(proof), proof as unknown as Record<string, unknown>)) }, signOffer, signBatch));
 
   // A payout's receipt, and the Metal transaction that anchors its hash. Public, like the payout itself:
   // it holds no bank details, and anyone can check it against the chain.

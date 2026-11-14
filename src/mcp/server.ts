@@ -21,7 +21,7 @@ import { z } from "zod";
 import { invoiceShape, toRequest, usdzLimit, type Invoice } from "./tools.js";
 import { failed, SaysoClient, type Failure, type PayOutcome, type Reply } from "./sayso.js";
 import { disputeDigest, disputeMessage } from "../payouts/dispute-auth.js";
-import { verifyOffer, type SignedOffer } from "../payouts/offer.js";
+import { verifyBatchOffer, verifyOffer, type SignedBatchOffer, type SignedOffer } from "../payouts/offer.js";
 import { PAYOUT } from "../payouts/book.js";
 
 const base = process.env.SAYSO_URL ?? "http://127.0.0.1:4021";
@@ -106,6 +106,28 @@ async function checkOffer(q: Quote, i: Invoice): Promise<Doubt | undefined> {
   if (t.payTo.toLowerCase() !== published.pay_to.toLowerCase()) return { reason: "the signed offer pays an address Sayso doesn't publish", retryable: false };
   if (t.currency !== i.currency.toUpperCase() || (q.decision?.verdict !== "split" && Number(t.amountMinor) !== Math.round(Number(i.amount) * 100))) return { reason: "the signed offer is for a different amount or currency than this invoice", retryable: false };
   if (Number(t.expiresAt) * 1000 < Date.now()) return { reason: "the signed offer has expired", retryable: false };
+  return undefined;
+}
+
+/** Before paying a batch: Sayso signed these lines, this total and its own address, and each line's offer matches the invoice it came from. */
+async function checkBatch(b: { id?: string; price_usdz?: string; offer?: SignedBatchOffer | null; payouts?: Quote[]; set_aside?: Array<{ index: number }> }, items: Invoice[]): Promise<Doubt | undefined> {
+  if (!b.offer || !b.payouts) return { reason: "Sayso sent no signed offer with this batch", retryable: false };
+  const h = await api.healthz();
+  if (!h.ok) return { reason: `couldn't check Sayso's signing key: ${h.error}`, retryable: true };
+  if (!(await verifyBatchOffer(b.offer, h.data.quote_signer))) return { reason: "the batch offer is not signed by Sayso's published quote key", retryable: false };
+  const t = b.offer.terms;
+  if (t.batch !== b.id) return { reason: "the signed batch offer is for another batch", retryable: false };
+  if (t.quotes !== b.payouts.map((l) => l.id).join(",")) return { reason: "the signed batch offer covers different lines", retryable: false };
+  if ((Number(t.priceUsdzMinor) / 100).toFixed(2) !== b.price_usdz) return { reason: `the signed batch price (${t.priceUsdzMinor} cents) is not the quoted price ${b.price_usdz}`, retryable: false };
+  if (t.payTo.toLowerCase() !== h.data.pay_to.toLowerCase()) return { reason: "the signed batch offer pays an address Sayso doesn't publish", retryable: false };
+  if (Number(t.expiresAt) * 1000 < Date.now()) return { reason: "the signed batch offer has expired", retryable: false };
+  const aside = new Set((b.set_aside ?? []).map((s) => s.index));
+  const kept = items.filter((_, i) => !aside.has(i));
+  if (kept.length !== b.payouts.length) return { reason: "the batch's lines don't match the invoices sent", retryable: false };
+  for (const [n, line] of b.payouts.entries()) {
+    const doubt = await checkOffer(line, kept[n]!);
+    if (doubt) return { reason: `line ${n + 1}: ${doubt.reason}`, retryable: doubt.retryable };
+  }
   return undefined;
 }
 
@@ -199,14 +221,14 @@ server.registerTool("pay_remainder", {
 });
 
 server.registerTool("pay_batch", {
-  description: "Pay many people at once (e.g. a marketplace's sellers or a team of contractors) with ONE USDZ payment over x402. Each line is an invoice with the same required fields as pay_invoice; lines Sayso won't pay are set aside with reasons and not charged. Pays only if the batch price is at most max_usdz (USDZ, fees included). A line that bounces is refunded on its own. If this times out, call batch_status before paying again: the payment may have gone through.",
+  description: "Pay many people at once (e.g. a marketplace's sellers or a team of contractors) with ONE USDZ payment over x402. Each line is an invoice with the same required fields as pay_invoice; lines Sayso won't pay are set aside with reasons and not charged. Pays only if the batch price is at most max_usdz (USDZ, fees included). It pays only if Sayso's signed batch offer and every line's signed offer match what was asked. A line that bounces is refunded on its own. If this times out, call batch_status before paying again: the payment may have gone through.",
   inputSchema: {
     items: z.array(z.object(invoiceShape)).min(1).max(100).describe("The invoices to pay, one object per payee. Each needs the same required fields as pay_invoice."),
     reference: z.string().trim().max(35).optional().describe("Optional. A label for the whole batch, at most 35 characters."),
     max_usdz: usdzLimit("The most this agent will pay for the whole batch, in USDZ (not the payee's currency)"),
   },
 }, async ({ items, reference, max_usdz }) => {
-  const created = await api.post<{ id?: string; status?: string; price_usdz?: string; pay_url?: string | null; set_aside?: unknown[]; error?: string }>(
+  const created = await api.post<{ id?: string; status?: string; price_usdz?: string; pay_url?: string | null; set_aside?: Array<{ index: number }>; error?: string; offer?: SignedBatchOffer | null; payouts?: Quote[] }>(
     "/v1/batches", { reference: reference ?? "Batch payout", items: items.map((i) => toRequest(i as Invoice)) }, "creating the batch",
   );
   if (!created.ok) return failure(created, { paid: false });
@@ -214,6 +236,8 @@ server.registerTool("pay_batch", {
   if (!b.pay_url) return text({ paid: false, ...b });
   if (Number(b.price_usdz) > Number(max_usdz)) return text({ paid: false, reason: `batch price ${b.price_usdz} USDZ is above max_usdz ${max_usdz}`, batch: b });
   if (!b.id) return failure(failed("Sayso created a batch without an id; nothing was charged.", { retryable: true }), { paid: false });
+  const bad = await checkBatch(b, items as Invoice[]);
+  if (bad) return text({ paid: false, reason: `Not paying: ${bad.reason}`, ...(bad.retryable ? { retryable: true, next: "Nothing was charged. Retry in about a minute." } : {}), batch: b });
   const r = await api.payBatch(b.id, b.pay_url);
   return text({ paid: r.http_status < 400, batch_id: b.id, ...r });
 });

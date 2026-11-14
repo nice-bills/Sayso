@@ -21,10 +21,11 @@ import type { MandateChecker, MandatePolicy, MandateProof, SimMandates } from ".
 import { PayoutError, publicView, WAITS_FOR_FUNDS, waitsForFunds, type PayoutService } from "./service.js";
 import type { BatchBook } from "./batch.js";
 import type { Payout } from "./book.js";
-import type { SignedOffer } from "./offer.js";
+import type { BatchTerms, SignedBatchOffer, SignedOffer } from "./offer.js";
 
 /** Signs what a quote promises (see offer.ts). */
 export type SignOffer = (p: Payout) => Promise<SignedOffer | null>;
+export type SignBatch = (terms: Omit<BatchTerms, "payTo">) => Promise<SignedBatchOffer>;
 /** A quote that ever became payable carries Sayso's signed offer; held, rejected ones never had one. */
 const SIGNED = new Set(["quoted", "accepted", "funded", "waiting", "submitted", "paid", "failed", "refunded", "refund_failed", "expired"]);
 
@@ -43,7 +44,7 @@ export interface MandateOptions {
 const PAY = /^\/v1\/payouts\/([0-9a-f-]{36})\/pay$/;
 const PAY_BATCH = /^\/v1\/batches\/([0-9a-f-]{36})\/pay$/;
 
-export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchBook, mandates: MandateOptions = { policy: "verify", record: () => {} }, signOffer?: SignOffer): Router {
+export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchBook, mandates: MandateOptions = { policy: "verify", record: () => {} }, signOffer?: SignOffer, signBatch?: SignBatch): Router {
   const r = express.Router();
   const withOffer = async (p: Payout) => {
     const left = svc.remainder(p);
@@ -55,17 +56,25 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
   const linesOf = (x: { kind: "payout" | "batch"; id: string }) => (x.kind === "payout" ? [x.id] : batches.get(x.id)?.payoutIds ?? []);
   // Only payout routes parse JSON here: the router is mounted at the root, so a router-wide parser would run for every path.
   const json = express.json({ limit: "1mb" });
+  // A payable batch carries Sayso's signature over its lines and total, and each line its own offer, so the agent can check them like a single quote.
+  const signedBatch = async (id: string) => {
+    const v = batches.view(id);
+    if (!v || !v.pay_url || !signBatch || !signOffer) return v;
+    const payouts = await Promise.all(v.payouts.map(async (l) => ({ ...l, offer: await signOffer(svc.book.get(l.id)!) })));
+    const offer = await signBatch({ batch: v.id, quotes: v.payouts.map((l) => l.id).join(","), priceUsdzMinor: String(Math.round(Number(v.price_usdz) * 100)), expiresAt: String(Math.floor(new Date(v.expires_at).getTime() / 1000)) });
+    return { ...v, payouts, offer };
+  };
 
   r.post("/v1/batches", json, async (req, res) => {
     try {
       const b = await batches.create(req.body?.items, String(req.body?.reference ?? "Batch payout"));
-      res.status(b.status === "rejected" ? 422 : 201).json(batches.view(b.id));
+      res.status(b.status === "rejected" ? 422 : 201).json(await signedBatch(b.id));
     } catch (err) {
       sendError(res, err);
     }
   });
-  r.get("/v1/batches/:id", (req, res) => {
-    const v = batches.view(req.params.id);
+  r.get("/v1/batches/:id", async (req, res) => {
+    const v = await signedBatch(req.params.id);
     if (!v) return void res.status(404).json({ error: "no such batch" });
     res.json(v);
   });

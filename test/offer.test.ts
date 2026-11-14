@@ -2,7 +2,7 @@ import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import { buildSayso } from "../src/app.js";
 import type { Payout } from "../src/payouts/book.js";
-import { verifyOffer, type SignedOffer } from "../src/payouts/offer.js";
+import { verifyBatchOffer, verifyOffer, type SignedOffer } from "../src/payouts/offer.js";
 
 const quoteBody = {
   amount: "120.00", currency: "EUR", reference: "INV-7",
@@ -30,6 +30,31 @@ describe("Sayso's signed offer", () => {
       expect(await verifyOffer({ ...o, signer: "0x0000000000000000000000000000000000000002" }, "0x0000000000000000000000000000000000000002")).toBe(false);
       // The same offer comes back on the payout itself, unchanged.
       expect((await (await fetch(`${base}/v1/payouts/${q.id}`)).json()).offer.signature).toBe(o.signature);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("signs a payable batch over its lines and total, and each line carries its own offer", async () => {
+    const cs = await buildSayso({ offline: true });
+    const server = cs.app.listen(0);
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    try {
+      const res = await fetch(`${base}/v1/batches`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reference: "B", items: [quoteBody, { ...quoteBody, amount: "80.00", reference: "INV-8" }] }) });
+      expect(res.status).toBe(201);
+      const b = await res.json();
+      const { quote_signer, pay_to } = await (await fetch(`${base}/healthz`)).json();
+      expect(await verifyBatchOffer(b.offer, quote_signer)).toBe(true);
+      expect(b.offer.terms).toMatchObject({ batch: b.id, quotes: b.payouts.map((l: { id: string }) => l.id).join(","), payTo: pay_to });
+      expect((Number(b.offer.terms.priceUsdzMinor) / 100).toFixed(2)).toBe(b.price_usdz);
+      for (const l of b.payouts) {
+        expect(await verifyOffer(l.offer, quote_signer)).toBe(true);
+        expect(l.offer.terms.quote).toBe(l.id);
+      }
+      for (const change of [{ priceUsdzMinor: "1" }, { quotes: "x" }, { batch: "other" }, { payTo: "0x0000000000000000000000000000000000000001" }]) {
+        expect(await verifyBatchOffer({ ...b.offer, terms: { ...b.offer.terms, ...change } }, quote_signer), JSON.stringify(change)).toBe(false);
+      }
+      expect((await (await fetch(`${base}/v1/batches/${b.id}`)).json()).offer.signature).toBe(b.offer.signature);
     } finally {
       server.close();
     }
