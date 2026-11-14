@@ -26,7 +26,6 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",
-    "@huggingface/transformers": "4.3.1",
     "@metalntwx/metal-agent": "0.3.3",
     "@metalntwx/metal-pay": "0.3.4",
     "@metalntwx/metal-ts": "0.3.2",
@@ -46,6 +45,7 @@
   },
   "devDependencies": {
     "@e2e-dev/web": "^0.15.2",
+    "@huggingface/transformers": "4.3.1",
     "@types/express": "^5.0.6",
     "@types/mailparser": "^3.9.0",
     "@types/node": "^26.6.5",

@@ -19,3 +19,4 @@ integrations
 plugins
 data/*
 !data/fx.csv
+vendor
