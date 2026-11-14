@@ -26,7 +26,11 @@ export interface AirwallexCredit {
 export type SweepOutcome =
   | { outcome: "credited"; sweep: Sweep }
   | { outcome: "already_credited"; sweep: Sweep }
-  | { outcome: "rejected"; sweep: Sweep };
+  | { outcome: "rejected"; sweep: Sweep }
+  | { outcome: "pending"; sweep: Sweep; reason: string };
+
+/** Thrown when the movement is proven wrong (refused, reverted, wrong event); anything else is retried. */
+export class SweepRejected extends Error {}
 
 export async function sweepEpoch(e: SettledEarnings, ledger: RampLedger, metal: MetalSettlementVerifier, awx: AirwallexCredit): Promise<SweepOutcome> {
   const op = ledger.record(randomUUID(), e.epoch, e.amountMinor, e.currency);
@@ -34,11 +38,20 @@ export async function sweepEpoch(e: SettledEarnings, ledger: RampLedger, metal: 
   if (op.status === "rejected") return { outcome: "rejected", sweep: op };
 
   if (op.status === "recorded") {
+    let eventKey: string;
     try {
-      const { eventKey } = await metal.verify(e.epoch, e.amountMinor);
+      ({ eventKey } = await metal.verify(e.epoch, e.amountMinor));
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      // Only a proven-bad movement is rejected; a timeout or RPC error leaves it recorded so the same epoch is retried, never pulled again.
+      if (!(err instanceof SweepRejected)) return { outcome: "pending", sweep: op, reason };
+      ledger.markRejected(op.operationId, reason);
+      return { outcome: "rejected", sweep: ledger.get(op.operationId)! };
+    }
+    try {
       ledger.markVerified(op.operationId, eventKey);
     } catch (err) {
-      // A movement that is not final, or not what we expected, is never credited.
+      // The same on-chain event already backs another sweep: definite.
       ledger.markRejected(op.operationId, err instanceof Error ? err.message : String(err));
       return { outcome: "rejected", sweep: ledger.get(op.operationId)! };
     }

@@ -1,6 +1,6 @@
 // Sayso's hosted MCP endpoint (Streamable HTTP at /mcp). Any agent that speaks MCP can add it by
 // URL with its own key: Claude, ChatGPT, Cursor, OpenClaw, Hermes, or the assistant someone texts
-// from iMessage. An agent can quote, forward an invoice and check status. Approving is not a tool:
+// from iMessage. An agent can quote, forward an invoice, check status and check a payout's proof and receipt. Approving is not a tool:
 // the owner gets a link and taps it while signed in, so a hijacked agent can't pay anyone.
 // Agents with their own USDZ still pay quotes directly over x402 (pay_url), capped by Metal.
 
@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { AgentKey, AgentKeys } from "../agents/keys.js";
 import { emit } from "../events.js";
-import type { Inbox, InboxItem } from "../inbox/inbox.js";
+import { cameByEmail, type Inbox, type InboxItem } from "../inbox/inbox.js";
 import type { Notifier } from "../notify.js";
 import { PayoutError, publicView, type PayoutService } from "../payouts/service.js";
 import { PAYOUT } from "../payouts/book.js";
@@ -21,7 +21,8 @@ import { toMinor } from "../treasury/money.js";
 import { MailError, type Mailbox } from "../inbox/mailbox.js";
 import { invoiceShape, toRequest, type Invoice } from "./tools.js";
 
-export interface HostedDeps { svc: PayoutService; inbox: Inbox; keys: AgentKeys; notify: Notifier; mailbox?: Mailbox; isPlatformKey?: (agentId: string) => boolean }
+export interface HostedDeps { svc: PayoutService; inbox: Inbox; keys: AgentKeys; notify: Notifier; mailbox?: Mailbox; isPlatformKey?: (agentId: string) => boolean; views?: { receipt: (id: string) => View; proof: (id: string) => Promise<View> } }
+type View = { status: number; body: Record<string, unknown> };
 
 const text = (o: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(o, null, 2) }] });
 const fail = (message: string) => ({ ...text({ error: message }), isError: true });
@@ -93,11 +94,12 @@ const emailOf = (from: string) => from.match(/<([^>]+)>/)?.[1]?.trim() ?? (/^[^\
 async function askForDetails(d: HostedDeps, agent: AgentKey, invoiceId: string, note?: string) {
   const mb = d.mailbox;
   if (!mb) return { error: "Sayso has no email set up." };
-  const item = d.inbox.list().find((i) => i.id === invoiceId);
+  const item = d.inbox.view(invoiceId);
   if (!item) return { error: "No such invoice." };
   if (item.status !== "needs_details") return { error: "That invoice isn't missing anything." };
   const to = emailOf(item.from);
   if (!to) return { error: `Sayso doesn't have an email address for ${item.from}.` };
+  if (!(await mb.knows(to, d.inbox.list().filter(cameByEmail).map((i) => i.from)))) return { error: `Sayso only emails people who have emailed it or sent an invoice in, and ${to} hasn't. Forward their email to ${mb.status().address} instead.` };
   if (!spend(agent)) return { error: `This agent has sent its ${EMAILS_PER_DAY} emails for today.` };
   const about = item.subject && !/^Forwarded by/.test(item.subject) ? ` ("${item.subject}")` : "";
   const text = `Hello,\n\nThanks for your invoice${about}. Before we can pay it, we need: ${item.missing.join(", ")}.${note ? `\n\n${note}` : ""}\n\nReply to this email with those details and we'll take it from there.\n\nThanks`;
@@ -117,7 +119,7 @@ const pending = ["awaiting_approval", "needs_verification", "needs_details", "pa
 /** An agent hands Sayso an invoice: into the owner's inbox, with a link and a push for their tap. */
 async function forward(d: HostedDeps, agent: AgentKey, base: string, a: { text: string; from?: string; subject?: string }) {
   const item = await d.inbox.receive({ messageId: `agent-${agent.id.slice(0, 8)}-${randomUUID()}`, from: a.from ?? `${agent.name} (agent)`, subject: a.subject ?? `Forwarded by ${agent.name}`, body: a.text, receivedAt: new Date() });
-  const full = d.inbox.list().find((i) => i.id === item.id)!;
+  const full = d.inbox.view(item.id)!;
   if (full.payout && overCap(agent, full.payout.price_usdz) && ["awaiting_approval", "needs_verification"].includes(full.status)) {
     d.inbox.ignore(item.id);
     emit("refuse", `${agent.name} forwarded ${full.payout.amount} ${full.payout.currency}, above its cap; not queued`);
@@ -165,7 +167,7 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
 
   if (d.mailbox) {
     const mb = d.mailbox;
-    const senders = () => d.inbox.list().map((i) => i.from);
+    const senders = () => d.inbox.list().filter(cameByEmail).map((i) => i.from);
     const mailFail = (err: unknown) => fail(err instanceof MailError ? err.message : "email failed");
 
     server.registerTool("ask_for_details", {
@@ -239,6 +241,24 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
     const p = d.svc.book.get(payout_id);
     return p ? text(publicView(p)) : fail("no such payout");
   });
+
+  if (d.views) {
+    const views = d.views;
+    server.registerTool("payout_receipt", {
+      description: "A final payout's receipt and the Metal transaction anchoring its hash, so the agent can prove the money was delivered (or refunded) without trusting Sayso. A receipt exists only once the payout is paid or refunded; until then Sayso answers that it is not final yet.",
+      inputSchema: { payout_id: z.string().describe("The payout id (a UUID)") },
+    }, async ({ payout_id }) => {
+      const r = views.receipt(payout_id);
+      return r.status === 200 ? text(r.body) : fail(String(r.body.error));
+    });
+    server.registerTool("prove_payout", {
+      description: "Everything Sayso can prove about a payout, as the seller: the order the agent placed, the Metal mandate that allowed it, the owner's approval if it was held, the Metal payment, the Airwallex transfer and the receipt on chain. Each piece is proven, missing, or against.",
+      inputSchema: { payout_id: z.string().describe("The payout id (a UUID)") },
+    }, async ({ payout_id }) => {
+      const r = await views.proof(payout_id);
+      return r.status === 200 ? text(r.body) : fail(String(r.body.error));
+    });
+  }
 
   return server;
 }

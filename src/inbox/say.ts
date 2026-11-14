@@ -95,8 +95,8 @@ const day = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "n
 /** The item for the payee said: by name, else by sound, but only when exactly one payee sounds like it. */
 function pick<T extends InboxItem>(items: T[], said: string): T | undefined {
   const named = items.filter((i) => i.fields.payeeName);
-  const exact = named.find((i) => sameName(i.fields.payeeName!, said));
-  if (exact) return exact;
+  const exact = named.filter((i) => sameName(i.fields.payeeName!, said));
+  if (exact.length && new Set(exact.map((i) => norm(i.fields.payeeName!))).size === 1) return exact[0];
   const alike = named.filter((i) => soundsLike(i.fields.payeeName!, said));
   return new Set(alike.map((i) => norm(i.fields.payeeName!))).size === 1 ? alike[0] : undefined;
 }
@@ -112,7 +112,7 @@ export async function say(inbox: Inbox, transcript: string, now = new Date()): P
 
   const items = inbox.list();
   // An invoice already waiting for this payee: the words just point at it.
-  const waiting = pick(items.filter((i) => (i.status === "awaiting_approval" || i.status === "needs_verification") && (!intent.amount || Number(i.fields.amount) === Number(intent.amount))), intent.payee);
+  const waiting = pick(items.filter((i) => (i.status === "awaiting_approval" || i.status === "needs_verification") && (!intent.amount || Number(i.fields.amount) === Number(intent.amount)) && (!intent.currency || i.fields.currency?.toUpperCase() === intent.currency.toUpperCase())), intent.payee);
   if (waiting) {
     const from = waiting.from === SAID_FROM ? "what you said earlier" : `the invoice from ${addressOf(waiting.from)}`;
     for (const [field, v] of [["amount", waiting.fields.amount], ["currency", waiting.fields.currency], ["reference", waiting.fields.reference]] as const) {

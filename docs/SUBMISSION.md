@@ -115,7 +115,7 @@ Not entered: tracks 9 and 10 (they need Airi CLI access and a merchant storefron
 
 ## What's next
 
-- Real inbound email addresses per business, and approvals by push notification.
+- Several businesses on one Sayso, each with its own owner and rules.
 - A Visa card path for merchants that only take cards, building on the agent card.
 - An FX policy that earns its keep: hold euros earned in euros (the natural hedge) once Sayso has non-USD income, which the backtest shows is where a policy beats converting on the due date.
 

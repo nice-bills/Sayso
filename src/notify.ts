@@ -2,6 +2,7 @@
 // install the ntfy app, subscribe to a long random topic, and set NTFY_TOPIC. PUBLIC_URL makes the
 // notification open the approval page. Without NTFY_TOPIC this only logs.
 
+import { publicBase } from "./auth.js";
 import { emit } from "./events.js";
 
 export type Notifier = (title: string, message: string, path: string) => Promise<void>;
@@ -9,7 +10,7 @@ export type Notifier = (title: string, message: string, path: string) => Promise
 export function notifierFromEnv(): Notifier {
   const topic = process.env.NTFY_TOPIC;
   const server = process.env.NTFY_SERVER ?? "https://ntfy.sh";
-  const publicUrl = process.env.PUBLIC_URL;
+  const publicUrl = publicBase();
   return async (title, message, path) => {
     if (!topic) return;
     const headers: Record<string, string> = { title, tags: "coin" };

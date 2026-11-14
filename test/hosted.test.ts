@@ -28,7 +28,7 @@ describe("hosted MCP endpoint", () => {
       const { key } = cs.keys.create("Phone assistant", null);
       const agent = await connect(key);
       const tools = (await agent.listTools()).tools.map((t) => t.name).sort();
-      expect(tools).toEqual(["ask_for_details", "email_inbox", "forward_invoice", "list_invoices", "payout_status", "quote_payout", "read_email", "reply_email", "send_email"]);
+      expect(tools).toEqual(["ask_for_details", "email_inbox", "forward_invoice", "list_invoices", "payout_receipt", "payout_status", "prove_payout", "quote_payout", "read_email", "reply_email", "send_email"]);
       expect(tools.some((t) => /approve/.test(t))).toBe(false); // no tool can approve
 
       // Chat apps that support MCP Apps draw the inbox as cards (the view can't approve either).
@@ -67,6 +67,45 @@ describe("hosted MCP endpoint", () => {
     }
   });
 
+  it("lets an agent read a paid payout's proof and receipt, and says when there is none yet", async () => {
+    process.env.SAYSO_AGENT_MANDATES = "required";
+    const { cs, server, base, connect, call } = await setup();
+    try {
+      const agent = await connect(cs.keys.create("Prover", null).key);
+      const quote = await fetch(`${base}/v1/quotes`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          amount: "120.00", currency: "EUR", reference: "INV-7",
+          payee: { name: "Etiqueta SL", address: { country_code: "ES", city: "Madrid", street_address: "Calle 1", postcode: "28001" }, bank: { iban: "ES9121000418450200051332" }, bank_country_code: "ES" },
+        }),
+      });
+      const q = (await quote.json()) as { id: string; pay_url: string };
+      const early = await call(agent, "payout_receipt", { payout_id: q.id });
+      expect(early.error).toBe(true);
+      expect(early.body.error).toMatch(/receipt is issued once/);
+
+      cs.simMandates!.bind("0xm", { principal: "0xOwner", capCents: 40_000, budgetCents: 70_000 });
+      const paid = await fetch(base + q.pay_url, { method: "POST", headers: { "x-sim-mandate": "0xm", "x-sim-signed-order": "sim" } });
+      expect(paid.status).toBe(202);
+      for (let i = 0; i < 3; i++) await cs.tick();
+
+      const receipt = await call(agent, "payout_receipt", { payout_id: q.id });
+      expect(receipt.error).toBe(false);
+      expect(receipt.body.anchors.length).toBeGreaterThan(0);
+      const proof = await call(agent, "prove_payout", { payout_id: q.id });
+      expect(Array.isArray(proof.body.evidence)).toBe(true);
+      for (const tool of ["payout_receipt", "prove_payout"]) {
+        const none = await call(agent, tool, { payout_id: "nope" });
+        expect(none.error).toBe(true);
+        expect(none.body.error).toBe("no such payout");
+      }
+      await agent.close();
+    } finally {
+      delete process.env.SAYSO_AGENT_MANDATES;
+      server.close();
+    }
+  });
+
   it("shows the two USDZ figures on an inbox card distinctly: the quoted price (with fee) and the conversion cost the decision weighs", async () => {
     const { cs, server, connect, call } = await setup();
     try {
@@ -97,7 +136,7 @@ describe("hosted MCP endpoint", () => {
       const viaUrl = cs.keys.create("Chat app", null);
       const c = new Client({ name: "url-agent", version: "1.0.0" });
       await c.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp/k/${viaUrl.key}`)));
-      expect((await c.listTools()).tools).toHaveLength(9);
+      expect((await c.listTools()).tools).toHaveLength(11);
       await c.close();
       const small = cs.keys.create("Tiny budget", 5000); // $50
       const agent = await connect(small.key);
@@ -118,6 +157,12 @@ describe("hosted MCP endpoint", () => {
       const agent = await connect(cs.keys.create("Claude", null).key);
       const vague = await call(agent, "forward_invoice", { text: vagueEmail.body, from: vagueEmail.from, subject: vagueEmail.subject });
       expect(vague.body.status).toBe("needs_details");
+
+      // An agent-typed sender is not a correspondent: it can't be asked or emailed until they really write in.
+      const early = await call(agent, "ask_for_details", { invoice_id: vague.body.invoice_id });
+      expect(early.body.error).toMatch(/only emails people/);
+      expect((await call(agent, "send_email", { to: "someone@someone.example", subject: "Hi", text: "Pay me" })).body.error).toMatch(/only emails people/);
+      await cs.mailbox.simReceive(vagueEmail.from, vagueEmail.subject, vagueEmail.body);
 
       const asked = await call(agent, "ask_for_details", { invoice_id: vague.body.invoice_id });
       expect(asked.error).toBe(false);

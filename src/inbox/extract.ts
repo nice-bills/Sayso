@@ -65,14 +65,15 @@ export function extractByPattern(e: InboundEmail): InvoiceFields {
   };
 }
 
-/** "1.234,56" and "1,234.56" both become "1234.56". */
+/** "1.234,56", "1,234.56" and "1234.5" become "1234.56"/"1234.50"; "1,234" is a thousand. */
 function normalise(raw: string): string | null {
   const s = raw.replace(/\s/g, "");
   const lastSep = Math.max(s.lastIndexOf("."), s.lastIndexOf(","));
-  const hasCents = lastSep >= 0 && s.length - lastSep - 1 === 2;
+  const tail = lastSep >= 0 ? s.length - lastSep - 1 : 0;
+  const hasCents = tail === 1 || tail === 2;
   const whole = (hasCents ? s.slice(0, lastSep) : s).replace(/[.,]/g, "");
   if (!/^\d+$/.test(whole)) return null;
-  return `${Number(whole)}.${hasCents ? s.slice(lastSep + 1) : "00"}`;
+  return `${Number(whole)}.${hasCents ? s.slice(lastSep + 1).padEnd(2, "0") : "00"}`;
 }
 
 const SYSTEM = `Extract the payment details from an invoice email for a payments agent.
@@ -93,9 +94,32 @@ export async function extractWithClaude(client: Anthropic, e: InboundEmail): Pro
   return response.parsed_output;
 }
 
+const squash = (s: string) => s.replace(/[\s-]/g, "").toUpperCase();
+/**
+ * A model can misread or invent. Keep a field only if it is well formed, and a bank detail only if
+ * it appears in the email; anything dropped becomes a missing field a person fills in.
+ */
+export function checkFields(f: InvoiceFields, body: string): InvoiceFields {
+  const text = squash(body);
+  const inBody = (v: string | null) => (v && text.includes(squash(v)) ? v : null);
+  const cur = f.currency?.trim().toUpperCase() ?? null;
+  const country = f.bankCountry?.trim().toUpperCase() ?? null;
+  return {
+    ...f,
+    amount: f.amount && /^\d+\.\d{2}$/.test(f.amount) ? f.amount : null,
+    currency: cur && /^[A-Z]{3}$/.test(cur) ? cur : null,
+    bankCountry: country && /^[A-Z]{2}$/.test(country) ? country : null,
+    iban: inBody(f.iban), accountNumber: inBody(f.accountNumber), sortCode: inBody(f.sortCode), routingNumber: inBody(f.routingNumber),
+  };
+}
+
 export async function extractInvoice(e: InboundEmail): Promise<InvoiceFields & { extractor: "claude" | "patterns" }> {
   if (!process.env.ANTHROPIC_API_KEY) return { ...extractByPattern(e), extractor: "patterns" };
-  return { ...(await extractWithClaude(new Anthropic(), e)), extractor: "claude" };
+  try {
+    return { ...checkFields(await extractWithClaude(new Anthropic(), e), e.body), extractor: "claude" };
+  } catch {
+    return { ...extractByPattern(e), extractor: "patterns" };
+  }
 }
 
 /** Which fields a payout still needs before it can be quoted. */

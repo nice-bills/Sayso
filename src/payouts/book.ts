@@ -9,7 +9,7 @@
 //      └─> expired                                    funded ──decision was wait──> waiting ──rate back in band, or the wait ends──> funded
 //
 //   paid ──bank returned it──> failed
-//   failed ──> refund_failed
+//   failed ──> refund_failed ──retried──> refunded
 //
 // The table below (PAYOUT) is the source of truth; this picture is only a reading aid.
 
@@ -31,7 +31,7 @@ export const PAYOUT = register(machine("payout", ["quoted", "needs_review", "rej
   // An invoice paid from the owner's own balance stays here: the money never left, so there is nothing to refund.
   failed: { means: "The bank or Airwallex refused it. An agent's payment is refunded; an invoice's money is still in the owner's balance.", waitingOn: "sayso", to: ["refunded", "refund_failed"] },
   refunded: { means: "It failed and the payer has the money back.", waitingOn: "nobody", to: [] },
-  refund_failed: { means: "It failed and the refund did not go through. The owner has to step in.", waitingOn: "owner", to: [] },
+  refund_failed: { means: "It failed and the refund has not gone through yet. Sayso retries it; the owner can also step in.", waitingOn: "owner", to: ["refunded"] },
   expired: { means: "Nobody paid the quote in time. Ask for a new one.", waitingOn: "nobody", to: [] },
 }));
 export type PayoutStatus = keyof typeof PAYOUT.states;
@@ -94,7 +94,9 @@ export class PayoutBook {
       );
       CREATE TABLE IF NOT EXISTS trusted_payees (
         payee_hash TEXT PRIMARY KEY, payee_name TEXT NOT NULL, trusted_by TEXT NOT NULL, trusted_at TEXT NOT NULL
-      );`);
+      );
+      CREATE INDEX IF NOT EXISTS payouts_status ON payouts (status);
+      CREATE INDEX IF NOT EXISTS payouts_buyer ON payouts (buyer, created_at);`);
     // Books made before decide() existed get the column added.
     const cols = store.db.prepare("PRAGMA table_info(payouts)").all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === "decision")) store.db.exec("ALTER TABLE payouts ADD COLUMN decision TEXT");
@@ -115,6 +117,11 @@ export class PayoutBook {
 
   waiting(): Payout[] {
     return this.store.db.prepare("SELECT * FROM payouts WHERE status = 'waiting' ORDER BY created_at").all().map((r) => this.decode(r)!);
+  }
+
+  /** Every payout in any of `statuses`, oldest first, with no row limit (unlike list(), which only sees the newest rows). */
+  byStatus(...statuses: PayoutStatus[]): Payout[] {
+    return this.store.db.prepare(`SELECT * FROM payouts WHERE status IN (${statuses.map(() => "?").join(",")}) ORDER BY created_at`).all(...statuses).map((r) => this.decode(r)!);
   }
 
   list(limit = 100): Payout[] {

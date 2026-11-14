@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { heuristicRead } from "../src/agent/reader.js";
-import { extractByPattern } from "../src/inbox/extract.js";
+import { checkFields, extractByPattern } from "../src/inbox/extract.js";
 import { Inbox } from "../src/inbox/inbox.js";
+import { shortCode } from "../src/mcp/hosted.js";
 import { PayoutService, publicView } from "../src/payouts/service.js";
 import { FakeAirwallex, FakeRefunder } from "../src/sim/offline.js";
 import { Store } from "../src/store.js";
@@ -12,13 +13,37 @@ function setup() {
   const store = new Store(":memory:");
   const awx = new FakeAirwallex({ USD: toMinor(2000) });
   const svc = new PayoutService({ awx, store, refunder: new FakeRefunder(), read: async (t) => heuristicRead(t) });
-  return { inbox: new Inbox(store, svc), svc, awx };
+  return { inbox: new Inbox(store, svc), svc, awx, store };
 }
+
+const addNewer = (store: Store, n: number) => { for (let i = 0; i < n; i++) store.db.prepare("INSERT INTO inbox (id, sender, subject, received_at, body, fields, missing, status) VALUES (?,?,?,?,?,?,?,?)").run(`filler-${i}`, "x", "x", new Date(Date.now() + 86_400_000 + i * 1000).toISOString(), "", "{}", "[]", "ignored"); };
 
 describe("extractByPattern", () => {
   it("reads European and British invoices", () => {
     expect(extractByPattern(studioInvoice)).toMatchObject({ payeeName: "Kreuzberg Studio GmbH", amount: "280.00", currency: "EUR", reference: "INV-2026-114", iban: "DE89370400440532013000", bankCountry: "DE" });
     expect(extractByPattern(designerInvoice)).toMatchObject({ payeeName: "Holloway Print Ltd", amount: "72.00", currency: "GBP", sortCode: "040568", accountNumber: "10006132", bankCountry: "GB" });
+  });
+});
+
+describe("extractByPattern amounts", () => {
+  it("reads one or two decimals as cents and three digits as thousands", () => {
+    expect(extractByPattern({ ...studioInvoice, body: "Total due: EUR 12,5\nIBAN: DE89 3704 0044 0532 0130 00" }).amount).toBe("12.50");
+    expect(extractByPattern({ ...studioInvoice, body: "Total due: EUR 1,234\nIBAN: DE89 3704 0044 0532 0130 00" }).amount).toBe("1234.00");
+  });
+});
+
+describe("checkFields", () => {
+  const f = { ...extractByPattern(studioInvoice), iban: "DE89370400440532013000", amount: "480.00", currency: "EUR" };
+  it("drops a bank detail that is not in the email, keeps one that is", () => {
+    expect(checkFields(f, "pay to DE89 3704 0044 0532 0130 00 please").iban).toBe("DE89370400440532013000");
+    expect(checkFields(f, "no bank details here").iban).toBeNull();
+  });
+  it("nulls a malformed amount or currency, keeps well formed ones", () => {
+    expect(checkFields({ ...f, amount: "480", currency: "euros" }, "").amount).toBeNull();
+    expect(checkFields({ ...f, amount: "480", currency: "euros" }, "").currency).toBeNull();
+    expect(checkFields(f, "").amount).toBe("480.00");
+    expect(checkFields(f, "").currency).toBe("EUR");
+    expect(checkFields({ ...f, currency: "eur" }, "").currency).toBe("EUR");
   });
 });
 
@@ -32,6 +57,47 @@ describe("Inbox", () => {
     await svc.follow();
     expect(svc.book.get(item.payoutId!)?.status).toBe("paid");
     expect(awx.balances.EUR).toBe(0);
+  });
+
+  it("approving an invoice whose quote ran out quotes it again and pays", async () => {
+    const { inbox, svc } = setup();
+    const item = await inbox.receive(studioInvoice);
+    const oldId = item.payoutId!;
+    const paid = await inbox.approve(item.id, "owner", {}, new Date(Date.now() + 8 * 24 * 3_600_000));
+    expect(paid.status).toBe("paying");
+    expect(paid.payoutId).not.toBe(oldId);
+    expect(svc.book.get(oldId)?.status).toBe("expired");
+    expect(svc.book.get(paid.payoutId!)?.status).not.toBe("quoted");
+  });
+
+  it("re-quotes when the payout is already marked expired", async () => {
+    const { inbox, svc } = setup();
+    const item = await inbox.receive(studioInvoice);
+    svc.book.transition(item.payoutId!, ["quoted"], "expired");
+    const paid = await inbox.approve(item.id, "owner");
+    expect(paid.status).toBe("paying");
+    expect(paid.payoutId).not.toBe(item.payoutId);
+    expect(svc.book.get(paid.payoutId!)?.status).not.toBe("quoted");
+  });
+
+  it("an invoice stranded in paying by an expired quote goes back to the owner", async () => {
+    const { inbox, svc, store } = setup();
+    const item = await inbox.receive(studioInvoice);
+    store.db.prepare("UPDATE inbox SET status = 'paying' WHERE id = ?").run(item.id);
+    expect(inbox.rescueStranded()).toBe(0); // quote still valid
+    svc.book.transition(item.payoutId!, ["quoted"], "expired");
+    expect(inbox.rescueStranded()).toBe(1);
+    expect(inbox.get(item.id)?.status).toBe("awaiting_approval");
+    expect((await inbox.approve(item.id, "owner")).status).toBe("paying");
+  });
+
+  it("a single invoice is found past the newest 200", async () => {
+    const { inbox, store } = setup();
+    const item = await inbox.receive(studioInvoice);
+    addNewer(store, 201);
+    expect(inbox.list().some((i) => i.id === item.id)).toBe(false);
+    expect(inbox.view(item.id)?.id).toBe(item.id);
+    expect(inbox.byShortCode(shortCode(item.id), shortCode)?.id).toBe(item.id);
   });
 
   it("does not queue the same invoice twice", async () => {

@@ -11,10 +11,10 @@ import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { createPublicClient, http, type Address, type Hash } from "viem";
-import type { MetalSettlementVerifier } from "../bridge/ramp.js";
+import { SweepRejected, type MetalSettlementVerifier } from "../bridge/ramp.js";
 import { emit } from "../events.js";
 import type { Store } from "../store.js";
-import { verifyMip20Transfer } from "./verify.js";
+import { TransferRejected, verifyMip20Transfer } from "./verify.js";
 
 const run = promisify(execFile);
 const CLI = createRequire(import.meta.url).resolve("@metalntwx/metal-agent/dist/index.js");
@@ -164,16 +164,24 @@ export class MandateSweepVerifier implements MetalSettlementVerifier {
       const r = await this.mandate.pull(this.mandate.cfg.rampAddress, amountMinor);
       if (r.outcome !== "paid") {
         this.store.recordPull(epoch, r.outcome === "refused" ? r.tx : null, r.outcome, r.reason);
-        throw new Error(`mandate refused the sweep: ${r.reason}`);
+        throw new SweepRejected(`mandate refused the sweep: ${r.reason}`);
       }
       this.store.recordPull(epoch, r.tx, "paid");
       emit("act", `Swept ${centsToUsdz(amountMinor)} USDZ to the ramp under the mandate`, { epoch }, r.explorer ?? r.tx);
       prior = { txHash: r.tx, outcome: "paid" };
     }
+    // A refused pull's tx must never be verified as a sweep.
+    if (prior.outcome !== "paid") throw new SweepRejected(`mandate refused the sweep: ${prior.outcome}`);
     const client = createPublicClient({ transport: http(this.rpcUrl) });
-    const { eventKey } = await verifyMip20Transfer(client, this.rpcUrl, {
-      hash: prior.txHash as Hash, token: USDZ, from: this.principal, to: this.mandate.cfg.rampAddress, amount: centsToUsdzUnits(amountMinor),
-    });
+    let eventKey: string;
+    try {
+      ({ eventKey } = await verifyMip20Transfer(client, this.rpcUrl, {
+        hash: prior.txHash as Hash, token: USDZ, from: this.principal, to: this.mandate.cfg.rampAddress, amount: centsToUsdzUnits(amountMinor),
+      }));
+    } catch (err) {
+      if (err instanceof TransferRejected) throw new SweepRejected(err.message);
+      throw err;
+    }
     emit("reconcile", `Sweep for ${epoch} is final on Metal`, { eventKey }, prior.txHash ?? undefined);
     return { eventKey };
   }

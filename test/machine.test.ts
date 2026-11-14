@@ -89,7 +89,7 @@ describe("machine tables", () => {
       }
     }
     expect(PAYOUT.states.refund_failed.waitingOn).toBe("owner");
-    expect(PAYOUT.terminal("refund_failed")).toBe(true);
+    expect(PAYOUT.terminal("refund_failed")).toBe(false); // Sayso retries the refund
   });
 
   it("describes one entry per state, with terminal matching an empty move list", () => {

@@ -1,10 +1,11 @@
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildSayso } from "../src/app.js";
-import type { Anchored } from "../src/metal/receipts.js";
+import { SimAnchorer, type Anchored } from "../src/metal/receipts.js";
 import type { Payout } from "../src/payouts/book.js";
-import { buildProof, judge, type Claim, type Evidence, type Proof } from "../src/payouts/proof.js";
+import { buildProof, Disputes, judge, type Claim, type Evidence, type Proof } from "../src/payouts/proof.js";
 import type { TrailStep } from "../src/trail.js";
+import { Store } from "../src/store.js";
 
 const quoteBody = (iban = "ES9121000418450200051332") => ({
   amount: "300.00", currency: "EUR", reference: "agent job",
@@ -191,6 +192,39 @@ describe("prove it: what Sayso shows when an agent's purchase is questioned", ()
       expect(d.body.dispute.reason).toMatch(/signed this exact order, price included/);
     } finally {
       server.close();
+    }
+  });
+});
+
+describe("Disputes anchoring", () => {
+  it("retries the anchor of a denied dispute", () => {
+    const d = new Disputes(new Store(":memory:"));
+    const base = { payout: "p1", claim: "not_received" as Claim, note: "", by: "agent", reason: "r", cites: [], proof_hash: "0xabc" };
+    const denied = d.add({ ...base, verdict: "denied" });
+    d.add({ ...base, verdict: "upheld" });
+    expect(d.unanchored().map((x) => x.id)).toEqual([denied.id]);
+    d.anchored(denied.id, "sim:0x1");
+    expect(d.unanchored()).toEqual([]);
+  });
+
+  it("records the transaction on send, so a failure while waiting is not retried by the tick", async () => {
+    const anchor = vi.spyOn(SimAnchorer.prototype, "anchor").mockImplementation(async (_hash, onSent) => { onSent?.("0xsent"); throw new Error("timed out waiting"); });
+    const { cs, server, call, owner } = await start();
+    try {
+      cs.simMandates!.bind("0xm", { principal: "0xOwner", capCents: 40_000, budgetCents: 70_000 });
+      const q = await call("POST", "/v1/quotes", quoteBody());
+      await call("POST", q.body.pay_url, undefined, { "x-sim-mandate": "0xm", "x-sim-signed-order": "sim" });
+      for (let i = 0; i < 3; i++) await cs.tick();
+      anchor.mockClear();
+      const d = await call("POST", `/v1/payouts/${q.body.id}/disputes`, { claim: "wrong_amount", note: "no" }, owner);
+      expect(d.body.dispute.verdict).toBe("denied");
+      expect(anchor).toHaveBeenCalledTimes(1);
+      expect((await call("GET", `/v1/payouts/${q.body.id}/proof`)).body.disputes[0].anchor_tx).toBe("0xsent");
+      for (let i = 0; i < 2; i++) await cs.tick();
+      expect(anchor).toHaveBeenCalledTimes(1);
+    } finally {
+      server.close();
+      anchor.mockRestore();
     }
   });
 });

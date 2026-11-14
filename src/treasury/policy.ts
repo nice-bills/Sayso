@@ -131,7 +131,8 @@ export function plan(state: TreasuryState, cfg: PolicyConfig, now: Date): Plan {
     }
     held[base] = (held[base] ?? 0) - estSellMinor;
     held[o.currency] = 0;
-    const needsApproval = estSellMinor > limit;
+    // The limit is on the whole payment, not just the part converted for it.
+    const needsApproval = estSellMinor + toBase(haveMinor, o.currency, state, base) > limit;
     actions.push({ kind: "convert", obligationId: o.id, buyCurrency: o.currency, buyMinor, sellCurrency: base, estSellMinor, needsApproval });
     actions.push(payAction(o, feeMinor, haveMinor > 0 ? "mixed" : "converted", needsApproval));
   }

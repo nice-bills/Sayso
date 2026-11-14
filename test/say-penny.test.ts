@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildSayso } from "../src/app.js";
 import { parseSpoken } from "../src/inbox/say.js";
 import { recentEvents } from "../src/events.js";
+import { PennyChecks } from "../src/inbox/penny.js";
 import { studioBankChange, studioInvoice } from "../samples/invoices.js";
 
 async function start() {
@@ -79,6 +80,31 @@ describe("say a payment", () => {
     }
   });
 
+  it("does not pick a waiting EUR invoice for a spoken amount in pounds", async () => {
+    const { server, post, forward } = await start();
+    try {
+      const item = await forward({ ...studioInvoice, body: studioInvoice.body.replace(/280\.00/g, "480.00") });
+      expect(item.body.status).toBe("awaiting_approval");
+      const r = await post("/v1/say", { transcript: "Pay Kreuzberg Studio 480 pounds" });
+      expect(r.body.item?.id).not.toBe(item.body.id);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("does not guess between two waiting payees that both contain the spoken name", async () => {
+    const { server, post, forward } = await start();
+    try {
+      await forward(studioInvoice);
+      const other = await forward({ ...studioInvoice, messageId: "<mitte@x>", body: studioInvoice.body.replace("Kreuzberg Studio GmbH", "Mitte Studio UG").replace("INV-2026-114", "INV-2026-115") });
+      expect(other.body.status).toBe("awaiting_approval");
+      const r = await post("/v1/say", { transcript: "Pay Studio 280 euros" });
+      expect(["awaiting_approval"]).not.toContain(r.body.item?.status);
+    } finally {
+      server.close();
+    }
+  });
+
   it("points at an invoice already waiting instead of making a new one", async () => {
     const { server, post, forward } = await start();
     try {
@@ -129,6 +155,34 @@ describe("the one-cent code check", () => {
     }
   });
 
+  it("has no contact on file when the paid invoice came from an agent, not email", async () => {
+    const { cs, server, post, forward } = await start();
+    try {
+      const item = await post("/v1/inbox", { message_id: "agent-test0000-1", from: studioInvoice.from, subject: studioInvoice.subject, body: studioInvoice.body });
+      await post(`/v1/inbox/${encodeURIComponent(item.body.id)}/approve`, { approver: "will" });
+      for (let i = 0; i < 2; i++) await cs.svc.follow();
+      const held = await forward(studioBankChange);
+      const check = await post(`/v1/inbox/${encodeURIComponent(held.body.id)}/penny`);
+      expect(check.status).toBe(409);
+      expect(check.body.error).toMatch(/no contact on file/);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("converts the currency for the cent like any payout", async () => {
+    const { cs, server, forward, post, payStudio } = await start();
+    try {
+      await payStudio();
+      const held = await forward(studioBankChange);
+      expect((await post(`/v1/inbox/${encodeURIComponent(held.body.id)}/penny`)).status).toBeLessThan(300);
+      const ops = (cs.svc as any).d.store.ops() as Array<{ kind: string; obligationId: string }>;
+      expect(ops.some((o) => o.kind === "convert" && o.obligationId.startsWith("penny-"))).toBe(true);
+    } finally {
+      server.close();
+    }
+  });
+
   it("blocks the invoice for good when the payee says the details aren't theirs, or after three wrong codes", async () => {
     const { server, base, post, forward, payStudio } = await start();
     try {
@@ -164,6 +218,22 @@ describe("the one-cent code check", () => {
       const r = await post(`/v1/inbox/${encodeURIComponent(held.body.id)}/penny`);
       expect(r.status).toBe(409);
       expect(r.body.error).toMatch(/no contact on file/);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("refuses a live check that has no public address, before any cent is sent", async () => {
+    const { cs, server, payStudio, forward } = await start();
+    try {
+      await payStudio();
+      const held = await forward(studioBankChange);
+      let calls = 0;
+      const awx = { createBeneficiary: async () => { calls++; return { id: "b" }; }, createTransfer: async () => { calls++; return { id: "t" }; } };
+      // The guard runs before anything is written, so a stub store that finds no earlier check is enough.
+      const penny = new PennyChecks({ store: { db: { exec() {}, prepare: () => ({ get: () => undefined, all: () => [] }) } } as never, svc: cs.svc, inbox: cs.inbox, awx: awx as never, offline: false });
+      await expect(penny.start(held.body.id)).rejects.toMatchObject({ status: 503 });
+      expect(calls).toBe(0);
     } finally {
       server.close();
     }

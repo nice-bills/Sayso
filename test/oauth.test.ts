@@ -2,6 +2,10 @@ import type { AddressInfo } from "node:net";
 import { createHash, randomBytes } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { buildSayso } from "../src/app.js";
 
@@ -69,6 +73,25 @@ describe("Sign in with Sayso (MCP authorization for chat apps)", () => {
       cs.keys.revoke(agent.id);
       expect((await fetch(`${base}/oauth2/token`, form({ grant_type: "refresh_token", refresh_token: fresh.refresh_token }))).status).toBe(400);
     } finally {
+      server.close();
+    }
+  });
+
+  it("drops authorization requests that expired more than a day ago", async () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), "sayso-oauth-")), "t.db");
+    const cs = await buildSayso({ offline: true, dbPath });
+    const server = cs.app.listen(0);
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const db = new DatabaseSync(dbPath);
+    try {
+      const redirect = "https://claude.ai/api/mcp/auth_callback";
+      const reg = (await (await fetch(`${base}/oauth2/register`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ redirect_uris: [redirect] }) })).json()) as { client_id: string };
+      db.prepare("INSERT INTO oauth_requests (id, client_id, redirect_uri, challenge, state, status, expires) VALUES (?,?,?,?,?,?,?)").run("stale", reg.client_id, redirect, "c", null, "pending", Date.now() - 2 * 86_400_000);
+      const q = new URLSearchParams({ response_type: "code", client_id: reg.client_id, redirect_uri: redirect, code_challenge: "abc", code_challenge_method: "S256" });
+      expect((await fetch(`${base}/oauth2/authorize?${q}`, { redirect: "manual" })).status).toBe(302);
+      expect((db.prepare("SELECT COUNT(*) AS n FROM oauth_requests WHERE id = 'stale'").get() as { n: number }).n).toBe(0);
+    } finally {
+      db.close();
       server.close();
     }
   });

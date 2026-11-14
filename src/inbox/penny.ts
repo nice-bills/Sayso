@@ -15,7 +15,7 @@ import type { PayoutAirwallex } from "../payouts/service.js";
 import { PayoutError, type PayoutService } from "../payouts/service.js";
 import type { Store } from "../store.js";
 import { emit } from "../events.js";
-import type { Inbox, InboxItem } from "./inbox.js";
+import { cameByEmail, type Inbox, type InboxItem } from "./inbox.js";
 import { machine, register } from "../machine.js";
 
 export const PENNY = register(machine("bank_detail_check", ["sent"], {
@@ -59,9 +59,9 @@ export class PennyChecks {
     )`);
   }
 
-  /** Where Sayso would reach this payee: the sender of an invoice it already paid them. */
+  /** Where Sayso would reach this payee: who really emailed an invoice it already paid them. */
   contactOnFile(payeeName: string): string | undefined {
-    const paid = this.d.inbox.list().find((i) => i.payout?.status === "paid" && i.fields.payeeName && norm(i.fields.payeeName) === norm(payeeName) && addressOf(i.from));
+    const paid = this.d.inbox.list().find((i) => cameByEmail(i) && i.payout?.status === "paid" && i.fields.payeeName && norm(i.fields.payeeName) === norm(payeeName) && addressOf(i.from));
     return paid ? addressOf(paid.from)! : undefined;
   }
 
@@ -75,6 +75,9 @@ export class PennyChecks {
     const payee = item.fields.payeeName ?? "";
     const contact = this.contactOnFile(payee);
     if (!contact) throw new PayoutError(409, `Sayso has never paid ${payee || "this payee"}, so it has no contact on file to ask. Call them on a number you already had.`);
+    // Only the offline demo may point the payee at localhost; a live server without a public address would email a dead link, so fail before spending the cent.
+    const base = this.d.publicUrl ?? (this.d.offline ? "http://127.0.0.1:4021" : undefined);
+    if (!base) throw new PayoutError(503, "Set PUBLIC_URL so the payee's link points at this server.");
     const p = this.d.svc.book.get(item.payoutId)!;
 
     const id = randomUUID();
@@ -83,6 +86,8 @@ export class PennyChecks {
     const reference = `SAYSO CODE ${code}`;
     // The cent goes to the new account, like any payout: Airwallex checks the details, and request_id makes it once-only.
     const ben = await this.d.awx.createBeneficiary({ beneficiary: p.beneficiary, transfer_methods: [p.method], nickname: `Check ${payee}`.slice(0, 50) });
+    // The cent needs the currency in the balance, like any payout.
+    await this.d.svc.ensureFloatFor(p.currency, 1, p.method, `penny-${id}`);
     const t = await this.d.awx.createTransfer({
       request_id: `penny-${id}`, beneficiary_id: ben.id, transfer_amount: "0.01", transfer_currency: p.currency, transfer_method: p.method,
       reference, source_currency: p.currency, reason: "business_expenses",
@@ -90,10 +95,10 @@ export class PennyChecks {
     this.d.store.db.prepare("INSERT INTO penny_checks (id, inbox_id, payout_id, token, code_hash, contact, status, transfer_id, created_at, sim_reference) VALUES (?,?,?,?,?,?,?,?,?,?)")
       .run(id, inboxId, p.id, token, hashCode(id, code), contact, "sent", t.id, now.toISOString(), this.d.offline ? reference : null);
 
-    const link = `${this.d.publicUrl ?? "http://127.0.0.1:4021"}/v/${token}`;
+    const link = `${base}/v/${token}`;
     const text = `Hi,\n\nWe received an invoice from ${payee} asking us to pay new bank details (account ending ${last4(p.beneficiary)}).\n\nIf that is really you, we've just sent 0.01 ${p.currency} to that account. Its reference holds a 6-digit code. Enter it here:\n\n${link}\n\nIf you didn't change your bank details, open the link and tell us; nothing will be paid.\n`;
     if (this.d.send) await this.d.send(contact, `Did ${payee} change its bank details?`, text).catch((e) => emit("escalate", `Could not email ${contact}: ${String(e).slice(0, 160)}`, { payout: p.id }));
-    else emit("observe", `Email to ${contact} (no mail sender configured): ${link}`, { payout: p.id });
+    else emit("observe", `Email to ${contact} (no mail sender configured): ${link}`, { payout: p.id }, undefined, { private: true });
     emit("act", `Sent 0.01 ${p.currency} with a code to the new account, and asked ${contact} (the contact on file) for it`, { payout: p.id }, t.id);
     return this.forInbox(inboxId)!;
   }

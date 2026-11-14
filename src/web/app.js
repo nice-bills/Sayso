@@ -111,7 +111,7 @@ async function askDevice(kind, options) {
 }
 async function addPasskey() {
   const { challenge_id, options } = await api("/auth/passkey/register/options", {});
-  await api("/auth/passkey/register", { challenge_id, response: await askDevice("create", options) });
+  await api("/auth/passkey/register", { challenge_id, response: await askDevice("create", options), confirmation: await confirmWith("register", "owner") });
   state.me = { ...state.me, passkeys: true, methods: { ...state.me?.methods, passkey: true } };
 }
 /** A passkey check bound to one action. Undefined while no passkey is set up (the server then doesn't ask). */
@@ -122,8 +122,11 @@ async function confirmWith(purpose, subject) {
 }
 const approveInvoice = async (id, extra = {}) => api(`/v1/inbox/${encodeURIComponent(id)}/approve`, { ...extra, confirmation: await confirmWith("approve", id) });
 
+let loadSeq = 0;
 async function load() {
+  const mine = ++loadSeq;
   const [inbox, payouts, summary, agents, mailbox] = await Promise.all([api("/v1/inbox"), api("/v1/payouts"), api("/v1/summary"), api("/v1/agents"), api("/v1/mailbox").catch(() => null)]);
+  if (mine !== loadSeq) return; // a newer load started; its answer wins
   const changed = JSON.stringify([inbox, payouts, summary, agents, mailbox]) !== JSON.stringify([state.inbox, state.payouts, state.summary, state.agents, state.mailbox]);
   Object.assign(state, { inbox, payouts, summary, agents, mailbox, signedIn: true });
   if (changed) render();
@@ -132,14 +135,15 @@ async function load() {
 let pending;
 function refreshSoon() { clearTimeout(pending); pending = setTimeout(() => load().catch(() => {}), 350); }
 
-let stream;
+let stream, pollTimer, renderTimer;
 function goLive() {
   if (stream) return;
   stream = new EventSource("/ops/events");
   stream.onmessage = (m) => { try { addEvent(JSON.parse(m.data)); } catch { /* not an event */ } refreshSoon(); };
   stream.onerror = () => { if (state.signedIn === false) { stream.close(); stream = undefined; } };
-  setInterval(() => { if (state.signedIn && document.visibilityState === "visible") load().catch(() => {}); }, 8000);
-  setInterval(() => { if (state.signedIn && state.tab === "home" && document.visibilityState === "visible") render(); }, 30000);
+  clearInterval(pollTimer); clearInterval(renderTimer);
+  pollTimer = setInterval(() => { if (state.signedIn && document.visibilityState === "visible") load().catch(() => {}); }, 8000);
+  renderTimer = setInterval(() => { if (state.signedIn && state.tab === "home" && document.visibilityState === "visible") render(); }, 30000);
 }
 
 // The server replays its recent events on connect, so a reconnect sends some twice.
@@ -191,8 +195,25 @@ function render() {
   window.scrollTo(0, y);
   filmBehindApp();
   afterRender();
+  settleFocus();
   watchReveals();
 }
+// Where focus goes after the next render: a selector, set by whatever opened or closed a dialog.
+let focusAfter = null;
+function settleFocus() {
+  const dialog = $root.querySelector(".why-drawer, .osheet[role=dialog]");
+  const want = focusAfter ? $root.querySelector(focusAfter) : null;
+  focusAfter = null;
+  if (want) return want.focus();
+  // A re-render while a dialog is open puts focus back inside it.
+  if (dialog && !dialog.contains(document.activeElement)) dialog.querySelector("button, [href], input, [tabindex]:not([tabindex='-1'])")?.focus();
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const why = Object.keys(state.why)[0];
+  if (why) { delete state.why[why]; focusAfter = `.why-btn[data-why="${CSS.escape(why)}"]`; render(); return; }
+  if (state.home?.open) { if (state.home.open === "said") Object.assign(state.say, { result: null, text: "", interim: "" }); state.home.open = null; state.home.from = null; focusAfter = ".deck .hc.k0"; render(); }
+});
 // Every screen but the landing sits on the night film (app-film.css); the film only plays while shown.
 const appFilm = document.querySelector(".app-film video");
 function filmBehindApp() {
@@ -694,7 +715,8 @@ function appView() {
         state.me?.viewer ? h("span", { class: "mode read-only", title: "You can look, but nothing you do pays or changes anything" }, "Read-only") : null,
         s ? h("span", { class: "mode", title: s.offline ? "Airwallex and Metal are simulated" : "Real Airwallex and Metal APIs" }, h("span", { class: `dot${s.offline ? "" : " live"}` }), s.offline ? "Offline demo" : s.sandbox ? "Sandbox" : "Live") : null,
         h("a", { class: "btn quiet icon-btn", href: "/ops/", target: "_blank", rel: "noopener", title: "Back office", "aria-label": "Back office" }, icon("ledger", 18)),
-        h("button", { class: "btn quiet icon-btn", title: "Sign out", "aria-label": "Sign out", onclick: async () => { await api("/auth/logout", {}); state.me = await api("/auth/me").catch(() => state.me); state.signedIn = false; history.pushState(null, "", "/"); render(); } }, icon("out", 18)),
+        h("button", { class: "btn quiet icon-btn", title: "Sign out", "aria-label": "Sign out", onclick: async () => { await api("/auth/logout", {}); state.me = await api("/auth/me").catch(() => state.me); state.signedIn = false; stream?.close(); stream = undefined; clearInterval(pollTimer); clearInterval(renderTimer); history.pushState(null, "", "/"); render(); } }, icon("out", 18)),
+        h("button", { class: "btn quiet icon-btn", title: "Sign out everywhere", "aria-label": "Sign out everywhere", onclick: async () => { await api("/auth/logout/all", {}); state.me = await api("/auth/me").catch(() => state.me); state.signedIn = false; stream?.close(); stream = undefined; clearInterval(pollTimer); clearInterval(renderTimer); history.pushState(null, "", "/"); render(); } }, icon("out", 18)),
       ),
     )),
     h("div", { class: "wrap" },
@@ -751,13 +773,14 @@ function homeView() {
       !listening && !r ? live : null,
       s.typing ? h("form", { class: "sh-type", onsubmit: (e) => { e.preventDefault(); const t = e.target.elements.say.value.trim(); if (t) understand(t); } },
         h("input", { class: "field say-field", name: "say", autocomplete: "off", "aria-label": "Type a payment", placeholder: "Pay Kreuzberg Studio 280 euros", value: "", autofocus: true })) : null,
-      h("button", { class: `mic${s.listening ? " on" : ""}${state.busy.say ? " busy" : ""}`, type: "button", "aria-label": s.listening ? "Stop listening" : "Hold to talk", "aria-pressed": String(s.listening), disabled: !s.engine,
-        onpointerdown: (e) => { if (!s.listening) { e.preventDefault(); orbDown = performance.now(); startListening(); } },
-        onpointerup: () => { if (s.listening && orbDown && performance.now() - orbDown > 400) stopListening(); orbDown = 0; },
-        onclick: () => { if (s.listening && !orbDown) stopListening(); },
+      h("button", { class: `mic${s.listening ? " on" : ""}${state.busy.say ? " busy" : ""}`, type: "button", "aria-label": s.listening ? "Stop listening" : "Talk", "aria-pressed": String(s.listening), disabled: !s.engine,
+        onpointerdown: (e) => { if (!s.listening) { e.preventDefault(); orbDown = performance.now(); tapStarted = true; startListening(); } },
+        // Held: let go to stop. Tapped: keep listening until the next tap.
+        onpointerup: () => { if (s.listening && orbDown && performance.now() - orbDown > 400) { stopListening(); tapStarted = false; } orbDown = 0; },
+        onclick: () => { if (tapStarted) { tapStarted = false; return; } if (s.listening) stopListening(); },
         onkeydown: (e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); s.listening ? stopListening() : startListening(); } } }, icon(s.listening ? "hand" : "mic", 28)),
       h("div", { class: "sh-hint" },
-        s.listening ? (s.engine === "whisper" ? "Whisper, on this device" : "Listening") : s.engine ? "Hold to talk" : "Type what to pay",
+        s.listening ? (s.engine === "whisper" ? "Whisper, on this device" : "Listening") : s.engine ? "Tap or hold to talk" : "Type what to pay",
         " · ",
         h("button", { class: "linkish", type: "button", onclick: () => { s.typing = !s.typing; render(); if (s.typing) setTimeout(() => document.querySelector(".say-field")?.focus(), 0); } }, s.typing ? "hide keyboard" : "type instead")),
     ),
@@ -779,7 +802,7 @@ function decisionsPane() {
     h("div", { class: "dp-stats" },
       stat(count((p) => p.status === "paid"), "Delivered"),
       stat(count((p) => ["accepted", "funded", "submitted"].includes(p.status)), "On the way"),
-      stat(count((p) => p.status === "waiting" || p.decision?.verdict === "wait"), "Waiting"),
+      stat(count((p) => p.status === "waiting" || (p.status === "quoted" && p.decision?.verdict === "wait")), "Waiting"),
       stat(count((p) => ["needs_review", "rejected"].includes(p.status)), "Held or blocked")),
     latest ? h("button", { type: "button", class: "dp-latest", "data-tone": tone, onclick: () => openRow(latest) },
       h("span", { class: "dp-k" }, `Latest · ${latest.source === "agent" ? "from an agent" : "from the inbox"} · ${ago(latest.created_at)}`),
@@ -806,10 +829,15 @@ function deck(queue) {
     const amt = it ? (it.fields.amount && it.fields.currency ? money(it.fields.amount, it.fields.currency) : "A question") : money(p.amount, p.currency);
     const who = it ? it.fields.payeeName || sender(it.from) : p.payee;
     const sub = it ? (it.status === "needs_verification" ? (it.payout?.reasons?.[0] ?? "Asks to pay new bank details") : it.status === "needs_details" ? `Missing ${it.missing.slice(0, 3).join(", ")}` : agentOf(it) ? `${agentOf(it)} forwarded it` : `From ${sender(it.from)}`) : "An agent's payout, waiting for review";
-    const c = h("button", { type: "button", class: `hc ${tone} k${Math.min(rank, 3)}`, "aria-label": `${tag}: ${amt} to ${who}. Opens it.`, tabindex: rank === 0 ? "0" : "-1" },
+    const c = h("button", { type: "button", class: `hc ${tone} k${Math.min(rank, 3)}`, "aria-label": `${tag}: ${amt} to ${who}. Opens it.${rank === 0 && len > 1 ? " Arrow keys show the next." : ""}`, tabindex: rank === 0 ? "0" : "-1" },
       h("span", { class: "hc-row" }, h("span", { class: "hc-who" }, who), flaps(`hc:${q.key}`, FLAP_WORD[tag][0], { len: 5, size: "xs", tone: FLAP_WORD[tag][1] })),
       h("span", { class: "hc-row end" }, h("span", {}, h("b", { class: "hc-amt" }, amt), h("span", { class: "hc-sub" }, sub)), h("span", { class: "hc-go", "aria-hidden": "true" }, icon("ext", 16))));
     c._rank = rank;
+    if (rank === 0 && len > 1) c.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      e.preventDefault();
+      hs.top += e.key === "ArrowRight" ? 1 : len - 1; hs.shifted = true; focusAfter = ".deck .hc.k0"; render();
+    });
     let d = null, moved = false;
     c.addEventListener("pointerdown", (e) => { if (rank !== 0) return; d = { x: e.clientX, y: e.clientY, dx: 0, live: false }; try { c.setPointerCapture(e.pointerId); } catch {} });
     c.addEventListener("pointermove", (e) => {
@@ -840,7 +868,7 @@ function deck(queue) {
       if (rank > 0) { hs.top += rank; hs.shifted = true; render(); return; }
       const rr = c.getBoundingClientRect();
       hs.from = { t: rr.top, b: innerHeight - rr.bottom, x: rr.left, r: innerWidth - rr.right };
-      hs.open = q.key; render();
+      hs.open = q.key; focusAfter = ".osheet .sh-icon"; render();
     });
     return c;
   });
@@ -852,7 +880,7 @@ function deck(queue) {
 function cardSheet(key, item, lead, body) {
   const hs = state.home, tone = item ? CARD_TONE[item.status] ?? "sky" : "ink";
   const grow = firstShow(`sheet:${key}:${item?.status ?? ""}`) && hs.from;
-  const close = () => { if (key === "said") Object.assign(state.say, { result: null, text: "", interim: "" }); hs.open = null; hs.from = null; render(); };
+  const close = () => { if (key === "said") Object.assign(state.say, { result: null, text: "", interim: "" }); hs.open = null; hs.from = null; focusAfter = ".deck .hc.k0"; render(); };
   return h("div", { class: `osheet ${tone}${grow ? " grow" : ""}`, role: "dialog", "aria-label": item?.fields.payeeName ?? "Payment", style: grow ? `--t:${hs.from.t}px;--b:${hs.from.b}px;--x:${hs.from.x}px;--r:${hs.from.r}px` : "" },
     h("header", { class: "sh-top" }, h("button", { class: "sh-icon", "aria-label": "Back", onclick: close }, icon("back", 22)), h("span", { class: "sh-mark" }, "sayso"), h("span", { style: "width:38px" })),
     h("div", { class: "sheet-body sh-card" }, lead, body),
@@ -866,6 +894,7 @@ function paidSheet(item) {
     h("div", { class: "sheet-body sh-card" }, paidCard(item)));
 }
 let orbDown = 0;
+let tapStarted = false;
 const seenCards = new Set();
 const firstShow = (key) => !seenCards.has(key) && seenCards.add(key);
 
@@ -1064,15 +1093,15 @@ const SAID = { payee: "Pay", amount: "Amount", reference: "Reference", bank: "In
 const WHY = { heard: "You said", read: "Read", risk: "Rules", payee: "Bank", mandate: "Mandate", observe: "Seen", decide: "Decided", act: "Moved", reconcile: "Settled", escalate: "Flagged", refuse: "Refused", receipt: "Receipt" };
 function whyButton(id) {
   const open = Boolean(state.why[id]);
-  return h("button", { class: "btn quiet small why-btn", type: "button", disabled: state.busy[`why:${id}`], onclick: () => open ? (delete state.why[id], render()) : act(`why:${id}`, async () => { state.why = { [id]: await api(`/v1/payouts/${encodeURIComponent(id)}/why`) }; }) }, open ? "Hide why" : "Why?");
+  return h("button", { class: "btn quiet small why-btn", "data-why": id, type: "button", disabled: state.busy[`why:${id}`], onclick: () => open ? (delete state.why[id], focusAfter = `.why-btn[data-why="${CSS.escape(id)}"]`, render()) : act(`why:${id}`, async () => { state.why = { [id]: await api(`/v1/payouts/${encodeURIComponent(id)}/why`) }; focusAfter = ".why-drawer .icon-btn"; }) }, open ? "Hide why" : "Why?");
 }
 // The open "Why?" slides in as a side panel over the page (one at a time), like the inbox mock.
 function whyDrawer() {
   const id = Object.keys(state.why)[0];
   if (!id) return null;
-  const close = () => { delete state.why[id]; render(); };
+  const close = () => { delete state.why[id]; focusAfter = `.why-btn[data-why="${CSS.escape(id)}"]`; render(); };
   return [h("div", { class: "why-scrim", onclick: close }),
-    h("aside", { class: "why-drawer", "aria-label": "Why Sayso decided this" },
+    h("aside", { class: "why-drawer", role: "dialog", "aria-modal": "true", "aria-label": "Why Sayso decided this" },
       h("div", { class: "wd-head" }, h("b", {}, "Why Sayso decided this"), h("button", { class: "btn quiet icon-btn", type: "button", "aria-label": "Close", onclick: close }, icon("x", 18))),
       whyPanel(id))];
 }
@@ -1485,7 +1514,7 @@ function provePanel(p) {
       h("span", { class: `pill ${DISPUTE_VERDICT[d.verdict]?.[1] ?? ""}` }, DISPUTE_VERDICT[d.verdict]?.[0] ?? d.verdict),
       h("span", {}, h("b", {}, `${proof.claims[d.claim]}. `), d.reason, d.anchor_tx?.startsWith("0x") ? h("a", { href: `https://testnet.metalntwx.com/tx/${d.anchor_tx}`, target: "_blank", rel: "noopener" }, " Anchored on Metal") : null))),
     p.status === "paid" ? h("div", { class: "actions" }, disputeButton(p), open ? h("button", { type: "button", class: "btn quiet small", disabled: state.busy[key], onclick: keep }, "Keep the payout") : null) : null,
-    p.status === "paid" && !open ? h("div", { class: "pv-try" },
+    p.status === "paid" && !open && !state.me?.viewer ? h("div", { class: "pv-try" },
       h("span", { class: "wi-hint" }, "Dispute it as the agent would. The rules answer from the proof above."),
       h("div", { class: "wi-chips" }, CLAIM_CHIPS.map(([c, label]) => h("button", { type: "button", class: "chip", disabled: state.busy[key], onclick: () => file(c) }, label)))) : null,
   );
@@ -1657,7 +1686,8 @@ export { h, state, brand, stage, proveSection, signinDialog, toApp, openApp, sti
     const me = await api("/auth/me");
     state.me = me;
     state.signedIn = me.owner || me.viewer;
-    if (state.signedIn) { await load(); goLive(); }
   } catch { state.signedIn = false; }
+  // A failed load is not a signed-out owner: keep the session and let the live stream and poll fill in.
+  if (state.signedIn) { await load().catch(() => toast("Couldn't load everything; retrying.")); goLive(); }
   render();
 })();

@@ -1,7 +1,22 @@
-node_modules
+# Only what the server needs goes into the image: src, scripts, samples, data/fx.csv, package files.
+**/node_modules
+.git
+.github
+.claude
+.claude-plugin
+.e2e
 .env
 *.db
-.e2e
-data
-results
 .metal
+demo
+recon
+plans
+docs
+test
+tests
+results
+integrations
+plugins
+data/*
+!data/fx.csv
+vendor

@@ -21,10 +21,11 @@ import type { MandateChecker, MandatePolicy, MandateProof, SimMandates } from ".
 import { PayoutError, publicView, WAITS_FOR_FUNDS, waitsForFunds, type PayoutService } from "./service.js";
 import type { BatchBook } from "./batch.js";
 import type { Payout } from "./book.js";
-import type { SignedOffer } from "./offer.js";
+import type { BatchTerms, SignedBatchOffer, SignedOffer } from "./offer.js";
 
 /** Signs what a quote promises (see offer.ts). */
 export type SignOffer = (p: Payout) => Promise<SignedOffer | null>;
+export type SignBatch = (terms: Omit<BatchTerms, "payTo">) => Promise<SignedBatchOffer>;
 /** A quote that ever became payable carries Sayso's signed offer; held, rejected ones never had one. */
 const SIGNED = new Set(["quoted", "accepted", "funded", "waiting", "submitted", "paid", "failed", "refunded", "refund_failed", "expired"]);
 
@@ -43,7 +44,7 @@ export interface MandateOptions {
 const PAY = /^\/v1\/payouts\/([0-9a-f-]{36})\/pay$/;
 const PAY_BATCH = /^\/v1\/batches\/([0-9a-f-]{36})\/pay$/;
 
-export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchBook, mandates: MandateOptions = { policy: "verify", record: () => {} }, signOffer?: SignOffer): Router {
+export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchBook, mandates: MandateOptions = { policy: "verify", record: () => {} }, signOffer?: SignOffer, signBatch?: SignBatch): Router {
   const r = express.Router();
   const withOffer = async (p: Payout) => {
     const left = svc.remainder(p);
@@ -53,29 +54,38 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
     };
   };
   const linesOf = (x: { kind: "payout" | "batch"; id: string }) => (x.kind === "payout" ? [x.id] : batches.get(x.id)?.payoutIds ?? []);
-  r.use(express.json({ limit: "1mb" }));
+  // Only payout routes parse JSON here: the router is mounted at the root, so a router-wide parser would run for every path.
+  const json = express.json({ limit: "1mb" });
+  // A payable batch carries Sayso's signature over its lines and total, and each line its own offer, so the agent can check them like a single quote.
+  const signedBatch = async (id: string) => {
+    const v = batches.view(id);
+    if (!v || !v.pay_url || !signBatch || !signOffer) return v;
+    const payouts = await Promise.all(v.payouts.map(async (l) => ({ ...l, offer: await signOffer(svc.book.get(l.id)!) })));
+    const offer = await signBatch({ batch: v.id, quotes: v.payouts.map((l) => l.id).join(","), priceUsdzMinor: String(Math.round(Number(v.price_usdz) * 100)), expiresAt: String(Math.floor(new Date(v.expires_at).getTime() / 1000)) });
+    return { ...v, payouts, offer };
+  };
 
-  r.post("/v1/batches", async (req, res) => {
+  r.post("/v1/batches", json, async (req, res) => {
     try {
       const b = await batches.create(req.body?.items, String(req.body?.reference ?? "Batch payout"));
-      res.status(b.status === "rejected" ? 422 : 201).json(batches.view(b.id));
+      res.status(b.status === "rejected" ? 422 : 201).json(await signedBatch(b.id));
     } catch (err) {
       sendError(res, err);
     }
   });
-  r.get("/v1/batches/:id", (req, res) => {
-    const v = batches.view(req.params.id);
+  r.get("/v1/batches/:id", async (req, res) => {
+    const v = await signedBatch(req.params.id);
     if (!v) return void res.status(404).json({ error: "no such batch" });
     res.json(v);
   });
-  r.post("/v1/batches/:id/pay", (req, res, next) => {
+  r.post("/v1/batches/:id/pay", json, (req, res, next) => {
     const b = batches.get(req.params.id);
     if (!b) return void res.status(404).json({ error: "no such batch" });
     if (!batches.priceOf(b.id)) return void res.status(b.status === "quoted" ? 410 : 409).json({ error: b.status === "quoted" ? "batch quote expired" : `batch is ${b.status}`, batch: batches.view(b.id) });
     next();
   });
 
-  r.post("/v1/quotes", async (req, res) => {
+  r.post("/v1/quotes", json, async (req, res) => {
     try {
       const p = await svc.quote(req.body);
       res.status(p.status === "rejected" ? 422 : 201).json({ ...(await withOffer(p)), pay_url: p.status === "quoted" && !waitsForFunds(p) ? `/v1/payouts/${p.id}/pay` : null });
@@ -85,7 +95,7 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
   });
 
   // A split's second part: a quote for what is left, to the same payee, paid like any other.
-  r.post("/v1/payouts/:id/remainder", async (req, res) => {
+  r.post("/v1/payouts/:id/remainder", json, async (req, res) => {
     try {
       const q = await svc.quoteRemainder(req.params.id);
       res.status(201).json({ ...(await withOffer(q)), pay_url: q.status === "quoted" && !waitsForFunds(q) ? `/v1/payouts/${q.id}/pay` : null });
@@ -101,7 +111,7 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
   });
 
   // Only a payable quote ever gets a 402; anything else is answered before payment is asked for.
-  r.post("/v1/payouts/:id/pay", (req, res, next) => {
+  r.post("/v1/payouts/:id/pay", json, (req, res, next) => {
     const p = svc.book.get(req.params.id);
     if (!p) return void res.status(404).json({ error: "no such quote" });
     if (p.status === "quoted" && waitsForFunds(p)) return void res.status(409).json({ error: WAITS_FOR_FUNDS, payout: publicView(p) });
@@ -109,8 +119,10 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
     next();
   });
 
+  const guard = lockGuard();
   if (mode.kind === "x402") {
-    const release = (t: unknown) => { const x = target(t); if (x?.kind === "payout") svc.release(x.id); else if (x?.kind === "batch") batches.release(x.id); };
+    const reqOf = (t: unknown) => (t as { request?: { adapter?: { req?: object } } } | undefined)?.request?.adapter?.req;
+    const release = (t: unknown) => guard.releaseIfLocked(reqOf(t), () => { const x = target(t); if (x?.kind === "payout") svc.release(x.id); else if (x?.kind === "batch") batches.release(x.id); });
     mode.server.onAfterSettle(async (ctx) => {
       const x = target(ctx.transportContext);
       if (!x || !ctx.result.success) return;
@@ -174,7 +186,7 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
       if (!payer) return void res.status(402).json({ error: "payment refused: mandate_not_bound", price_usdz: price });
       const tx = `sim:0xsettle${id.slice(0, 8)}`;
       res.on("finish", () => {
-        if (res.statusCode >= 400) return void (kind === "payout" ? svc.release(id) : batches.release(id));
+        if (res.statusCode >= 400) return void guard.releaseIfLocked(req, () => (kind === "payout" ? svc.release(id) : batches.release(id)));
         void (kind === "payout" ? svc.onFunded(id, payer!, tx) : batches.onFunded(id, payer!, tx));
         if (ref && mode.mandates && mandates.policy !== "off") void mode.mandates.check({ tx, ref, checkoutMandate: req.header("x-sim-signed-order"), presented: { credential: req.body?.mandate_credential, issuer: req.body?.mandate_issuer } }).then((proof) => mandates.record(linesOf({ kind, id }), proof));
       });
@@ -187,6 +199,7 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
   r.post("/v1/batches/:id/pay", (req, res) => {
     try {
       const b = batches.accept(req.params.id);
+      guard.mark(req);
       res.status(202).json({ ...batches.view(b.id), status_url: `/v1/batches/${b.id}` });
     } catch (err) {
       sendError(res, err);
@@ -196,6 +209,7 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
   r.post("/v1/payouts/:id/pay", (req, res) => {
     try {
       const p = svc.accept(req.params.id);
+      guard.mark(req);
       res.status(202).json({ ...publicView(p), status_url: `/v1/payouts/${p.id}` });
     } catch (err) {
       sendError(res, err);
@@ -203,6 +217,16 @@ export function payoutApi(svc: PayoutService, mode: PaymentMode, batches: BatchB
   });
 
   return r;
+}
+
+/** Remembers which requests moved a quote to `accepted`; only those may move it back. */
+export function lockGuard() {
+  const locked = new WeakSet<object>();
+  return {
+    mark: (req: object) => void locked.add(req),
+    /** Runs `release` only if `req` took the lock. A losing duplicate's 409 must not undo the winner. */
+    releaseIfLocked: (req: object | undefined, release: () => void) => { if (req && locked.has(req)) release(); },
+  };
 }
 
 function target(transport: unknown): { kind: "payout" | "batch"; id: string } | undefined {

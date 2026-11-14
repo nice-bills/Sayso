@@ -197,9 +197,6 @@ export function authMdRouter(d: { store: Store; keys: AgentKeys; auth: Auth }): 
   return r;
 }
 
-/** Where a 401 points an agent: the PRM, per RFC 9728. */
-export const resourceMetadataHeader = (req: Request, base: (req: Request) => string) => `Bearer resource_metadata="${base(req)}/.well-known/oauth-protected-resource"`;
-
 function skill(base: string): string {
   return `# auth.md
 

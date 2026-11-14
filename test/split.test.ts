@@ -58,6 +58,36 @@ describe("a split is paid in full, in two parts", () => {
     }
   });
 
+  it("asking for the rest twice at once gives one quote", async () => {
+    const { cs, server, call } = await start();
+    const payer = { "x-sim-payer": "0xA9e0000000000000000000000000000000000001" };
+    try {
+      const q = await call("POST", "/v1/quotes", body({ spendable_usdz: "150.00" }));
+      expect((await call("POST", q.body.pay_url, undefined, payer)).status).toBe(202);
+      for (let i = 0; i < 3; i++) await cs.tick();
+      const [a, b] = await Promise.all([call("POST", `/v1/payouts/${q.body.id}/remainder`), call("POST", `/v1/payouts/${q.body.id}/remainder`)]);
+      expect([a.status, b.status]).toEqual([201, 201]);
+      expect(a.body.id).toBe(b.body.id);
+      const rests = cs.svc.book.list(500).filter((p) => p.reference === "split job" && p.id !== q.body.id && p.status === "quoted");
+      expect(rests).toHaveLength(1);
+      expect(rests[0]!.amountMinor).toBe(toMinor(Number(a.body.amount)));
+    } finally {
+      server.close();
+    }
+  });
+
+  it("waits instead of splitting when fees eat the whole budget", async () => {
+    const { server, call } = await start();
+    try {
+      const q = await call("POST", "/v1/quotes", body({ spendable_usdz: "0.50" }));
+      expect(q.body.decision).toMatchObject({ verdict: "wait", decided_by: "balance" });
+      expect(Number(q.body.amount)).toBe(300);
+      expect(q.body.pay_url).toBeNull();
+    } finally {
+      server.close();
+    }
+  });
+
   it("won't sell a quote that waits for funds", async () => {
     const { server, call } = await start();
     try {

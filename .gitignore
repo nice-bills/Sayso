@@ -16,3 +16,9 @@ node_modules/
 .taste-skill/
 .scratch/
 .runs/
+
+# Local only: agent worktrees, demo production, research notes.
+.claude/worktrees/
+demo/
+recon/
+vendor/

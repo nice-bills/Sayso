@@ -66,10 +66,27 @@ export function heuristicRead(message: string): Findings {
   return { kind, claimedPayee: null, requestsNewBankDetails, pressureTactics, forecastSignal, citations, summary: "keyword reader (no model)" };
 }
 
-/** Claude when ANTHROPIC_API_KEY is set, otherwise the keyword reader. */
+/** Claude can add red flags to the keyword read, never remove them. */
+export function mergeFindings(claude: Findings, keywords: Findings): Findings {
+  return {
+    ...claude,
+    kind: keywords.kind === "bank_details_change" ? "bank_details_change" : claude.kind,
+    requestsNewBankDetails: claude.requestsNewBankDetails || keywords.requestsNewBankDetails,
+    pressureTactics: claude.pressureTactics || keywords.pressureTactics,
+    forecastSignal: keywords.forecastSignal === "contradicts" ? "contradicts" : claude.forecastSignal,
+    citations: [...new Set([...claude.citations, ...keywords.citations])],
+  };
+}
+
+/** Claude when ANTHROPIC_API_KEY is set, merged with the keyword reader so it can only add flags; the keyword reader alone otherwise. */
 export async function readAuto(message: string): Promise<Findings & { reader: "claude" | "keywords" }> {
-  if (!process.env.ANTHROPIC_API_KEY) return { ...heuristicRead(message), reader: "keywords" };
-  return { ...(await readMessage(new Anthropic(), message)), reader: "claude" };
+  const keywords = heuristicRead(message);
+  if (!process.env.ANTHROPIC_API_KEY) return { ...keywords, reader: "keywords" };
+  try {
+    return { ...mergeFindings(await readMessage(new Anthropic(), message), keywords), reader: "claude" };
+  } catch {
+    return { ...keywords, summary: "keyword reader (Claude unavailable)", reader: "keywords" };
+  }
 }
 
 export type FindingsEffect = { escalate: boolean; reason: string | null; forecast: Forecast };

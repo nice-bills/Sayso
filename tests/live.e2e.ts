@@ -27,7 +27,7 @@ test('live: the newest receipt hashes to what Sayso recorded, and an edited one 
 test('live: a visitor can look around read-only, and cannot pay anything', async ({ app, screen, browser }) => {
   await app.open('/');
   await screen.getByRole('button', 'Look around, read-only').tap();
-  await expect(screen.getByRole('button', 'Hold to talk')).toBeVisible({ timeout: 20_000 });
+  await expect(screen.getByRole('button', 'Talk')).toBeVisible({ timeout: 20_000 });
   await expect(browser.locator('.mode.read-only').first()).toHaveText('Read-only');
   const status = await browser.evaluate(async () => (await fetch('/v1/inbox', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ from: 'a@b.c', body: 'pay 10 EUR' }) })).status);
   expect(status).toBe(403);

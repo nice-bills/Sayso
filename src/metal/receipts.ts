@@ -51,8 +51,10 @@ export function hashReceipt(r: Receipt): Hex {
 export const anchorData = (hash: Hex): Hex => `${RECEIPT_TAG}${hash.slice(2)}`;
 
 export interface Anchorer {
-  /** Writes the hash on chain. Returns the transaction. */
-  anchor(hash: Hex): Promise<{ tx: string; explorer?: string }>;
+  /** Writes the hash on chain. Calls onSent with the transaction as soon as it is broadcast, then returns once it is mined. */
+  anchor(hash: Hex, onSent?: (tx: string) => void): Promise<{ tx: string; explorer?: string }>;
+  /** Whether a transaction sent earlier succeeded (true) or reverted (false). Throws while it can't tell. */
+  confirm?(tx: string): Promise<boolean>;
 }
 
 /** Live: a funded Metal key sends the anchor to itself, paying gas in USDZ. */
@@ -76,15 +78,21 @@ export class MetalAnchorer implements Anchorer {
 
   // One anchor at a time: two sent together from the same key race for the same nonce.
   private queue: Promise<unknown> = Promise.resolve();
-  anchor(hash: Hex): Promise<{ tx: string; explorer?: string }> {
-    const next = this.queue.then(() => this.send(hash));
+  anchor(hash: Hex, onSent?: (tx: string) => void): Promise<{ tx: string; explorer?: string }> {
+    const next = this.queue.then(() => this.send(hash, onSent));
     this.queue = next.catch(() => undefined);
     return next;
   }
 
-  private async send(hash: Hex) {
+  async confirm(tx: string): Promise<boolean> {
+    const r = await this.client.waitForTransactionReceipt({ hash: tx as Hex, timeout: 30_000 });
+    return r.status === "success";
+  }
+
+  private async send(hash: Hex, onSent?: (tx: string) => void) {
     const { sendMip20Call } = await import("@metalntwx/metal-ts");
     const tx = await sendMip20Call({ walletClient: this.wallet, publicClient: this.client, to: this.address, data: anchorData(hash), gasToken: USDZ, gasFallback: 80_000n });
+    onSent?.(tx);
     const receipt = await this.client.waitForTransactionReceipt({ hash: tx });
     if (receipt.status !== "success") throw new Error(`anchor transaction reverted: ${tx}`);
     return { tx, explorer: `${EXPLORER}${tx}` };
@@ -93,8 +101,10 @@ export class MetalAnchorer implements Anchorer {
 
 /** Offline: the anchor is recorded, and its proof says sim:. */
 export class SimAnchorer implements Anchorer {
-  async anchor(_hash: Hex) {
-    return { tx: `sim:0x${randomUUID().replaceAll("-", "")}` };
+  async anchor(_hash: Hex, onSent?: (tx: string) => void) {
+    const tx = `sim:0x${randomUUID().replaceAll("-", "")}`;
+    onSent?.(tx);
+    return { tx };
   }
 }
 
@@ -123,6 +133,54 @@ export class Receipts {
       payout_id TEXT NOT NULL, status TEXT NOT NULL, receipt TEXT NOT NULL, hash TEXT NOT NULL,
       tx TEXT, explorer TEXT, error TEXT, PRIMARY KEY (payout_id, status)
     )`);
+    const cols = store.db.prepare("PRAGMA table_info(receipts)").all() as Array<{ name: string }>;
+    for (const [name, ddl] of [["sent_tx", "TEXT"], ["attempts", "INTEGER NOT NULL DEFAULT 0"], ["next_at", "TEXT"]] as const) {
+      if (!cols.some((c) => c.name === name)) store.db.exec(`ALTER TABLE receipts ADD COLUMN ${name} ${ddl}`);
+    }
+  }
+
+  private readonly anchoring = new Set<string>();
+
+  /**
+   * Anchors one stored receipt. A transaction already sent is confirmed, never sent again; a failure
+   * waits longer each time (1, 2, 4... minutes, at most an hour) and is escalated once, on the fifth.
+   */
+  private async anchorRow(payoutId: string, status: string, hash: Hex, now = new Date()): Promise<boolean> {
+    const key = `${payoutId}:${status}`;
+    if (this.anchoring.has(key)) return false;
+    this.anchoring.add(key);
+    const set = (sql: string, ...args: Array<string | number | null>) => this.store.db.prepare(`UPDATE receipts SET ${sql} WHERE payout_id = ? AND status = ?`).run(...args, payoutId, status);
+    try {
+      const row = this.store.db.prepare("SELECT sent_tx, attempts FROM receipts WHERE payout_id = ? AND status = ?").get(payoutId, status) as { sent_tx: string | null; attempts: number };
+      if (row.sent_tx && this.anchorer.confirm) {
+        try {
+          if (await this.anchorer.confirm(row.sent_tx)) {
+            set("tx = ?, explorer = ?, error = NULL", row.sent_tx, row.sent_tx.startsWith("0x") ? `${EXPLORER}${row.sent_tx}` : null);
+            return true;
+          }
+          set("sent_tx = NULL"); // it reverted, so a new one is needed
+        } catch (err) {
+          this.backoff(payoutId, status, row.attempts, err, now);
+          return false;
+        }
+      }
+      const { tx, explorer } = await this.anchorer.anchor(hash, (sent) => set("sent_tx = ?", sent));
+      set("tx = ?, explorer = ?, error = NULL", tx, explorer ?? null);
+      return true;
+    } catch (err) {
+      const attempts = (this.store.db.prepare("SELECT attempts FROM receipts WHERE payout_id = ? AND status = ?").get(payoutId, status) as { attempts: number }).attempts;
+      this.backoff(payoutId, status, attempts, err, now);
+      return false;
+    } finally {
+      this.anchoring.delete(key);
+    }
+  }
+
+  private backoff(payoutId: string, status: string, attempts: number, err: unknown, now: Date) {
+    const n = attempts + 1;
+    const next = new Date(now.getTime() + Math.min(60, 2 ** (n - 1)) * 60_000).toISOString();
+    this.store.db.prepare("UPDATE receipts SET attempts = ?, next_at = ?, error = ? WHERE payout_id = ? AND status = ?").run(n, next, String(err).slice(0, 300), payoutId, status);
+    if (n === 5) emit("escalate", `The receipt for ${payoutId.slice(0, 8)} (${status}) still isn't anchored after 5 tries: ${String(err).slice(0, 200)}. Check the receipt key's USDZ for gas.`, { payout: payoutId });
   }
 
   /** Records the receipt first, then anchors it, so a crash between the two leaves it to retry. */
@@ -133,27 +191,17 @@ export class Receipts {
     const receipt = existing?.receipt ?? receiptOf(p, now);
     const hash = hashReceipt(receipt);
     if (!existing) this.store.db.prepare("INSERT OR IGNORE INTO receipts (payout_id, status, receipt, hash) VALUES (?, ?, ?, ?)").run(p.id, p.status, JSON.stringify(receipt), hash);
-    try {
-      const { tx, explorer } = await this.anchorer.anchor(hash);
-      this.store.db.prepare("UPDATE receipts SET tx = ?, explorer = ?, error = NULL WHERE payout_id = ? AND status = ?").run(tx, explorer ?? null, p.id, p.status);
-      emit("reconcile", `Receipt for ${p.id.slice(0, 8)} (${p.status}) anchored on Metal`, { payout: p.id, hash }, explorer ?? tx);
-    } catch (err) {
-      this.store.db.prepare("UPDATE receipts SET error = ? WHERE payout_id = ? AND status = ?").run(String(err).slice(0, 300), p.id, p.status);
-      emit("escalate", `Could not anchor the receipt for ${p.id.slice(0, 8)}: ${String(err).slice(0, 200)}`, { payout: p.id });
-    }
+    const ok = await this.anchorRow(p.id, p.status, hash, now);
+    const after = this.get(p.id).find((a) => a.status === p.status);
+    if (ok) emit("reconcile", `Receipt for ${p.id.slice(0, 8)} (${p.status}) anchored on Metal`, { payout: p.id, hash }, after?.explorer ?? after?.tx ?? undefined);
+    else if ((this.store.db.prepare("SELECT attempts FROM receipts WHERE payout_id = ? AND status = ?").get(p.id, p.status) as { attempts: number }).attempts === 1) emit("escalate", `Could not anchor the receipt for ${p.id.slice(0, 8)}: ${String(after?.error).slice(0, 200)}`, { payout: p.id });
     return this.get(p.id).find((a) => a.status === p.status);
   }
 
   /** Anchors any receipt that failed to anchor before. */
-  async retry(): Promise<void> {
-    const rows = this.store.db.prepare("SELECT payout_id, status FROM receipts WHERE tx IS NULL").all() as Array<{ payout_id: string; status: string }>;
-    for (const r of rows) {
-      const a = this.get(r.payout_id).find((x) => x.status === r.status)!;
-      try {
-        const { tx, explorer } = await this.anchorer.anchor(a.hash);
-        this.store.db.prepare("UPDATE receipts SET tx = ?, explorer = ?, error = NULL WHERE payout_id = ? AND status = ?").run(tx, explorer ?? null, r.payout_id, r.status);
-      } catch { /* left for the next tick */ }
-    }
+  async retry(now = new Date()): Promise<void> {
+    const rows = this.store.db.prepare("SELECT payout_id, status, hash FROM receipts WHERE tx IS NULL AND (next_at IS NULL OR next_at <= ?)").all(now.toISOString()) as Array<{ payout_id: string; status: string; hash: Hex }>;
+    for (const r of rows) await this.anchorRow(r.payout_id, r.status, r.hash, now);
   }
 
   /** The newest anchored receipt, preferring one anchored on Metal over a simulated one. */

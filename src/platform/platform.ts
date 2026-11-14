@@ -8,6 +8,8 @@
 // own UI (a Base44 entity, say) shows it live.
 
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { BlockList, isIP } from "node:net";
 import { z } from "zod";
 import type { AgentKey, AgentKeys } from "../agents/keys.js";
 import { emit } from "../events.js";
@@ -64,6 +66,7 @@ export type AppPayoutState = keyof typeof APP_PAYOUT.states;
 
 // "paid" is not final: a bank can return a payout later, and the app should hear about the refund.
 const TERMINAL = new Set(["failed", "refunded", "rejected", "ignored", "duplicate"]);
+const PAID_WATCH_MS = 120 * 86_400_000; // banks return payouts within weeks; 120 days covers the slow ones
 
 /** The state an app hears about, from the inbox item and the payout behind it. */
 export function stateOf(item: InboxItem & { payout: { status: string } | null }): string {
@@ -88,6 +91,24 @@ export function verifyWebhook(secret: string, header: string, body: string, tole
   return want.length === got.length && timingSafeEqual(want, got);
 }
 
+const PRIVATE = new BlockList();
+for (const [a, n] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 4], ["240.0.0.0", 4]] as const) PRIVATE.addSubnet(a, n, "ipv4");
+for (const [a, n] of [["::", 128], ["::1", 128], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8]] as const) PRIVATE.addSubnet(a, n, "ipv6");
+
+/** True for an address on the public internet: not loopback, private, link-local (cloud metadata), CGNAT or reserved. */
+export function isPublicAddress(ip: string): boolean {
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(ip);
+  if (mapped) return isPublicAddress(mapped[1]!);
+  const v = isIP(ip);
+  return v !== 0 && !PRIVATE.check(ip, v === 4 ? "ipv4" : "ipv6");
+}
+
+/** True only if the name resolves, and every address it resolves to is public. */
+export async function resolvesPublic(hostname: string, lookup = dnsLookup): Promise<boolean> {
+  const all = await lookup(hostname, { all: true, verbatim: true });
+  return all.length > 0 && all.every((a) => isPublicAddress(a.address));
+}
+
 /** A webhook must be https and must not point at the machine's own network (unless running offline). */
 export function checkWebhookUrl(raw: string, offline: boolean): string {
   let u: URL;
@@ -95,7 +116,7 @@ export function checkWebhookUrl(raw: string, offline: boolean): string {
   if (offline) return u.toString();
   if (u.protocol !== "https:") throw new PayoutError(400, "webhook_url must be https");
   const h = u.hostname.toLowerCase();
-  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal") || /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h) || h.includes(":") || /^\d+$/.test(h)) throw new PayoutError(400, "webhook_url must be a public host");
+  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal") || /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h) || h.includes(":") || /^\d+$/.test(h) || (isIP(h) !== 0 && !isPublicAddress(h))) throw new PayoutError(400, "webhook_url must be a public host");
   return u.toString();
 }
 
@@ -119,7 +140,10 @@ export class Platform {
       CREATE TABLE IF NOT EXISTS platform_events (
         id TEXT PRIMARY KEY, app_id TEXT NOT NULL, body TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL,
         delivered_at TEXT, last_error TEXT
-      );`);
+      );
+      CREATE INDEX IF NOT EXISTS platform_events_due ON platform_events (delivered_at, next_at);`);
+    const cols = store.db.prepare("PRAGMA table_info(platform_refs)").all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === "state_at")) store.db.exec("ALTER TABLE platform_refs ADD COLUMN state_at TEXT");
   }
 
   // ---------- apps (owner) ----------
@@ -252,14 +276,13 @@ export class Platform {
   view(app: PlatformApp, ref: string) {
     const row = this.store.db.prepare("SELECT * FROM platform_refs WHERE app_id = ? AND ref = ?").get(app.id, ref) as { inbox_id: string } | undefined;
     if (!row) return undefined;
-    const item = this.inbox.list().find((i) => i.id === row.inbox_id);
+    const item = this.inbox.view(row.inbox_id);
     return item ? this.shape(ref, item) : undefined;
   }
 
   listFor(app: PlatformApp) {
     const refs = this.store.db.prepare("SELECT ref, inbox_id FROM platform_refs WHERE app_id = ? ORDER BY created_at DESC LIMIT 100").all(app.id) as Array<{ ref: string; inbox_id: string }>;
-    const items = new Map(this.inbox.list().map((i) => [i.id, i]));
-    return refs.flatMap((r) => { const i = items.get(r.inbox_id); return i ? [this.shape(r.ref, i)] : []; });
+    return refs.flatMap((r) => { const i = this.inbox.view(r.inbox_id); return i ? [this.shape(r.ref, i)] : []; });
   }
 
   private shape(ref: string, item: ReturnType<Inbox["list"]>[number]) {
@@ -277,14 +300,19 @@ export class Platform {
 
   // ---------- events back to the app ----------
 
-  /** Queues an event for each payout whose state changed since the app last heard, then delivers what's due. */
-  async tick(now = Date.now()): Promise<void> {
-    const refs = this.store.db.prepare("SELECT r.*, a.revoked_at FROM platform_refs r JOIN platform_apps a ON a.id = r.app_id").all() as Array<{ app_id: string; ref: string; inbox_id: string; last_state: string | null; seq: number; revoked_at: string | null }>;
-    const live = refs.filter((r) => !TERMINAL.has(r.last_state ?? ""));
+  private ticking: Promise<void> | undefined;
+  /** Queues events for state changes and delivers what is due. A call made while one is running joins it. */
+  tick(now = Date.now()): Promise<void> {
+    return (this.ticking ??= this.tickOnce(now).finally(() => { this.ticking = undefined; }));
+  }
+
+  private async tickOnce(now: number): Promise<void> {
+    const refs = this.store.db.prepare("SELECT r.*, a.revoked_at FROM platform_refs r JOIN platform_apps a ON a.id = r.app_id").all() as Array<{ app_id: string; ref: string; inbox_id: string; last_state: string | null; seq: number; state_at: string | null; revoked_at: string | null }>;
+    // A paid ref is let go after PAID_WATCH_MS; a null state_at (older row) stays watched until its next change.
+    const live = refs.filter((r) => !TERMINAL.has(r.last_state ?? "") && !(r.last_state === "paid" && r.state_at && Date.parse(r.state_at) < now - PAID_WATCH_MS));
     if (live.length) {
-      const items = new Map(this.inbox.list().map((i) => [i.id, i]));
       for (const r of live) {
-        const item = items.get(r.inbox_id);
+        const item = this.inbox.view(r.inbox_id);
         if (!item) continue;
         const state = stateOf(item);
         if (state === r.last_state) continue;
@@ -295,7 +323,7 @@ export class Platform {
         const body = JSON.stringify({ id: `evt_${randomUUID()}`, type: `payout.${state}`, created: new Date(now).toISOString(), app_id: r.app_id, sequence: seq, data });
         const id = JSON.parse(body).id as string;
         this.store.db.prepare("INSERT INTO platform_events (id, app_id, body, next_at) VALUES (?,?,?,?)").run(id, r.app_id, body, now);
-        this.store.db.prepare("UPDATE platform_refs SET last_state = ?, seq = ? WHERE app_id = ? AND ref = ?").run(state, seq, r.app_id, r.ref);
+        this.store.db.prepare("UPDATE platform_refs SET last_state = ?, seq = ?, state_at = ? WHERE app_id = ? AND ref = ?").run(state, seq, new Date(now).toISOString(), r.app_id, r.ref);
       }
     }
     await this.deliver(now);
@@ -306,6 +334,8 @@ export class Platform {
     for (const e of due) {
       if (!e.webhook_url) { this.store.db.prepare("UPDATE platform_events SET delivered_at = ?, last_error = 'no webhook configured' WHERE id = ?").run(new Date().toISOString(), e.id); continue; }
       try {
+        // shortcut: the name can resolve differently between this check and the connection (DNS rebinding); pinning needs a custom dispatcher.
+        if (!this.o.offline && !(await resolvesPublic(new URL(e.webhook_url).hostname))) throw new Error("webhook host resolves to a private address");
         const res = await this.send(e.webhook_url, {
           method: "POST", redirect: "error", signal: AbortSignal.timeout(8000),
           headers: { "content-type": "application/json", "sayso-signature": signWebhook(e.webhook_secret, e.body, Math.floor(now / 1000)), "sayso-event-id": e.id },

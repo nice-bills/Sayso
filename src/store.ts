@@ -38,11 +38,13 @@ export class Store {
         updated_at TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE (obligation_id, kind, attempt)
       );
+      CREATE INDEX IF NOT EXISTS operations_airwallex ON operations (airwallex_id);
       CREATE TABLE IF NOT EXISTS webhook_events (
         event_id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        body TEXT NOT NULL
+        body TEXT NOT NULL,
+        processed_at TEXT
       );
       CREATE TABLE IF NOT EXISTS mandate_pulls (
         epoch TEXT PRIMARY KEY,
@@ -50,6 +52,12 @@ export class Store {
         outcome TEXT NOT NULL,
         detail TEXT
       );`);
+    const cols = this.db.prepare("PRAGMA table_info(webhook_events)").all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === "processed_at")) {
+      this.db.exec("ALTER TABLE webhook_events ADD COLUMN processed_at TEXT");
+      // events stored before this column existed were handled by the old code; do not run them again
+      this.db.exec("UPDATE webhook_events SET processed_at = created_at");
+    }
   }
 
   /** The UNIQUE (obligation, kind, attempt) constraint is the duplicate lock: one live attempt at a time. */
@@ -75,10 +83,20 @@ export class Store {
     return this.db.prepare("SELECT * FROM operations ORDER BY updated_at").all().map((r) => this.row(r)!);
   }
 
-  /** Returns false when the event was already processed (Airwallex delivers at least once). */
+  /** Returns false when this event id was already recorded. */
   recordEvent(eventId: string, name: string, createdAt: string, body: string): boolean {
     const r = this.db.prepare("INSERT OR IGNORE INTO webhook_events (event_id, name, created_at, body) VALUES (?, ?, ?, ?)").run(eventId, name, createdAt, body);
     return Number(r.changes) === 1;
+  }
+
+  markEventProcessed(eventId: string): void {
+    this.db.prepare("UPDATE webhook_events SET processed_at = datetime('now') WHERE event_id = ?").run(eventId);
+  }
+
+  /** Events recorded but not yet handled, oldest first: a crash or a handler error left them. */
+  unprocessedEvents(): Array<{ eventId: string; body: string }> {
+    return this.db.prepare("SELECT event_id, body FROM webhook_events WHERE processed_at IS NULL ORDER BY created_at").all()
+      .map((r) => ({ eventId: String((r as { event_id: unknown }).event_id), body: String((r as { body: unknown }).body) }));
   }
 
   /** A mandate pull, recorded as soon as its transaction is known, so a lost receipt is re-checked, never re-pulled. */
