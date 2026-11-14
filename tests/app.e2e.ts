@@ -20,6 +20,23 @@ async function openEverything(app: { open(path: string): Promise<unknown> }, scr
   await expect(screen.getByRole('heading', 'Inbox')).toBeVisible();
 }
 
+/** After opening, what has focus must be that payment's own row head, open, and fully inside the viewport below the sticky header. */
+function focusedRow(browser: Parameters<Parameters<typeof test>[1]>[0]['browser']) {
+  return browser.evaluate(async () => {
+    // Let any scroll that starts late (smooth, to the top) land first, then give the focused head up to 3 s to be fully in view.
+    await new Promise((r) => setTimeout(r, 500));
+    const inView = () => { const r = document.activeElement?.getBoundingClientRect(); const top = document.querySelector('header.top')?.getBoundingClientRect().bottom ?? 0; return !!r && r.top >= top && r.bottom <= innerHeight; };
+    for (const end = Date.now() + 3000; !inView() && Date.now() < end;) await new Promise((r) => setTimeout(r, 50));
+    const row = document.activeElement?.closest('.row');
+    return {
+      head: document.activeElement?.classList.contains('row-head') ?? false,
+      open: row?.classList.contains('open') ?? false,
+      who: row?.querySelector('.rh-who')?.textContent ?? null,
+      visible: inView(),
+    };
+  });
+}
+
 test('a wrong token does not get in', async ({ app, screen }) => {
   await app.open('/');
   await screen.getByLabel('Owner token').fill('not-the-token');
@@ -42,42 +59,29 @@ test('opening a decision from Home focuses that exact payment and keeps it on sc
   const last = browser.locator('ol.dp-list li:last-child button');
   const listed = await browser.locator('ol.dp-list li:last-child .dp-who b').textContent();
   const second = await browser.locator('ol.dp-list li:nth-child(2) .dp-who b').textContent();
-  // After opening, what has focus must be that payment's own row head, open, and fully inside the viewport.
-  const focused = () => browser.evaluate(async () => {
-    // Let any scroll that starts late (smooth, to the top) land first, then give the focused head up to 3 s to be fully in view.
-    await new Promise((r) => setTimeout(r, 500));
-    const inView = () => { const r = document.activeElement?.getBoundingClientRect(); const top = document.querySelector('header.top')?.getBoundingClientRect().bottom ?? 0; return !!r && r.top >= top && r.bottom <= innerHeight; };
-    for (const end = Date.now() + 3000; !inView() && Date.now() < end;) await new Promise((r) => setTimeout(r, 50));
-    const row = document.activeElement?.closest('.row');
-    return {
-      head: document.activeElement?.classList.contains('row-head') ?? false,
-      open: row?.classList.contains('open') ?? false,
-      who: row?.querySelector('.rh-who')?.textContent ?? null,
-      visible: inView(),
-    };
-  });
   await last.click();
-  expect(await focused()).toEqual({ head: true, open: true, who: listed, visible: true });
+  expect(await focusedRow(browser)).toEqual({ head: true, open: true, who: listed, visible: true });
   // Short viewport, Home scrolled to the bottom: the row opens above the fold and must clear the sticky header.
   await browser.setViewport({ width: 1280, height: 420 });
   await browser.locator('button.tab').first().click(); // back to Home
   await browser.evaluate(() => window.scrollTo({ top: 99999, behavior: 'instant' }));
   await browser.locator('ol.dp-list li:nth-child(2) button').click();
-  expect(await focused()).toEqual({ head: true, open: true, who: second, visible: true });
+  expect(await focusedRow(browser)).toEqual({ head: true, open: true, who: second, visible: true });
 });
 
 test('opening a decision shows it even when a filter would hide it', async ({ app, screen, browser }) => {
   await signIn(app, screen);
   await browser.setViewport({ width: 1280, height: 600 });
-  const listed = await browser.locator('ol.dp-list li:last-child .dp-who b').textContent();
+  const listed = (await browser.locator('ol.dp-list li:last-child .dp-who b').textContent())!;
   await screen.getByRole('button', 'Everything').tap();
   await screen.getByRole('tab', 'Payments').tap();
   await browser.locator('.filters .chip:has-text("Bounced")').click();
+  const shown = () => browser.evaluate((who) => [...document.querySelectorAll('article.row')].filter((r) => r.querySelector('.rh-who')?.textContent === who).length, listed);
+  expect(await shown()).toBe(0);
   await browser.locator('button.tab').first().click(); // back to Home, filter still on
   await browser.evaluate(() => window.scrollTo({ top: 99999, behavior: 'instant' }));
   await browser.locator('ol.dp-list li:last-child button').click();
-  await browser.evaluate(async () => { for (let i = 0; i < 30 && !document.activeElement?.classList.contains('row-head'); i++) await new Promise((r) => setTimeout(r, 100)); });
-  expect(await browser.evaluate(() => document.activeElement?.closest('.row')?.querySelector('.rh-who')?.textContent ?? null)).toBe(listed);
+  expect(await focusedRow(browser)).toEqual({ head: true, open: true, who: listed, visible: true });
 });
 
 test('switching tabs and opening Everything jump to the top at once', async ({ app, screen, browser }) => {
