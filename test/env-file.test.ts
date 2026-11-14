@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -16,7 +16,11 @@ describe("env-file", () => {
     const d = join(mkdtempSync(join(tmpdir(), "metal-")), ".metal");
     lockMetalDir(d);
     writeFileSync(join(d, "k.json"), "{}", { mode: 0o644 });
+    mkdirSync(join(d, "sub"), { mode: 0o755 });
+    chmodSync(join(d, "sub"), 0o755);
     lockMetalDir(d);
+    expect(statSync(join(d, "sub")).mode & 0o777).toBe(0o755);
+    expect(readdirSync(join(d, "sub"))).toEqual([]);
     expect(statSync(d).mode & 0o777).toBe(0o700);
     expect(statSync(join(d, "k.json")).mode & 0o777).toBe(0o600);
   });
