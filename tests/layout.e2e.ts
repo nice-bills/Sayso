@@ -35,3 +35,19 @@ test('the app header fits at tablet widths', async ({ app, screen, browser }) =>
   }
   expect(bad).toEqual([]);
 });
+
+for (const width of [320, 360]) {
+  test(`the held-payment sheet fits a ${width}px phone`, async ({ app, screen, browser }) => {
+    await browser.setViewport({ width, height: 640 });
+    await signIn(app, screen);
+    await browser.locator('.hc.k0').click();
+    await expect(browser.locator('.osheet')).toBeVisible();
+    // The chip strip bleeds into the decision box's padding on purpose, so it may pass .whatif but not .decision.
+    const m = await browser.evaluate(() => {
+      const over = (sel: string) => { const e = document.querySelector(sel)!; return e.scrollWidth - e.clientWidth; };
+      const edge = (sel: string) => document.querySelector(sel)!.getBoundingClientRect().right;
+      return { sheet: over('.osheet'), card: over('.osheet .pcard'), decision: over('.osheet .decision'), chips: edge('.osheet .wi-chips') - edge('.osheet .decision') };
+    });
+    expect(Object.entries(m).filter(([, px]) => px > 0)).toEqual([]);
+  });
+}
