@@ -35,10 +35,33 @@ test('pressing Enter in the token field signs in', async ({ app, screen, browser
   await expect(screen.getByRole('button', 'Talk')).toBeVisible();
 });
 
-test('opening a decision from Home keeps keyboard focus on its row', async ({ app, screen, browser }) => {
+test('opening a decision from Home focuses that exact payment and keeps it on screen', async ({ app, screen, browser }) => {
+  // Server events re-render the page and drop focus (a separate app bug), and other tests fire them in parallel; this test is about the click.
+  await browser.addInitScript(() => { (window as any).EventSource = class { close() {} }; });
   await signIn(app, screen);
+  // Short, so the later rows start below the fold.
+  await browser.setViewport({ width: 1280, height: 600 });
+  const last = browser.locator('ol.dp-list li:last-child button');
+  const listed = await browser.locator('ol.dp-list li:last-child .dp-who b').textContent();
+  const latest = (await browser.locator('.dp-what').textContent())!.split(' to ').slice(1).join(' to ');
+  // After opening, what has focus must be that payment's own row head, open, and inside the viewport.
+  const focused = () => browser.evaluate(async () => {
+    // The page scrolls smoothly, so give the scroll up to 3 s to land before judging.
+    const inView = () => { const r = document.activeElement?.closest('.row')?.getBoundingClientRect(); return !!r && r.top < innerHeight && r.bottom > 0; };
+    for (const end = Date.now() + 3000; !inView() && Date.now() < end;) await new Promise((r) => setTimeout(r, 50));
+    const row = document.activeElement?.closest('.row');
+    return {
+      head: document.activeElement?.classList.contains('row-head') ?? false,
+      open: row?.classList.contains('open') ?? false,
+      who: row?.querySelector('.rh-who')?.textContent ?? null,
+      visible: inView(),
+    };
+  });
+  await last.click();
+  expect(await focused()).toEqual({ head: true, open: true, who: listed, visible: true });
+  await browser.locator('button.tab').first().click(); // back to Home
   await browser.locator('.dp-latest').click();
-  await expect(browser.locator('.row.open .row-head').first()).toBeFocused();
+  expect(await focused()).toEqual({ head: true, open: true, who: latest, visible: true });
 });
 
 test('one tap pays a forwarded invoice', async ({ app, screen, browser }) => {
