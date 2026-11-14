@@ -165,6 +165,17 @@ export class PayoutService {
    * it can still be paid, and a fresh one once it has expired unpaid.
    */
   async quoteRemainder(id: string, now = new Date()): Promise<Payout> {
+    // Two asks at once would each quote, leaving two payable quotes for one remainder.
+    const running = this.remaindering.get(id);
+    if (running) return running;
+    const p = this.quoteRemainderNow(id, now).finally(() => this.remaindering.delete(id));
+    this.remaindering.set(id, p);
+    return p;
+  }
+
+  private readonly remaindering = new Map<string, Promise<Payout>>();
+
+  private async quoteRemainderNow(id: string, now: Date): Promise<Payout> {
     const p = this.book.get(id);
     if (!p) throw new PayoutError(404, "no such payout");
     const left = this.remainder(p);
@@ -304,6 +315,15 @@ export class PayoutService {
     while (pp.totalMinor > spendableMinor && part > 0) {
       part -= Math.max(1, Math.ceil((pp.totalMinor - spendableMinor) * pp.rateUsed));
       pp = price(part, currency, method, rate, this.pricing);
+    }
+    if (part <= 0) {
+      // Fees alone are more than the budget: nothing can go now, so wait for the top-up like decide() does.
+      decision.verdict = "wait";
+      decision.decidedBy = "balance";
+      delete decision.tranches;
+      decision.until = { fundsUsdzMinor: fullTotalMinor };
+      decision.reason = `Waiting for funds: ${toMajor(spendableMinor).toFixed(2)} USDZ can be spent and this costs ${toMajor(fullTotalMinor).toFixed(2)} USDZ; sweeping earnings first.`;
+      return { amountMinor, ...price(amountMinor, currency, method, rate, this.pricing) };
     }
     decision.tranches = [{ amountMinor: part, costUsdzMinor: pp.totalMinor, when: "now" }, { amountMinor: amountMinor - part, costUsdzMinor: Math.max(0, fullTotalMinor - pp.totalMinor), when: "on_sweep" }];
     decision.reason = `Splitting: ${toMajor(spendableMinor).toFixed(2)} USDZ can be spent and this costs ${toMajor(fullTotalMinor).toFixed(2)} USDZ, so paying ${fmt(part, currency)} now and ${fmt(amountMinor - part, currency)} after the agent's next top-up.`;
@@ -474,7 +494,19 @@ export class PayoutService {
   private async execute(p: Payout): Promise<Payout> {
     const mine = !this.executing.has(p.id);
     this.executing.add(p.id);
-    try { return await this.executeNow(p); } finally { if (mine) this.executing.delete(p.id); }
+    try { return await this.inCurrency(p.currency, () => this.executeNow(p)); } finally { if (mine) this.executing.delete(p.id); }
+  }
+
+  private readonly floatLocks = new Map<string, Promise<unknown>>();
+
+  /** Runs fn after every earlier fn for this currency has finished, so two payouts never read the same balance. */
+  private inCurrency<T>(ccy: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.floatLocks.get(ccy) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    const tail = run.catch(() => undefined);
+    this.floatLocks.set(ccy, tail);
+    void tail.then(() => { if (this.floatLocks.get(ccy) === tail) this.floatLocks.delete(ccy); });
+    return run;
   }
 
   private async executeNow(p: Payout): Promise<Payout> {

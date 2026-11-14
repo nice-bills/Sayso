@@ -72,6 +72,17 @@ describe("PayoutService", () => {
     expect(awx.balances.EUR).toBe(0);
   });
 
+  it("two payouts in one currency don't both spend the same float", async () => {
+    const { awx, svc, store } = setup({ USD: toMinor(5000), EUR: toMinor(282.68) });
+    const a = await svc.quote(req());
+    const b = await svc.quote(req());
+    svc.accept(a.id); svc.accept(b.id);
+    const [fa, fb] = await Promise.all([svc.onFunded(a.id, BUYER, "0xfunda"), svc.onFunded(b.id, BUYER, "0xfundb")]);
+    expect([fa.status, fb.status]).toEqual(["submitted", "submitted"]);
+    expect(store.ops().filter((o) => o.kind === "convert")).toHaveLength(1);
+    expect(awx.balances.EUR).toBe(0);
+  });
+
   it("charges nothing and moves nothing until the payment settles, and a quote pays once", async () => {
     const { svc, store } = setup();
     const q = await svc.quote(req());
