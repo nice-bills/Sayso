@@ -36,6 +36,9 @@ export interface InboxItem {
   status: InboxStatus;
 }
 
+/** An invoice that arrived as real email. Agent forwards, voice and connected apps name a sender nobody checked. */
+export const cameByEmail = (i: { id: string }) => !/^(agent-|said-|b44:)/.test(i.id);
+
 /** Long enough for a person to get round to it. */
 const APPROVAL_TTL_MS = 7 * 24 * 3_600_000;
 

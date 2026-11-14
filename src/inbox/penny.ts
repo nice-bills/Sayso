@@ -15,7 +15,7 @@ import type { PayoutAirwallex } from "../payouts/service.js";
 import { PayoutError, type PayoutService } from "../payouts/service.js";
 import type { Store } from "../store.js";
 import { emit } from "../events.js";
-import type { Inbox, InboxItem } from "./inbox.js";
+import { cameByEmail, type Inbox, type InboxItem } from "./inbox.js";
 import { machine, register } from "../machine.js";
 
 export const PENNY = register(machine("bank_detail_check", ["sent"], {
@@ -59,9 +59,9 @@ export class PennyChecks {
     )`);
   }
 
-  /** Where Sayso would reach this payee: the sender of an invoice it already paid them. */
+  /** Where Sayso would reach this payee: who really emailed an invoice it already paid them. */
   contactOnFile(payeeName: string): string | undefined {
-    const paid = this.d.inbox.list().find((i) => i.payout?.status === "paid" && i.fields.payeeName && norm(i.fields.payeeName) === norm(payeeName) && addressOf(i.from));
+    const paid = this.d.inbox.list().find((i) => cameByEmail(i) && i.payout?.status === "paid" && i.fields.payeeName && norm(i.fields.payeeName) === norm(payeeName) && addressOf(i.from));
     return paid ? addressOf(paid.from)! : undefined;
   }
 

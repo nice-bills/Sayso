@@ -154,6 +154,21 @@ describe("the one-cent code check", () => {
     }
   });
 
+  it("has no contact on file when the paid invoice came from an agent, not email", async () => {
+    const { cs, server, post, forward } = await start();
+    try {
+      const item = await post("/v1/inbox", { message_id: "agent-test0000-1", from: studioInvoice.from, subject: studioInvoice.subject, body: studioInvoice.body });
+      await post(`/v1/inbox/${encodeURIComponent(item.body.id)}/approve`, { approver: "will" });
+      for (let i = 0; i < 2; i++) await cs.svc.follow();
+      const held = await forward(studioBankChange);
+      const check = await post(`/v1/inbox/${encodeURIComponent(held.body.id)}/penny`);
+      expect(check.status).toBe(409);
+      expect(check.body.error).toMatch(/no contact on file/);
+    } finally {
+      server.close();
+    }
+  });
+
   it("blocks the invoice for good when the payee says the details aren't theirs, or after three wrong codes", async () => {
     const { server, base, post, forward, payStudio } = await start();
     try {
