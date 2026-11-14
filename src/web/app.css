@@ -189,7 +189,12 @@ button:active:not(:disabled), .btn:active, .l-btn:active { transform: scale(.97)
 .tab[aria-selected="true"] { background: var(--ink); color: #fff; }
 .tab .count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 12px; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; }
 main { padding: 16px 0 80px; }
-@media (max-width: 980px) { .bal, .mode { display: none; } }
+/* The header row (brand, tabs, actions) needs ~1030px to fit with the balance and mode; below that, drop them and make Face ID icon-only. */
+@media (max-width: 1140px) { .bal, .mode { display: none; } }
+@media (min-width: 721px) and (max-width: 1140px) {
+  .top-right .faceid { margin-right: 0; }
+  .top-right .faceid .tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
 @media (max-width: 720px) {
   .top .wrap { height: 60px; }
   .tabs { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; z-index: 6; justify-content: space-around; background: var(--surface); border-radius: 0; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); box-shadow: 0 -8px 24px -12px rgba(0, 23, 46, .18); } /* taste-skill-ignore: a fixed bar is an overlay */
