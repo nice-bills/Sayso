@@ -1,0 +1,1 @@
+say-pay-kreuzberg.wav: a synthetic voice (MMS-TTS) saying "Please pay Kroysberg Studio two hundred and eighty euros for invoice one thirty", picked because Whisper base.en hears "Please pay Kreuzberg Studio 280 euros for invoice 130". Made with scripts/make-say-fixture.ts.

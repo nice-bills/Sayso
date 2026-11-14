@@ -1,5 +1,6 @@
 // The app's main flows, against Sayso offline (simulated Airwallex and Metal, seeded with
 // sample invoices and two agent payouts). Exact steps only, so no model is needed to run them.
+import { readFileSync } from 'node:fs';
 import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 
@@ -92,6 +93,39 @@ test('saying a payment shows what was heard and what was understood', async ({ a
   const card = browser.locator('.sh-card');
   await expect(card).toContainText('IBAN ending 3000');
   await expect(card).toContainText('from your payment to Kreuzberg Studio GmbH');
+  await expect(browser.locator('.sh-card .btn.pay')).toHaveText('Pay €280.00');
+});
+
+// Needs Hugging Face for the ~79 MB model the first time; E2E_OFFLINE=1 skips it.
+test('saying a payment by voice goes through Whisper on this device', { timeout: 280_000, skip: process.env.E2E_OFFLINE === '1' && 'needs Hugging Face' }, async ({ app, screen, browser }) => {
+  // The mic is a recorded voice: played once, then the stream stays live on silence so the app's own silence stop ends it.
+  const wav = readFileSync('tests/fixtures/say-pay-kreuzberg.wav');
+  await browser.addInitScript((b64: string) => {
+    try { localStorage.setItem('sayso.voice', 'whisper'); } catch {}
+    // The app only picks Whisper when it has a say-by-voice engine to prefer; remove the browser's.
+    delete (window as any).SpeechRecognition;
+    delete (window as any).webkitSpeechRecognition;
+    if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = async () => {
+      const ctx = new AudioContext();
+      await ctx.resume();
+      const audio = await ctx.decodeAudioData(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer);
+      const dest = ctx.createMediaStreamDestination();
+      const src = ctx.createBufferSource();
+      src.buffer = audio;
+      src.connect(dest);
+      src.start();
+      return dest.stream;
+    };
+  }, wav.toString('base64'));
+  await signIn(app, screen);
+  await screen.getByRole('button', 'Talk').tap();
+  const live = browser.locator('#say-live');
+  await expect(live).toContainText('Getting Whisper onto this device', { timeout: 20_000 });
+  await expect(live).toContainText('Kreuzberg', { timeout: 180_000 });
+  const card = browser.locator('.sh-card');
+  // "your payment to" or "your earlier payment to", depending on whether another test already paid Kreuzberg.
+  await expect(card).toContainText('IBAN ending 3000', { timeout: 30_000 });
+  await expect(card).toContainText('payment to Kreuzberg Studio GmbH');
   await expect(browser.locator('.sh-card .btn.pay')).toHaveText('Pay €280.00');
 });
 
