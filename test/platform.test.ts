@@ -125,6 +125,22 @@ describe("an app paying through Sayso", () => {
     }
   }, 30_000);
 
+  it("an app hears about its payout even after 200 newer invoices", async () => {
+    const store = new Store(":memory:");
+    const svc = new PayoutService({ awx: new FakeAirwallex({ USD: toMinor(5000), EUR: toMinor(100) }), store, refunder: new FakeRefunder(), read: async (t) => heuristicRead(t) });
+    const inbox = new Inbox(store, svc);
+    const platform = new Platform(store, new AgentKeys(store), inbox, { offline: true, baseUrl: () => "http://sayso.test", approvalPath: (id) => `/approve/${id}` });
+    const { app } = await platform.createApp("Old Co", null, "");
+    await platform.submit(app, payout({ ref: "old-1" }));
+    for (let i = 0; i < 201; i++) store.db.prepare("INSERT INTO inbox (id, sender, subject, received_at, body, fields, missing, status) VALUES (?,?,?,?,?,?,?,?)").run(`filler-${i}`, "x", "x", new Date(Date.now() + 86_400_000 + i * 1000).toISOString(), "", "{}", "[]", "ignored");
+    const count = () => (store.db.prepare("SELECT COUNT(*) AS n FROM platform_events").get() as { n: number }).n;
+    await platform.tick();
+    const before = count();
+    inbox.ignore((store.db.prepare("SELECT id FROM inbox WHERE id LIKE 'b44:%'").get() as { id: string }).id);
+    await platform.tick();
+    expect(count()).toBe(before + 1);
+  });
+
   it("queues one payout when two identical submits race for the same ref", async () => {
     const store = new Store(":memory:");
     const keys = new AgentKeys(store);

@@ -272,14 +272,13 @@ export class Platform {
   view(app: PlatformApp, ref: string) {
     const row = this.store.db.prepare("SELECT * FROM platform_refs WHERE app_id = ? AND ref = ?").get(app.id, ref) as { inbox_id: string } | undefined;
     if (!row) return undefined;
-    const item = this.inbox.list().find((i) => i.id === row.inbox_id);
+    const item = this.inbox.view(row.inbox_id);
     return item ? this.shape(ref, item) : undefined;
   }
 
   listFor(app: PlatformApp) {
     const refs = this.store.db.prepare("SELECT ref, inbox_id FROM platform_refs WHERE app_id = ? ORDER BY created_at DESC LIMIT 100").all(app.id) as Array<{ ref: string; inbox_id: string }>;
-    const items = new Map(this.inbox.list().map((i) => [i.id, i]));
-    return refs.flatMap((r) => { const i = items.get(r.inbox_id); return i ? [this.shape(r.ref, i)] : []; });
+    return refs.flatMap((r) => { const i = this.inbox.view(r.inbox_id); return i ? [this.shape(r.ref, i)] : []; });
   }
 
   private shape(ref: string, item: ReturnType<Inbox["list"]>[number]) {
@@ -302,9 +301,8 @@ export class Platform {
     const refs = this.store.db.prepare("SELECT r.*, a.revoked_at FROM platform_refs r JOIN platform_apps a ON a.id = r.app_id").all() as Array<{ app_id: string; ref: string; inbox_id: string; last_state: string | null; seq: number; revoked_at: string | null }>;
     const live = refs.filter((r) => !TERMINAL.has(r.last_state ?? ""));
     if (live.length) {
-      const items = new Map(this.inbox.list().map((i) => [i.id, i]));
       for (const r of live) {
-        const item = items.get(r.inbox_id);
+        const item = this.inbox.view(r.inbox_id);
         if (!item) continue;
         const state = stateOf(item);
         if (state === r.last_state) continue;

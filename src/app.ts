@@ -273,6 +273,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     await sandboxBank().catch((e) => emit("escalate", `Sandbox delivery failed: ${String(e).slice(0, 200)}`));
     await svc.follow().catch((e) => emit("escalate", `Following payouts failed: ${String(e).slice(0, 200)}`));
     await svc.releaseWaiting().catch((e) => emit("escalate", `Releasing waiting payouts failed: ${String(e).slice(0, 200)}`));
+    try { inbox.rescueStranded(); } catch (e) { emit("escalate", `Rescuing stranded invoices failed: ${String(e).slice(0, 200)}`); }
     await receipts.retry();
     if (imap) await pollImap(imap, inbox).catch((e) => emit("escalate", `Inbox read failed: ${String(e).slice(0, 200)}`));
     const mc = opts.offline || process.env.AGENTMAIL_WEBHOOK_SECRET ? undefined : mailbox.credentials();
@@ -405,7 +406,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   app.get("/app", (_req, res) => res.sendFile("index.html", { root: webDir }));
   // The short form agents send: /p/ and a hash of the invoice id.
   app.get("/p/:code", (req, res) => {
-    const item = inbox.list().find((i) => shortCode(i.id) === req.params.code);
+    const item = inbox.byShortCode(req.params.code, shortCode);
     res.redirect(302, item ? `/approve/${encodeURIComponent(item.id)}` : "/");
   });
   // An agent's auth.md claim link lands here (/c/ is the short form); the app asks for the code and a passkey check.
@@ -546,7 +547,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     try {
       const r = await say(inbox, transcript);
       if (r.item?.payoutId) trail.add(r.item.payoutId, "heard", `You said: "${r.heard}"`, { understood: r.understood, reader: r.reader });
-      res.json({ ...r, item: r.item ? inbox.list().find((i) => i.id === r.item!.id) ?? r.item : null });
+      res.json({ ...r, item: r.item ? inbox.view(r.item.id) ?? r.item : null });
     } catch (err) { fail(res, err); }
   });
   app.post("/v1/inbox/:id/approve", auth.requireOwner, express.json(), async (req, res) => {

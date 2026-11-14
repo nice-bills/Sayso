@@ -93,7 +93,7 @@ const emailOf = (from: string) => from.match(/<([^>]+)>/)?.[1]?.trim() ?? (/^[^\
 async function askForDetails(d: HostedDeps, agent: AgentKey, invoiceId: string, note?: string) {
   const mb = d.mailbox;
   if (!mb) return { error: "Sayso has no email set up." };
-  const item = d.inbox.list().find((i) => i.id === invoiceId);
+  const item = d.inbox.view(invoiceId);
   if (!item) return { error: "No such invoice." };
   if (item.status !== "needs_details") return { error: "That invoice isn't missing anything." };
   const to = emailOf(item.from);
@@ -117,7 +117,7 @@ const pending = ["awaiting_approval", "needs_verification", "needs_details", "pa
 /** An agent hands Sayso an invoice: into the owner's inbox, with a link and a push for their tap. */
 async function forward(d: HostedDeps, agent: AgentKey, base: string, a: { text: string; from?: string; subject?: string }) {
   const item = await d.inbox.receive({ messageId: `agent-${agent.id.slice(0, 8)}-${randomUUID()}`, from: a.from ?? `${agent.name} (agent)`, subject: a.subject ?? `Forwarded by ${agent.name}`, body: a.text, receivedAt: new Date() });
-  const full = d.inbox.list().find((i) => i.id === item.id)!;
+  const full = d.inbox.view(item.id)!;
   if (full.payout && overCap(agent, full.payout.price_usdz) && ["awaiting_approval", "needs_verification"].includes(full.status)) {
     d.inbox.ignore(item.id);
     emit("refuse", `${agent.name} forwarded ${full.payout.amount} ${full.payout.currency}, above its cap; not queued`);

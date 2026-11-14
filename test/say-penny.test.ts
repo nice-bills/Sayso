@@ -79,6 +79,31 @@ describe("say a payment", () => {
     }
   });
 
+  it("does not pick a waiting EUR invoice for a spoken amount in pounds", async () => {
+    const { server, post, forward } = await start();
+    try {
+      const item = await forward({ ...studioInvoice, body: studioInvoice.body.replace(/280\.00/g, "480.00") });
+      expect(item.body.status).toBe("awaiting_approval");
+      const r = await post("/v1/say", { transcript: "Pay Kreuzberg Studio 480 pounds" });
+      expect(r.body.item?.id).not.toBe(item.body.id);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("does not guess between two waiting payees that both contain the spoken name", async () => {
+    const { server, post, forward } = await start();
+    try {
+      await forward(studioInvoice);
+      const other = await forward({ ...studioInvoice, messageId: "<mitte@x>", body: studioInvoice.body.replace("Kreuzberg Studio GmbH", "Mitte Studio UG").replace("INV-2026-114", "INV-2026-115") });
+      expect(other.body.status).toBe("awaiting_approval");
+      const r = await post("/v1/say", { transcript: "Pay Studio 280 euros" });
+      expect(["awaiting_approval"]).not.toContain(r.body.item?.status);
+    } finally {
+      server.close();
+    }
+  });
+
   it("points at an invoice already waiting instead of making a new one", async () => {
     const { server, post, forward } = await start();
     try {
