@@ -1,7 +1,8 @@
 // Fresh demo buyers for a live run. The Metal testnet faucet funds each address once (100 USDZ),
 // and a full live demo spends about 50 USDZ from the second buyer, so each run before a recording
 // starts from three new funded keys. Writes METAL_BUYER_KEYS into .env.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { lockMetalDir, setEnv } from "./env-file.js";
 import { MetalMandate } from "../src/metal/mandate.js";
 
 if (!process.env.METAL_RPC_URL) throw new Error("Set METAL_RPC_URL");
@@ -17,6 +18,6 @@ while (keys.length < 3) {
   console.log(`funded ${k.address}`);
   keys.push(k.privateKey);
 }
-const env = existsSync(".env") ? readFileSync(".env", "utf8") : "";
-writeFileSync(".env", /^METAL_BUYER_KEYS=/m.test(env) ? env.replace(/^METAL_BUYER_KEYS=.*$/m, `METAL_BUYER_KEYS=${keys.join(",")}`) : `${env}\nMETAL_BUYER_KEYS=${keys.join(",")}\n`);
+lockMetalDir();
+setEnv("METAL_BUYER_KEYS", keys.join(","));
 console.log("METAL_BUYER_KEYS updated in .env");
