@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { AgentKey, AgentKeys } from "../agents/keys.js";
 import { emit } from "../events.js";
-import type { Inbox, InboxItem } from "../inbox/inbox.js";
+import { cameByEmail, type Inbox, type InboxItem } from "../inbox/inbox.js";
 import type { Notifier } from "../notify.js";
 import { PayoutError, publicView, type PayoutService } from "../payouts/service.js";
 import { PAYOUT } from "../payouts/book.js";
@@ -98,6 +98,7 @@ async function askForDetails(d: HostedDeps, agent: AgentKey, invoiceId: string, 
   if (item.status !== "needs_details") return { error: "That invoice isn't missing anything." };
   const to = emailOf(item.from);
   if (!to) return { error: `Sayso doesn't have an email address for ${item.from}.` };
+  if (!(await mb.knows(to, d.inbox.list().filter(cameByEmail).map((i) => i.from)))) return { error: `Sayso only emails people who have emailed it or sent an invoice in, and ${to} hasn't. Forward their email to ${mb.status().address} instead.` };
   if (!spend(agent)) return { error: `This agent has sent its ${EMAILS_PER_DAY} emails for today.` };
   const about = item.subject && !/^Forwarded by/.test(item.subject) ? ` ("${item.subject}")` : "";
   const text = `Hello,\n\nThanks for your invoice${about}. Before we can pay it, we need: ${item.missing.join(", ")}.${note ? `\n\n${note}` : ""}\n\nReply to this email with those details and we'll take it from there.\n\nThanks`;
@@ -165,7 +166,7 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
 
   if (d.mailbox) {
     const mb = d.mailbox;
-    const senders = () => d.inbox.list().map((i) => i.from);
+    const senders = () => d.inbox.list().filter(cameByEmail).map((i) => i.from);
     const mailFail = (err: unknown) => fail(err instanceof MailError ? err.message : "email failed");
 
     server.registerTool("ask_for_details", {

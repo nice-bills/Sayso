@@ -119,6 +119,12 @@ describe("hosted MCP endpoint", () => {
       const vague = await call(agent, "forward_invoice", { text: vagueEmail.body, from: vagueEmail.from, subject: vagueEmail.subject });
       expect(vague.body.status).toBe("needs_details");
 
+      // An agent-typed sender is not a correspondent: it can't be asked or emailed until they really write in.
+      const early = await call(agent, "ask_for_details", { invoice_id: vague.body.invoice_id });
+      expect(early.body.error).toMatch(/only emails people/);
+      expect((await call(agent, "send_email", { to: "someone@someone.example", subject: "Hi", text: "Pay me" })).body.error).toMatch(/only emails people/);
+      await cs.mailbox.simReceive(vagueEmail.from, vagueEmail.subject, vagueEmail.body);
+
       const asked = await call(agent, "ask_for_details", { invoice_id: vague.body.invoice_id });
       expect(asked.error).toBe(false);
       expect(asked.body).toMatchObject({ sent_to: "someone@someone.example", from: "sayso-demo@agentmail.to" });

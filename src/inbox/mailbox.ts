@@ -162,7 +162,7 @@ export class Mailbox {
     return /^(Re: )?(Your Sayso sign-in link|Did .+ change its bank details\?)$/.test(m.subject);
   }
 
-  /** People an agent may write to: whoever emailed this address, or sent an invoice in by email. */
+  /** People an agent may write to: whoever emailed this address, or sent an invoice in by real email (the caller passes only those). */
   async knows(address: string, invoiceSenders: string[] = []): Promise<boolean> {
     const a = addressOf(address);
     if (invoiceSenders.some((s) => addressOf(s) === a)) return true;

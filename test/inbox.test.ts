@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { heuristicRead } from "../src/agent/reader.js";
-import { extractByPattern } from "../src/inbox/extract.js";
+import { checkFields, extractByPattern } from "../src/inbox/extract.js";
 import { Inbox } from "../src/inbox/inbox.js";
 import { PayoutService, publicView } from "../src/payouts/service.js";
 import { FakeAirwallex, FakeRefunder } from "../src/sim/offline.js";
@@ -19,6 +19,27 @@ describe("extractByPattern", () => {
   it("reads European and British invoices", () => {
     expect(extractByPattern(studioInvoice)).toMatchObject({ payeeName: "Kreuzberg Studio GmbH", amount: "280.00", currency: "EUR", reference: "INV-2026-114", iban: "DE89370400440532013000", bankCountry: "DE" });
     expect(extractByPattern(designerInvoice)).toMatchObject({ payeeName: "Holloway Print Ltd", amount: "72.00", currency: "GBP", sortCode: "040568", accountNumber: "10006132", bankCountry: "GB" });
+  });
+});
+
+describe("extractByPattern amounts", () => {
+  it("reads one or two decimals as cents and three digits as thousands", () => {
+    expect(extractByPattern({ ...studioInvoice, body: "Total due: EUR 12,5\nIBAN: DE89 3704 0044 0532 0130 00" }).amount).toBe("12.50");
+    expect(extractByPattern({ ...studioInvoice, body: "Total due: EUR 1,234\nIBAN: DE89 3704 0044 0532 0130 00" }).amount).toBe("1234.00");
+  });
+});
+
+describe("checkFields", () => {
+  const f = { ...extractByPattern(studioInvoice), iban: "DE89370400440532013000", amount: "480.00", currency: "EUR" };
+  it("drops a bank detail that is not in the email, keeps one that is", () => {
+    expect(checkFields(f, "pay to DE89 3704 0044 0532 0130 00 please").iban).toBe("DE89370400440532013000");
+    expect(checkFields(f, "no bank details here").iban).toBeNull();
+  });
+  it("nulls a malformed amount or currency, keeps well formed ones", () => {
+    expect(checkFields({ ...f, amount: "480", currency: "euros" }, "").amount).toBeNull();
+    expect(checkFields({ ...f, amount: "480", currency: "euros" }, "").currency).toBeNull();
+    expect(checkFields(f, "").amount).toBe("480.00");
+    expect(checkFields(f, "").currency).toBe("EUR");
   });
 });
 
