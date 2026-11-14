@@ -42,10 +42,11 @@ test('opening a decision from Home focuses that exact payment and keeps it on sc
   const last = browser.locator('ol.dp-list li:last-child button');
   const listed = await browser.locator('ol.dp-list li:last-child .dp-who b').textContent();
   const latest = (await browser.locator('.dp-what').textContent())!.split(' to ').slice(1).join(' to ');
-  // After opening, what has focus must be that payment's own row head, open, and inside the viewport.
+  // After opening, what has focus must be that payment's own row head, open, and fully inside the viewport.
   const focused = () => browser.evaluate(async () => {
-    // The page scrolls smoothly, so give the scroll up to 3 s to land before judging.
-    const inView = () => { const r = document.activeElement?.closest('.row')?.getBoundingClientRect(); return !!r && r.top < innerHeight && r.bottom > 0; };
+    // Let any scroll that starts late (smooth, to the top) land first, then give the focused head up to 3 s to be fully in view.
+    await new Promise((r) => setTimeout(r, 500));
+    const inView = () => { const r = document.activeElement?.getBoundingClientRect(); return !!r && r.top >= 0 && r.bottom <= innerHeight; };
     for (const end = Date.now() + 3000; !inView() && Date.now() < end;) await new Promise((r) => setTimeout(r, 50));
     const row = document.activeElement?.closest('.row');
     return {
