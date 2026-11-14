@@ -43,7 +43,8 @@ export class Inbox {
     store.db.exec(`CREATE TABLE IF NOT EXISTS inbox (
       id TEXT PRIMARY KEY, sender TEXT NOT NULL, subject TEXT NOT NULL, received_at TEXT NOT NULL, body TEXT NOT NULL,
       fields TEXT NOT NULL, missing TEXT NOT NULL, payout_id TEXT, status TEXT NOT NULL, fingerprint TEXT
-    )`);
+    );
+    CREATE INDEX IF NOT EXISTS inbox_fingerprint ON inbox (fingerprint);`);
   }
 
   async receive(e: InboundEmail): Promise<InboxItem> {

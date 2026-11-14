@@ -270,7 +270,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     await sandboxBank().catch((e) => emit("escalate", `Sandbox delivery failed: ${String(e).slice(0, 200)}`));
     await svc.follow().catch((e) => emit("escalate", `Following payouts failed: ${String(e).slice(0, 200)}`));
     await svc.releaseWaiting().catch((e) => emit("escalate", `Releasing waiting payouts failed: ${String(e).slice(0, 200)}`));
-    await receipts.retry();
+    await receipts.retry().catch((e) => emit("escalate", `Anchoring receipts failed: ${String(e).slice(0, 200)}`));
     if (imap) await pollImap(imap, inbox).catch((e) => emit("escalate", `Inbox read failed: ${String(e).slice(0, 200)}`));
     const mc = opts.offline || process.env.AGENTMAIL_WEBHOOK_SECRET ? undefined : mailbox.credentials();
     if (mc) agentMail ??= new AgentMailPoller(mc.apiKey, mc.inboxId);

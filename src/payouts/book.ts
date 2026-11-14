@@ -94,7 +94,9 @@ export class PayoutBook {
       );
       CREATE TABLE IF NOT EXISTS trusted_payees (
         payee_hash TEXT PRIMARY KEY, payee_name TEXT NOT NULL, trusted_by TEXT NOT NULL, trusted_at TEXT NOT NULL
-      );`);
+      );
+      CREATE INDEX IF NOT EXISTS payouts_status ON payouts (status);
+      CREATE INDEX IF NOT EXISTS payouts_buyer ON payouts (buyer, created_at);`);
     // Books made before decide() existed get the column added.
     const cols = store.db.prepare("PRAGMA table_info(payouts)").all() as Array<{ name: string }>;
     if (!cols.some((c) => c.name === "decision")) store.db.exec("ALTER TABLE payouts ADD COLUMN decision TEXT");
