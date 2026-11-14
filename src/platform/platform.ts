@@ -300,8 +300,13 @@ export class Platform {
 
   // ---------- events back to the app ----------
 
-  /** Queues an event for each payout whose state changed since the app last heard, then delivers what's due. */
-  async tick(now = Date.now()): Promise<void> {
+  private ticking: Promise<void> | undefined;
+  /** Queues events for state changes and delivers what is due. A call made while one is running joins it. */
+  tick(now = Date.now()): Promise<void> {
+    return (this.ticking ??= this.tickOnce(now).finally(() => { this.ticking = undefined; }));
+  }
+
+  private async tickOnce(now: number): Promise<void> {
     const refs = this.store.db.prepare("SELECT r.*, a.revoked_at FROM platform_refs r JOIN platform_apps a ON a.id = r.app_id").all() as Array<{ app_id: string; ref: string; inbox_id: string; last_state: string | null; seq: number; state_at: string | null; revoked_at: string | null }>;
     // A paid ref is let go after PAID_WATCH_MS; a null state_at (older row) stays watched until its next change.
     const live = refs.filter((r) => !TERMINAL.has(r.last_state ?? "") && !(r.last_state === "paid" && r.state_at && Date.parse(r.state_at) < now - PAID_WATCH_MS));

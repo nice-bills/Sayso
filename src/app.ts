@@ -269,7 +269,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   // Without a public URL for the webhook, the AgentMail inbox is polled instead.
   let agentMail: AgentMailPoller | undefined;
-  async function tick() {
+  async function tickOnce() {
     await sweep().catch((e) => emit("escalate", `Sweep failed: ${String(e).slice(0, 200)}`));
     await sandboxBank().catch((e) => emit("escalate", `Sandbox delivery failed: ${String(e).slice(0, 200)}`));
     await svc.follow().catch((e) => emit("escalate", `Following payouts failed: ${String(e).slice(0, 200)}`));
@@ -295,6 +295,9 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
       await reconcileNow().catch((e) => emit("escalate", `Reconciliation failed: ${String(e).slice(0, 200)}`));
     }
   }
+  // A slow tick must not overlap the next timer's: a caller that arrives mid-run waits for that run instead of starting another.
+  let ticking: Promise<void> | undefined;
+  const tick = () => (ticking ??= tickOnce().finally(() => { ticking = undefined; }));
 
   store.db.exec("CREATE TABLE IF NOT EXISTS used_dispute_signatures (signature TEXT PRIMARY KEY, used_at INTEGER NOT NULL)");
 
