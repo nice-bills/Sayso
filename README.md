@@ -40,7 +40,7 @@ Built for the Airwallex Agentic Banking Hackathon (2026). Demo script: [docs/DEM
 npm install
 npm run demo:offline     # agents pay over MCP, a batch payout, the inbox, a refund, the heist, reconciliation
 npm run serve:offline    # or open the app on :4021 and sign in with sayso-demo
-npm run test:e2e         # the app's flows in a real browser (needs Node 22.22.3+ or 24.8+; `npx -y node@24` works)
+npm run test:e2e         # the app's flows in a real browser (needs Node 24.8+; `npx -y node@24` works)
 APP_URL=https://sayso-mp5d.onrender.com npm run test:e2e   # read-only checks against the deployed site (tests/live.e2e.ts)
 ```
 
@@ -65,7 +65,9 @@ claude mcp add sayso -e SAYSO_URL=http://127.0.0.1:4021 -e SAYSO_BUYER_KEY=0x...
 | --- | --- |
 | `quote_payout` | Prices a payout, for free. |
 | `pay_invoice` | Quotes, then pays only if the price is at most `max_usdz`. |
+| `pay_remainder` | Pays the rest of an invoice Sayso split because the budget was short, if it costs at most `max_usdz`. |
 | `pay_batch` | Pays many people with one USDZ payment, if the batch costs at most `max_usdz`. |
+| `batch_status` | Reports a batch's progress and each line's payout. Call it before paying again after a timeout. |
 | `pay_quote` | Pays an existing quote by id. |
 | `payout_status` | Reports where a payout is. |
 | `payout_receipt` | A final payout's receipt and the Metal transaction anchoring its hash. |
@@ -94,14 +96,14 @@ Start with [docs/BASE44.md](docs/BASE44.md), the accelerator write-up [docs/BASE
 | Call | Price | What it does |
 | --- | --- | --- |
 | `POST /v1/quotes` | free | Price, payee check, risk. Returns a quote, `needs_review` or `rejected`, with reasons. |
-| (every quote) | | A payable quote carries `offer`: Sayso's EIP-712 signature (domain `Sayso` v1, chain 63825) over the quote id, amount, currency, payee hash, reference, USDZ price, pay-to address and expiry, from the key `GET /healthz` publishes as `quote_signer`. The MCP agent checks it before paying and refuses an offer that doesn't verify or doesn't match its invoice; the proof cites it. Batch quotes aren't signed yet. |
+| (every quote) | | A payable quote carries `offer`: Sayso's EIP-712 signature (domain `Sayso` v1, chain 63825) over the quote id, amount, currency, payee hash, reference, USDZ price, pay-to address and expiry, from the key `GET /healthz` publishes as `quote_signer`. The MCP agent checks it before paying and refuses an offer that doesn't verify or doesn't match its invoice; the proof cites it. A payable batch carries `offer` (EIP-712 `BatchOffer`: batch id, line quote ids in order, USDZ total, pay-to address and expiry), each line carries its own `offer`, and `pay_batch` refuses unless both verify against `quote_signer` and match the invoices sent. |
 | `POST /v1/payouts/:id/remainder` | free | A split's second part: a quote for what is left, to the same payee, once the first part is paid for. Asking again returns the same quote. The MCP tool `pay_remainder` quotes and pays it after the agent tops up. |
 | `POST /v1/payouts/:id/pay` | x402: the quote total | Locks the quote. The payout runs once the payment settles. |
 | `GET /v1/payouts/:id` | free | Status, Airwallex transfer id, refund tx. Never returns bank details. |
 | `GET /v1/payouts/:id/receipt` | free | The final payout's receipt, its hash, and the Metal anchor transaction. |
 | `POST /v1/batches` | free | Up to 100 payouts quoted under one price. Lines it won't pay are set aside with reasons. |
 | `POST /v1/batches/:id/pay` | x402: the batch total | One payment funds every line. A line that bounces is refunded on its own. |
-| `POST /mcp` | agent key | The hosted MCP endpoint: `forward_invoice`, `list_invoices`, `quote_payout`, `payout_status`. |
+| `POST /mcp` | agent key | The hosted MCP endpoint: `forward_invoice`, `list_invoices`, `quote_payout`, `payout_status`, `payout_receipt` and `prove_payout`, plus `ask_for_details`, `email_inbox`, `read_email`, `send_email` and `reply_email` when Sayso has a mailbox. |
 | `POST /v1/agent/invoices` | agent key | The same forwarding as REST, for skill-based agents. |
 | `POST /webhooks/agentmail` | Svix signature | Invoices emailed to your AgentMail address. |
 | `POST /v1/inbox` | owner, or `x-inbox-secret` | Forward an invoice email (`from`, `subject`, `body`). |
@@ -132,11 +134,13 @@ Agents sign themselves up through [auth.md](https://github.com/workos/auth.md): 
 cp .env.example .env            # AWX_CLIENT_ID, AWX_API_KEY, METAL_RPC_URL
 npm run smoke:airwallex         # read-only check of the Airwallex keys
 npm run setup:metal             # keys, owner account, sweep and refund mandates bound on chain, faucet funds
-npm run setup:receipts          # just the receipt key: creates and funds it, prints METAL_RECEIPT_KEY (binds no mandates)
+npm run setup:receipts          # just the receipt key: creates and funds it, writes METAL_RECEIPT_KEY into .env (never printed; binds no mandates)
 npm run setup:airwallex         # USD global account and opening float
-# paste the printed lines into .env, then:
+# add the printed (non-secret) lines to .env; secrets are written there for you. Then:
 npm run demo                    # or: npm run serve
 ```
+
+The scripts make `.metal/` 0700, its key files 0600, and `.env` 0600.
 
 Network access needed: `api.sandbox.airwallex.com`, `*.metalntwx.com`, and optionally `api.frankfurter.dev` for the FX history.
 
@@ -151,9 +155,9 @@ What the live sandbox taught us, now handled in code: FX rates come back in mark
 Claude.ai, ChatGPT, approval links on a phone and Airwallex webhooks need Sayso on a public HTTPS address. It's one long-running Node service, so it fits Render, Fly or Railway (not serverless).
 
 - **On its own, live:** the service reconciles every 10 minutes (`RECONCILE_EVERY_MS`; `0` turns it off). On the Airwallex sandbox no bank ever answers, so after a minute (`AWX_SANDBOX_DELIVER_AFTER_MS`) Sayso moves each submitted transfer to SENT and then PAID through Airwallex's own simulation API, and writes that on the payout's trail; `AWX_SANDBOX_DELIVER=off` stops it. Without `AWX_GLOBAL_ACCOUNT_ID` a live Sayso says so at start and doesn't sweep, instead of crediting a made-up account.
-- **Render:** New > Blueprint > this repo. `render.yaml` builds the Dockerfile and asks for the secrets: your Airwallex keys and `AWX_GLOBAL_ACCOUNT_ID`, the Metal lines from `.env`, `METAL_BUNDLE` (the output of `npm run bundle:metal`, your `.metal` keys as one value), an `OWNER_TOKEN` you choose, and `PUBLIC_URL` (the `https://...onrender.com` address it gives you).
+- **Render:** New > Blueprint > this repo. `render.yaml` builds the Dockerfile and asks for the secrets: your Airwallex keys and `AWX_GLOBAL_ACCOUNT_ID`, the Metal lines from `.env`, `METAL_BUNDLE` (the output of `npm run bundle:metal`, your `.metal` keys as one value), an `OWNER_TOKEN` you choose, and optionally `PUBLIC_URL` (the `https://...onrender.com` address it gives you; on Render, Sayso falls back to `RENDER_EXTERNAL_URL` for every link it sends).
 - **Anywhere with Docker:** `docker build -t sayso . && docker run -p 4021:4021 --env-file .env -e METAL_BUNDLE="$(npm run -s bundle:metal)" sayso`.
-- Without Airwallex and Metal settings the container starts offline, which is handy for a first check. `GET /healthz` answers when it's up.
+- With no Airwallex or Metal settings the container runs the offline demo. With only some of them it refuses to start and names what is missing, unless `SAYSO_OFFLINE=on`. `GET /healthz` answers when it is up (and says `offline`).
 
 ## Layout
 
@@ -178,7 +182,8 @@ Claude.ai, ChatGPT, approval links on a phone and Airwallex webhooks need Sayso 
 
 ## Notes
 
-- Metal packages: `@metalntwx/metal-agent` 0.3.3 and `@metalntwx/metal-pay` 0.3.4, with `@x402/*` pinned to 2.28.0 (metal-pay 0.3.4 needs 2.28 or later). Mandates bound before metal-agent 0.3.3 could revert on testnet, so `.metal` accounts and mandates made with 0.2.x should be recreated (`npm run setup:metal`).
+- Metal packages: `@metalntwx/metal-agent` 0.3.3 and `@metalntwx/metal-pay` 0.3.4, with `@x402/*` pinned to 2.31.0 (metal-pay 0.3.4 needs 2.28 or later). Mandates bound before metal-agent 0.3.3 could revert on testnet, so `.metal` accounts and mandates made with 0.2.x should be recreated (`npm run setup:metal`).
+- `npm audit --omit=dev` reports one advisory (zod), inside `@metalntwx/metal-agent` 0.3.3's own nested dependencies, with no fixed release yet. Sayso's direct dependencies are patched, and overriding the nested zod breaks `@x402/*`.
 - Payload fields marked `VERIFY` follow the Airwallex docs as we understand them. They get checked against the docs MCP on the first live run.
 - The x402 payment path (dynamic price per quote, settle hooks) has run end to end against Metal's facilitator on testnet (live demo run, 18 Oct 2026). Offline, the same routes run with simulated payments.
 - Receipt and dispute anchors have run live on testnet (for example [0x0027d076…1cca](https://testnet.metalntwx.com/tx/0x0027d07614f64ccd007d05b426f84e5fa4f0d60a81b17842bd605061232a1cca)).
