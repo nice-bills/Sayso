@@ -22,7 +22,7 @@ Base44 has no payout feature in its SDK, and it has no per-app payment rules. Sa
 - signed, ordered, idempotent events, so a retried or late event never moves a payout backwards.
 
 ## Status, stated plainly
-- Sayso side: built, tested (45 test files, 304 tests passing), and deployed at https://sayso-mp5d.onrender.com on the Airwallex sandbox and Metal testnet.
+- Sayso side: built, tested (46 test files, 305 tests passing), and deployed at https://sayso-mp5d.onrender.com on the Airwallex sandbox and Metal testnet.
 - Base44 side: live. Freelance Hub is published at https://freelance-hub-6ea1cb4e.base44.app and connected in Sayso as "Freelance Hub" with the rules "No more than 2000 EUR per payout. Only pay EUR and GBP." Sayso reports them as enforced: "Refuse any payout above 2000.00 EUR" and "Pay only in EUR, GBP".
 - Checked end to end: a 12.00 EUR payout request sent with the app's key returned 201 `awaiting_approval` with an approval URL. Sayso delivered the signed `payout.awaiting_approval` event to the Base44 webhook (1 event, 1 delivered, 0 gave up), and the `SaysoPayout` row appeared in Base44 with `last_sequence` 1. A USD request was refused with 422 by the app's rules. An unsigned or badly signed POST to the webhook returns 401.
 - Checked end to end, by a person: a signed-in person used Freelance Hub to post a job, confirm delivery and release payment. Sayso showed the payout in the owner's inbox. The owner approved it with a passkey on their phone. Airwallex sandbox transfer `fda1f9b7-8c89-417f-b63a-9ed7ed31db7b` paid 20.00 EUR, and Freelance Hub turned the job to "Paid" by itself from Sayso's signed webhook.

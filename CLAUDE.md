@@ -20,6 +20,7 @@ Needs Node 24.8+ (`node:sqlite`, `--env-file-if-exists`).
 - `src/metal`: Metal (USDZ) client.
 - `src/platform`: platform API (router, rules, OpenAPI).
 - `src/mcp`: MCP server for agents.
+- `src/routes`: HTTP routes by area (proof, web, penny, viewer, owner); `src/app.ts` wires them in order.
 - `src/web`: static web UI served by the app.
 - `src/sim`: offline fakes; every sim proof starts with `sim:`.
 - `src/machine.ts`: state tables for every status.
