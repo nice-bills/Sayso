@@ -193,7 +193,8 @@ function render() {
   const y = window.scrollY;
   const keep = focusKey(focused);
   $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn && (inApp() || state.claim || state.connect || state.focus) ? (state.claim ? claimView() : state.connect ? connectView() : appView()) : !state.signedIn && (state.claim || state.connect) ? claimGate() : landing(), state.signedIn ? whyDrawer() : null, state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].flat().filter(Boolean));
-  window.scrollTo(0, y);
+  // Instant: with scroll-behavior: smooth a plain scrollTo animates, the next render cuts it short, and updates drift the page.
+  window.scrollTo({ top: y, behavior: "instant" });
   filmBehindApp();
   afterRender();
   settleFocus(keep);
@@ -724,7 +725,7 @@ function appView() {
   return h("div", { class: "shell" },
     h("header", { class: "top" }, h("div", { class: "wrap" },
       brand(),
-      h("nav", { class: "tabs", role: "tablist" }, tabs.map(([id, label, ic, n]) => h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === id && !state.focus), onclick: () => { state.tab = id; sessionSet("tab", id); shown.clear(); leaveFocus(); render(); window.scrollTo(0, 0); } }, icon(ic, 20), h("span", { class: "tab-label" }, label), n ? h("span", { class: "count" }, n) : null))),
+      h("nav", { class: "tabs", role: "tablist" }, tabs.map(([id, label, ic, n]) => h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === id && !state.focus), onclick: () => { state.tab = id; sessionSet("tab", id); shown.clear(); leaveFocus(); render(); window.scrollTo({ top: 0, behavior: "instant" }); } }, icon(ic, 20), h("span", { class: "tab-label" }, label), n ? h("span", { class: "count" }, n) : null))),
       h("div", { class: "top-right" },
         passkeyButton(),
         s?.balances?.USD ? h("span", { class: "bal" }, "Available ", h("b", {}, money(s.balances.USD / 100, "USD"))) : null,
@@ -775,7 +776,7 @@ function homeView() {
         sum?.offline ? h("span", { class: "sh-mode", title: "Airwallex and Metal are simulated" }, "Demo") : null,
         state.me?.viewer ? h("span", { class: "sh-mode mode read-only", title: "You can look, but nothing you do pays or changes anything" }, "Read-only") : null,
         passkeyButton(true),
-        h("button", { class: "sh-icon", title: "Everything: inbox, payments, agents", "aria-label": "Everything", onclick: () => { state.tab = "inbox"; sessionSet("tab", "inbox"); render(); window.scrollTo(0, 0); } }, icon("ledger", 20)),
+        h("button", { class: "sh-icon", title: "Everything: inbox, payments, agents", "aria-label": "Everything", onclick: () => { state.tab = "inbox"; sessionSet("tab", "inbox"); render(); window.scrollTo({ top: 0, behavior: "instant" }); } }, icon("ledger", 20)),
       )),
     listening
       ? h("main", { class: "sh-main sh-listen" }, r ? null : live, h("div", { class: "wave", "aria-hidden": "true" }, Array.from({ length: 18 }, (_, i) => h("i", { style: `animation-delay:-${(i * 0.137) % 1}s` }))), replyLine(null))
