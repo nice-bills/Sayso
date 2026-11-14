@@ -71,11 +71,15 @@ test('api: a connected agent can forward an invoice and list tools, but has no w
     method: 'POST', headers: { ...agent, ...JSON_H },
     body: JSON.stringify({ text: 'Invoice 77 from Holloway Print Ltd. Amount due: GBP 12.00. Sort code 04-00-04, account 12345678. 1 Fleet St, London EC4Y 1AA, United Kingdom.' }),
   });
-  expect([201, 422]).toContain(fwd.status);
-  const id = ((await fwd.json()) as { invoice_id?: string }).invoice_id ?? 'none';
+  expect(fwd.status).toBe(201);
+  const { invoice_id: id, status } = (await fwd.json()) as { invoice_id: string; status: string };
+  expect(typeof id).toBe('string');
   const approve = await fetch(new URL(`/v1/inbox/${encodeURIComponent(id)}/approve`, base), { method: 'POST', headers: { ...agent, ...JSON_H }, body: '{}' });
+  // The agent's attempt must leave the invoice exactly where it was: not paying, not paid.
+  const after = ((await (await fetch(new URL('/v1/inbox', base), { headers: OWNER })).json()) as Array<{ id: string; status: string }>).find((i) => i.id === id);
   await fetch(new URL(`/v1/inbox/${encodeURIComponent(id)}/ignore`, base), { method: 'POST', headers: { ...OWNER, ...JSON_H }, body: '{}' });
   expect(approve.status).toBe(401);
+  expect(after?.status).toBe(status);
 });
 
 test('api: an app paying through Sayso is held to its own rules and cannot approve itself', async ({ app }) => {
