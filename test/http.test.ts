@@ -2,7 +2,7 @@ import express from "express";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import { heuristicRead } from "../src/agent/reader.js";
-import { payoutApi } from "../src/payouts/http.js";
+import { lockGuard, payoutApi } from "../src/payouts/http.js";
 import { PayoutService } from "../src/payouts/service.js";
 import { BatchBook } from "../src/payouts/batch.js";
 import { FakeAirwallex, FakeRefunder } from "../src/sim/offline.js";
@@ -39,6 +39,20 @@ describe("payout API (sim payments)", () => {
     } finally {
       server.close();
     }
+  });
+
+  it("a quote another request already locked stays locked after a refused pay", async () => {
+    const svc = new PayoutService({ awx: new FakeAirwallex({ USD: toMinor(1000) }), store: new Store(":memory:"), refunder: new FakeRefunder(), read: async (t) => heuristicRead(t) });
+    const server = express().use(payoutApi(svc, { kind: "sim" }, new BatchBook(new Store(":memory:"), svc))).listen(0);
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const post = (path: string, body?: unknown, headers: Record<string, string> = {}) =>
+      fetch(base + path, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: body ? JSON.stringify(body) : undefined });
+    try {
+      const q = await (await post("/v1/quotes", invoice)).json() as { id: string; pay_url: string };
+      svc.accept(q.id);
+      expect((await post(q.pay_url, undefined, { "x-sim-payer": "0xBuyer" })).status).toBe(409);
+      expect(svc.book.get(q.id)!.status).toBe("accepted");
+    } finally { server.close(); }
   });
 
   it("answers bad requests and unknown quotes without asking for payment", async () => {
@@ -89,5 +103,18 @@ describe("payout API (sim payments)", () => {
     } finally {
       server.close();
     }
+  });
+});
+
+describe("lock guard", () => {
+  it("does not release for a request that never locked", () => {
+    const g = lockGuard(); let n = 0;
+    g.releaseIfLocked({}, () => n++); g.releaseIfLocked(undefined, () => n++);
+    expect(n).toBe(0);
+  });
+  it("releases for the request that locked", () => {
+    const g = lockGuard(); const req = {}; g.mark(req); let n = 0;
+    g.releaseIfLocked(req, () => n++);
+    expect(n).toBe(1);
   });
 });
