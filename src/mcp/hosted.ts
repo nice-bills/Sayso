@@ -1,6 +1,6 @@
 // Sayso's hosted MCP endpoint (Streamable HTTP at /mcp). Any agent that speaks MCP can add it by
 // URL with its own key: Claude, ChatGPT, Cursor, OpenClaw, Hermes, or the assistant someone texts
-// from iMessage. An agent can quote, forward an invoice and check status. Approving is not a tool:
+// from iMessage. An agent can quote, forward an invoice, check status and check a payout's proof and receipt. Approving is not a tool:
 // the owner gets a link and taps it while signed in, so a hijacked agent can't pay anyone.
 // Agents with their own USDZ still pay quotes directly over x402 (pay_url), capped by Metal.
 
@@ -21,7 +21,8 @@ import { toMinor } from "../treasury/money.js";
 import { MailError, type Mailbox } from "../inbox/mailbox.js";
 import { invoiceShape, toRequest, type Invoice } from "./tools.js";
 
-export interface HostedDeps { svc: PayoutService; inbox: Inbox; keys: AgentKeys; notify: Notifier; mailbox?: Mailbox; isPlatformKey?: (agentId: string) => boolean }
+export interface HostedDeps { svc: PayoutService; inbox: Inbox; keys: AgentKeys; notify: Notifier; mailbox?: Mailbox; isPlatformKey?: (agentId: string) => boolean; views?: { receipt: (id: string) => View; proof: (id: string) => Promise<View> } }
+type View = { status: number; body: Record<string, unknown> };
 
 const text = (o: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(o, null, 2) }] });
 const fail = (message: string) => ({ ...text({ error: message }), isError: true });
@@ -240,6 +241,24 @@ function buildServer(d: HostedDeps, agent: AgentKey, base: string): McpServer {
     const p = d.svc.book.get(payout_id);
     return p ? text(publicView(p)) : fail("no such payout");
   });
+
+  if (d.views) {
+    const views = d.views;
+    server.registerTool("payout_receipt", {
+      description: "A final payout's receipt and the Metal transaction anchoring its hash, so the agent can prove the money was delivered (or refunded) without trusting Sayso. A receipt exists only once the payout is paid or refunded; until then Sayso answers that it is not final yet.",
+      inputSchema: { payout_id: z.string().describe("The payout id (a UUID)") },
+    }, async ({ payout_id }) => {
+      const r = views.receipt(payout_id);
+      return r.status === 200 ? text(r.body) : fail(String(r.body.error));
+    });
+    server.registerTool("prove_payout", {
+      description: "Everything Sayso can prove about a payout, as the seller: the order the agent placed, the Metal mandate that allowed it, the owner's approval if it was held, the Metal payment, the Airwallex transfer and the receipt on chain. Each piece is proven, missing, or against.",
+      inputSchema: { payout_id: z.string().describe("The payout id (a UUID)") },
+    }, async ({ payout_id }) => {
+      const r = await views.proof(payout_id);
+      return r.status === 200 ? text(r.body) : fail(String(r.body.error));
+    });
+  }
 
   return server;
 }
