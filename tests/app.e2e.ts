@@ -27,6 +27,19 @@ test('a wrong token does not get in', async ({ app, screen }) => {
   await expect(screen.getByRole('button', 'Talk')).not.toBeVisible();
 });
 
+test('pressing Enter in the token field signs in', async ({ app, screen, browser }) => {
+  await app.open('/');
+  await screen.getByLabel('Owner token').fill('sayso-demo');
+  await browser.locator('#token').press('Enter');
+  await expect(screen.getByRole('button', 'Talk')).toBeVisible();
+});
+
+test('opening a decision from Home keeps keyboard focus on its row', async ({ app, screen, browser }) => {
+  await signIn(app, screen);
+  await browser.locator('.dp-latest').click();
+  await expect(browser.locator('.row.open .row-head').first()).toBeFocused();
+});
+
 test('one tap pays a forwarded invoice', async ({ app, screen, browser }) => {
   await openEverything(app, screen);
   await screen.getByRole('button', 'Pay £72.00').tap();

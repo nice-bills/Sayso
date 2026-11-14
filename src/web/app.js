@@ -551,6 +551,8 @@ async function signedIn() {
   state.signedIn = true;
   await load(); goLive();
   if (!inApp() && !state.claim && !state.connect && !state.focus) history.pushState(null, "", "/app");
+  // The token field still has focus after Enter, and render() waits for inputs to lose it.
+  if ($root.contains(document.activeElement)) document.activeElement.blur();
   render(); window.scrollTo({ top: 0, behavior: "instant" });
 }
 
@@ -795,7 +797,7 @@ function decisionsPane() {
   const latest = ps[0];
   const count = (f) => state.payouts.filter(f).length;
   const stat = (n, label) => h("div", { class: "dp-stat" }, h("b", {}, String(n)), h("span", {}, label));
-  const openRow = (p) => { state.tab = "payments"; sessionSet("tab", "payments"); state.rows.add(p.id); render(); window.scrollTo(0, 0); };
+  const openRow = (p) => { state.tab = "payments"; sessionSet("tab", "payments"); state.rows.add(p.id); focusAfter = `.row[data-id="${CSS.escape(p.id)}"] .row-head`; render(); window.scrollTo(0, 0); };
   const tone = latest ? FLAP_TONE[latest.decision.verdict] : "";
   return h("aside", { class: "dpane", "aria-label": "What Sayso decided" },
     h("div", { class: "dp-head" }, h("span", {}, "What Sayso decided"), h("span", { class: "dp-mode" }, state.summary?.offline ? "Offline demo" : state.summary?.sandbox ? "Airwallex sandbox · Metal testnet" : "Live")),
@@ -1463,8 +1465,8 @@ function payoutRow(p, opts = {}) {
       h("span", { class: "amt" }, money(p.amount, p.currency)),
       h("span", { class: `pill ${tone}` }, label)),
   ];
-  return h("article", { class: `row${open ? " open" : ""}${m.cls}`, style: m.style, "data-status": p.status },
-    opts.open || needsYou ? h("div", { class: "row-head" }, head)
+  return h("article", { class: `row${open ? " open" : ""}${m.cls}`, style: m.style, "data-status": p.status, "data-id": p.id },
+    opts.open || needsYou ? h("div", { class: "row-head", tabindex: "-1" }, head)
       : h("button", { type: "button", class: "row-head", "aria-expanded": String(open), onclick: toggle }, head),
     open ? h("div", { class: "row-body" },
       p.reference ? h("div", { class: "rb-ref" }, "Reference ", h("b", {}, p.reference)) : null,
