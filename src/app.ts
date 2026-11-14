@@ -329,16 +329,20 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   // A payout's receipt, and the Metal transaction that anchors its hash. Public, like the payout itself:
   // it holds no bank details, and anyone can check it against the chain.
-  app.get("/v1/payouts/:id/receipt", (req, res) => {
-    const p = svc.book.get(String(req.params.id));
-    if (!p) return void res.status(404).json({ error: "no such payout" });
+  const receiptView = (id: string): { status: number; body: Record<string, unknown> } => {
+    const p = svc.book.get(id);
+    if (!p) return { status: 404, body: { error: "no such payout" } };
     const anchored = receipts.get(p.id);
-    if (!anchored.length) return void res.status(409).json({ error: `payout is ${p.status}; a receipt is issued once it is paid or refunded` });
-    res.json({
-      anchors: anchored, anchor_address: anchorAddress ?? null,
-      how_to_verify: "SHA-256 the receipt's JSON with its keys sorted (no spaces); the anchor transaction's data is 0x534159534f31 (\"SAYSO1\") followed by that hash, sent by anchor_address to itself.",
-    });
-  });
+    if (!anchored.length) return { status: 409, body: { error: `payout is ${p.status}; a receipt is issued once it is paid or refunded` } };
+    return {
+      status: 200,
+      body: {
+        anchors: anchored, anchor_address: anchorAddress ?? null,
+        how_to_verify: "SHA-256 the receipt's JSON with its keys sorted (no spaces); the anchor transaction's data is 0x534159534f31 (\"SAYSO1\") followed by that hash, sent by anchor_address to itself.",
+      },
+    };
+  };
+  app.get("/v1/payouts/:id/receipt", (req, res) => { const r = receiptView(String(req.params.id)); res.status(r.status).json(r.body); });
 
   // The landing's receipt check: the newest real receipt, and its anchor transaction as Metal reports it
   // (read by Sayso from the RPC; the explorer link lets anyone read it themselves).
@@ -363,11 +367,12 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     const t = p.transferId ? await awx.transferByRequestId(p.id).catch(() => undefined) : undefined;
     return buildProof(p, trail.for(p.id), receipts.get(p.id), t?.status, offers.recorded(p.id));
   };
-  app.get("/v1/payouts/:id/proof", async (req, res) => {
-    const p = svc.book.get(String(req.params.id));
-    if (!p) return void res.status(404).json({ error: "no such payout" });
-    res.json({ ...(await proofOf(p)), disputes: disputes.for(p.id), claims: CLAIMS });
-  });
+  const proofView = async (id: string): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const p = svc.book.get(id);
+    if (!p) return { status: 404, body: { error: "no such payout" } };
+    return { status: 200, body: { ...(await proofOf(p)), disputes: disputes.for(p.id), claims: CLAIMS } };
+  };
+  app.get("/v1/payouts/:id/proof", async (req, res) => { const r = await proofView(String(req.params.id)); res.status(r.status).json(r.body); });
   const webDir = fileURLToPath(new URL("./web", import.meta.url));
   // The app itself: static files under a strict CSP, since it renders text from strangers' emails.
   app.use((_req, res, next) => {
@@ -452,7 +457,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const notify = notifierFromEnv();
   // Apps that pay through Sayso (Base44 apps, any backend) use their own keys and rules; those keys don't open the agent MCP.
   app.use(platformRouter(platform, keys, auth.requireOwner));
-  app.use(hostedMcpRouter({ svc, inbox, keys, notify, mailbox, isPlatformKey: platform.isPlatformKey }));
+  app.use(hostedMcpRouter({ svc, inbox, keys, notify, mailbox, isPlatformKey: platform.isPlatformKey, views: { receipt: receiptView, proof: proofView } }));
   // Sayso's email: its address, and the owner's one-time AgentMail code that lets it email people.
   app.get("/v1/mailbox", auth.requireOwner, (_req, res) => res.json(mailbox.status()));
   app.post("/v1/mailbox/verify", auth.requireOwner, express.json(), async (req, res) => {
