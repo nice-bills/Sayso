@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildSayso } from "../src/app.js";
 import { parseSpoken } from "../src/inbox/say.js";
 import { recentEvents } from "../src/events.js";
+import { PennyChecks } from "../src/inbox/penny.js";
 import { studioBankChange, studioInvoice } from "../samples/invoices.js";
 
 async function start() {
@@ -164,6 +165,22 @@ describe("the one-cent code check", () => {
       const r = await post(`/v1/inbox/${encodeURIComponent(held.body.id)}/penny`);
       expect(r.status).toBe(409);
       expect(r.body.error).toMatch(/no contact on file/);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("refuses a live check that has no public address, before any cent is sent", async () => {
+    const { cs, server, payStudio, forward } = await start();
+    try {
+      await payStudio();
+      const held = await forward(studioBankChange);
+      let calls = 0;
+      const awx = { createBeneficiary: async () => { calls++; return { id: "b" }; }, createTransfer: async () => { calls++; return { id: "t" }; } };
+      // The guard runs before anything is written, so a stub store that finds no earlier check is enough.
+      const penny = new PennyChecks({ store: { db: { exec() {}, prepare: () => ({ get: () => undefined, all: () => [] }) } } as never, svc: cs.svc, inbox: cs.inbox, awx: awx as never, offline: false });
+      await expect(penny.start(held.body.id)).rejects.toMatchObject({ status: 503 });
+      expect(calls).toBe(0);
     } finally {
       server.close();
     }

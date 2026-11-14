@@ -75,6 +75,9 @@ export class PennyChecks {
     const payee = item.fields.payeeName ?? "";
     const contact = this.contactOnFile(payee);
     if (!contact) throw new PayoutError(409, `Sayso has never paid ${payee || "this payee"}, so it has no contact on file to ask. Call them on a number you already had.`);
+    // Only the offline demo may point the payee at localhost; a live server without a public address would email a dead link, so fail before spending the cent.
+    const base = this.d.publicUrl ?? (this.d.offline ? "http://127.0.0.1:4021" : undefined);
+    if (!base) throw new PayoutError(503, "Set PUBLIC_URL so the payee's link points at this server.");
     const p = this.d.svc.book.get(item.payoutId)!;
 
     const id = randomUUID();
@@ -90,7 +93,7 @@ export class PennyChecks {
     this.d.store.db.prepare("INSERT INTO penny_checks (id, inbox_id, payout_id, token, code_hash, contact, status, transfer_id, created_at, sim_reference) VALUES (?,?,?,?,?,?,?,?,?,?)")
       .run(id, inboxId, p.id, token, hashCode(id, code), contact, "sent", t.id, now.toISOString(), this.d.offline ? reference : null);
 
-    const link = `${this.d.publicUrl ?? "http://127.0.0.1:4021"}/v/${token}`;
+    const link = `${base}/v/${token}`;
     const text = `Hi,\n\nWe received an invoice from ${payee} asking us to pay new bank details (account ending ${last4(p.beneficiary)}).\n\nIf that is really you, we've just sent 0.01 ${p.currency} to that account. Its reference holds a 6-digit code. Enter it here:\n\n${link}\n\nIf you didn't change your bank details, open the link and tell us; nothing will be paid.\n`;
     if (this.d.send) await this.d.send(contact, `Did ${payee} change its bank details?`, text).catch((e) => emit("escalate", `Could not email ${contact}: ${String(e).slice(0, 160)}`, { payout: p.id }));
     else emit("observe", `Email to ${contact} (no mail sender configured): ${link}`, { payout: p.id });
