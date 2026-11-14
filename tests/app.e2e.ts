@@ -1,5 +1,6 @@
 // The app's main flows, against Sayso offline (simulated Airwallex and Metal, seeded with
 // sample invoices and two agent payouts). Exact steps only, so no model is needed to run them.
+import { readFileSync } from 'node:fs';
 import { test } from '@e2e-dev/web';
 import { expect } from 'e2e';
 
@@ -19,12 +20,81 @@ async function openEverything(app: { open(path: string): Promise<unknown> }, scr
   await expect(screen.getByRole('heading', 'Inbox')).toBeVisible();
 }
 
+/** After opening, what has focus must be that payment's own row head, open, and fully inside the viewport below the sticky header. */
+function focusedRow(browser: Parameters<Parameters<typeof test>[1]>[0]['browser']) {
+  return browser.evaluate(async () => {
+    // Let any scroll that starts late (smooth, to the top) land first, then give the focused head up to 3 s to be fully in view.
+    await new Promise((r) => setTimeout(r, 500));
+    const inView = () => { const r = document.activeElement?.getBoundingClientRect(); const top = document.querySelector('header.top')?.getBoundingClientRect().bottom ?? 0; return !!r && r.top >= top && r.bottom <= innerHeight; };
+    for (const end = Date.now() + 3000; !inView() && Date.now() < end;) await new Promise((r) => setTimeout(r, 50));
+    const row = document.activeElement?.closest('.row');
+    return {
+      head: document.activeElement?.classList.contains('row-head') ?? false,
+      open: row?.classList.contains('open') ?? false,
+      who: row?.querySelector('.rh-who')?.textContent ?? null,
+      visible: inView(),
+    };
+  });
+}
+
 test('a wrong token does not get in', async ({ app, screen }) => {
   await app.open('/');
   await screen.getByLabel('Owner token').fill('not-the-token');
   await screen.getByRole('button', 'Sign in').tap();
   await expect(screen.getByRole('alert')).toContainText("That token isn't right.");
   await expect(screen.getByRole('button', 'Talk')).not.toBeVisible();
+});
+
+test('pressing Enter in the token field signs in', async ({ app, screen, browser }) => {
+  await app.open('/');
+  await screen.getByLabel('Owner token').fill('sayso-demo');
+  await browser.locator('#token').press('Enter');
+  await expect(screen.getByRole('button', 'Talk')).toBeVisible();
+});
+
+test('opening a decision from Home focuses that exact payment and keeps it on screen', async ({ app, screen, browser }) => {
+  await signIn(app, screen);
+  // Short, so the later rows start below the fold.
+  await browser.setViewport({ width: 1280, height: 600 });
+  const last = browser.locator('ol.dp-list li:last-child button');
+  const listed = await browser.locator('ol.dp-list li:last-child .dp-who b').textContent();
+  const second = await browser.locator('ol.dp-list li:nth-child(2) .dp-who b').textContent();
+  await last.click();
+  expect(await focusedRow(browser)).toEqual({ head: true, open: true, who: listed, visible: true });
+  // Short viewport, Home scrolled to the bottom: the row opens above the fold and must clear the sticky header.
+  await browser.setViewport({ width: 1280, height: 420 });
+  await browser.locator('button.tab').first().click(); // back to Home
+  await browser.evaluate(() => window.scrollTo({ top: 99999, behavior: 'instant' }));
+  await browser.locator('ol.dp-list li:nth-child(2) button').click();
+  expect(await focusedRow(browser)).toEqual({ head: true, open: true, who: second, visible: true });
+});
+
+test('opening a decision shows it even when a filter would hide it', async ({ app, screen, browser }) => {
+  await signIn(app, screen);
+  await browser.setViewport({ width: 1280, height: 600 });
+  const listed = (await browser.locator('ol.dp-list li:last-child .dp-who b').textContent())!;
+  await screen.getByRole('button', 'Everything').tap();
+  await screen.getByRole('tab', 'Payments').tap();
+  await browser.locator('.filters .chip:has-text("Bounced")').click();
+  const shown = () => browser.evaluate((who) => [...document.querySelectorAll('article.row')].filter((r) => r.querySelector('.rh-who')?.textContent === who).length, listed);
+  expect(await shown()).toBe(0);
+  await browser.locator('button.tab').first().click(); // back to Home, filter still on
+  await browser.evaluate(() => window.scrollTo({ top: 99999, behavior: 'instant' }));
+  await browser.locator('ol.dp-list li:last-child button').click();
+  expect(await focusedRow(browser)).toEqual({ head: true, open: true, who: listed, visible: true });
+});
+
+test('switching tabs and opening Everything jump to the top at once', async ({ app, screen, browser }) => {
+  await openEverything(app, screen);
+  await browser.setViewport({ width: 1280, height: 600 });
+  // Same tick as the click: a smooth scroll has not moved yet, so only an instant one reads 0.
+  const down = () => browser.evaluate(() => { window.scrollTo({ top: 400, behavior: 'instant' }); return window.scrollY; });
+  await screen.getByRole('tab', 'Payments').tap();
+  expect(await down()).toBeGreaterThan(0);
+  expect(await browser.evaluate(() => { ([...document.querySelectorAll('button.tab')].find((b) => b.textContent?.includes('Inbox')) as HTMLElement).click(); return window.scrollY; })).toBe(0);
+  await browser.locator('button.tab').first().click(); // Home
+  expect(await down()).toBeGreaterThan(0);
+  expect(await browser.evaluate(() => { (document.querySelector('button.sh-icon[aria-label="Everything"]') as HTMLElement).click(); return window.scrollY; })).toBe(0);
 });
 
 test('one tap pays a forwarded invoice', async ({ app, screen, browser }) => {
@@ -79,6 +149,39 @@ test('saying a payment shows what was heard and what was understood', async ({ a
   const card = browser.locator('.sh-card');
   await expect(card).toContainText('IBAN ending 3000');
   await expect(card).toContainText('from your payment to Kreuzberg Studio GmbH');
+  await expect(browser.locator('.sh-card .btn.pay')).toHaveText('Pay €280.00');
+});
+
+// Needs Hugging Face for the ~79 MB model the first time; E2E_OFFLINE=1 skips it.
+test('saying a payment by voice goes through Whisper on this device', { timeout: 280_000, skip: process.env.E2E_OFFLINE === '1' && 'needs Hugging Face' }, async ({ app, screen, browser }) => {
+  // The mic is a recorded voice: played once, then the stream stays live on silence so the app's own silence stop ends it.
+  const wav = readFileSync('tests/fixtures/say-pay-kreuzberg.wav');
+  await browser.addInitScript((b64: string) => {
+    try { localStorage.setItem('sayso.voice', 'whisper'); } catch {}
+    // The app only picks Whisper when it has a say-by-voice engine to prefer; remove the browser's.
+    delete (window as any).SpeechRecognition;
+    delete (window as any).webkitSpeechRecognition;
+    if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = async () => {
+      const ctx = new AudioContext();
+      await ctx.resume();
+      const audio = await ctx.decodeAudioData(Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer);
+      const dest = ctx.createMediaStreamDestination();
+      const src = ctx.createBufferSource();
+      src.buffer = audio;
+      src.connect(dest);
+      src.start();
+      return dest.stream;
+    };
+  }, wav.toString('base64'));
+  await signIn(app, screen);
+  await screen.getByRole('button', 'Talk').tap();
+  const live = browser.locator('#say-live');
+  await expect(live).toContainText('Getting Whisper onto this device', { timeout: 20_000 });
+  await expect(live).toContainText('Kreuzberg', { timeout: 180_000 });
+  const card = browser.locator('.sh-card');
+  // "your payment to" or "your earlier payment to", depending on whether another test already paid Kreuzberg.
+  await expect(card).toContainText('IBAN ending 3000', { timeout: 30_000 });
+  await expect(card).toContainText('payment to Kreuzberg Studio GmbH');
   await expect(browser.locator('.sh-card .btn.pay')).toHaveText('Pay €280.00');
 });
 
@@ -178,4 +281,31 @@ test('the landing stays at / after signing in, and opens the app from there', as
   await expect(browser.locator('.v-hero')).toBeVisible();
   await screen.getByRole('link', 'Open the app').first().tap();
   await expect(screen.getByRole('button', 'Talk')).toBeVisible();
+});
+
+test('a background update keeps keyboard focus where it was', async ({ app, screen, browser }) => {
+  await openEverything(app, screen);
+  await screen.getByRole('tab', 'Payments').tap();
+  const head = browser.locator('article.row[data-id] button.row-head').first();
+  await head.focus();
+  const id = await browser.evaluate(() => (document.activeElement?.closest('.row') as HTMLElement).dataset.id);
+  const H = { authorization: 'Bearer sayso-demo', 'content-type': 'application/json' };
+  const res = await fetch(new URL('/v1/inbox', app.baseUrl), {
+    method: 'POST', headers: H,
+    body: JSON.stringify({ message_id: `e2e-refocus-${Date.now()}`, from: 'Acme <billing@acme.example>', subject: `Refocus ${Date.now()}`, body: 'Please pay invoice 9 for EUR 75.00. Thanks, Acme Ltd' }),
+  });
+  expect(res.status).toBe(201);
+  const item = (await res.json()) as { id: string };
+  try {
+    // Wait for the app to rebuild the page: the node that had focus is gone from the document.
+    await browser.evaluate(async () => {
+      const el = document.activeElement;
+      for (let i = 0; i < 150 && el?.isConnected; i++) await new Promise((r) => setTimeout(r, 100));
+      if (el?.isConnected) throw new Error('page was not re-rendered');
+    });
+    const now = await browser.evaluate(() => ({ tag: document.activeElement?.tagName ?? null, cls: document.activeElement?.className ?? null, id: (document.activeElement?.closest('.row') as HTMLElement | null)?.dataset.id ?? null }));
+    expect(now).toEqual({ tag: 'BUTTON', cls: 'row-head', id });
+  } finally {
+    await fetch(new URL(`/v1/inbox/${encodeURIComponent(item.id)}/ignore`, app.baseUrl), { method: 'POST', headers: H, body: '{}' });
+  }
 });
