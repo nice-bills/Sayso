@@ -125,6 +125,19 @@ test('the visitor keeps the Read-only badge at 1024', async ({ app, screen, brow
   expect(await overflow(browser)).toBeLessThanOrEqual(0);
 });
 
+test('the visitor sees Read-only on Home at phone and tablet widths', async ({ app, screen, browser }) => {
+  await browser.setViewport({ width: 390, height: 800 });
+  await visitor(app, screen);
+  const bad: string[] = [];
+  for (const width of [320, 360, 390, 768]) {
+    await browser.setViewport({ width, height: 800 });
+    const badge = await browser.evaluate(() => (document.querySelector('.sh-mode.read-only') as HTMLElement | null)?.offsetWidth ?? -1);
+    const over = await overflow(browser);
+    if (badge <= 0 || over > 0) bad.push(`${width}: badge ${badge}, overflow ${over}`);
+  }
+  expect(bad).toEqual([]);
+});
+
 test('the visitor header does not overflow from 981 to 1140', async ({ app, screen, browser }) => {
   await browser.setViewport({ width: 1024, height: 768 });
   await visitor(app, screen);
