@@ -63,6 +63,22 @@ test('opening a decision from Home focuses that exact payment and keeps it on sc
   expect(await focused()).toEqual({ head: true, open: true, who: latest, visible: true });
 });
 
+test('opening a decision shows it even when a filter would hide it', async ({ app, screen, browser }) => {
+  await signIn(app, screen);
+  await browser.setViewport({ width: 1280, height: 600 });
+  const latest = (await browser.locator('.dp-what').textContent())!.split(' to ').slice(1).join(' to ');
+  await screen.getByRole('button', 'Everything').tap();
+  await screen.getByRole('tab', 'Payments').tap();
+  const id = await browser.locator(`article.row[data-id]:has-text("${latest}")`).first().getAttribute('data-id');
+  await browser.locator('.filters .chip:has-text("Bounced")').click();
+  await expect(browser.locator(`article.row[data-id="${id}"]`)).toHaveCount(0);
+  await browser.locator('button.tab').first().click(); // back to Home
+  await browser.locator('.dp-latest').click();
+  await expect(browser.locator(`article.row[data-id="${id}"] .row-head`)).toBeVisible();
+  await browser.evaluate(async () => { for (let i = 0; i < 30 && !document.activeElement?.classList.contains('row-head'); i++) await new Promise((r) => setTimeout(r, 100)); });
+  expect(await browser.evaluate(() => (document.activeElement?.closest('.row') as HTMLElement | null)?.dataset.id ?? null)).toBe(id);
+});
+
 test('switching tabs and opening Everything jump to the top at once', async ({ app, screen, browser }) => {
   await openEverything(app, screen);
   await browser.setViewport({ width: 1280, height: 600 });

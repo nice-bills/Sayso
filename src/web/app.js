@@ -812,7 +812,7 @@ function decisionsPane() {
   const latest = ps[0];
   const count = (f) => state.payouts.filter(f).length;
   const stat = (n, label) => h("div", { class: "dp-stat" }, h("b", {}, String(n)), h("span", {}, label));
-  const openRow = (p) => { state.tab = "payments"; sessionSet("tab", "payments"); state.rows.add(p.id); focusAfter = `.row[data-id="${CSS.escape(p.id)}"] .row-head`; render(); };
+  const openRow = (p) => { state.tab = "payments"; sessionSet("tab", "payments"); state.rows.add(p.id); state.filter = "all"; focusAfter = `.row[data-id="${CSS.escape(p.id)}"] .row-head`; render(); };
   const tone = latest ? FLAP_TONE[latest.decision.verdict] : "";
   return h("aside", { class: "dpane", "aria-label": "What Sayso decided" },
     h("div", { class: "dp-head" }, h("span", {}, "What Sayso decided"), h("span", { class: "dp-mode" }, state.summary?.offline ? "Offline demo" : state.summary?.sandbox ? "Airwallex sandbox · Metal testnet" : "Live")),
