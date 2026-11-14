@@ -216,7 +216,8 @@ function settleFocus(keep) {
   const want = focusAfter ? $root.querySelector(focusAfter) : null;
   focusAfter = null;
   // Instant scroll: a smooth one can be cut short by a background render's scrollTo, leaving the row off screen.
-  if (want) { want.focus({ preventScroll: true }); want.scrollIntoView({ block: "nearest", behavior: "instant" }); return; }
+  // Skip the row's 14px enter rise first: scrolling a displaced box leaves the head 14px short of the edge once it lands.
+  if (want) { want.closest(".row")?.getAnimations().forEach((a) => a.finish()); want.focus({ preventScroll: true }); want.scrollIntoView({ block: "nearest", behavior: "instant" }); return; }
   // A re-render while a dialog is open puts focus back inside it.
   if (dialog && !dialog.contains(document.activeElement)) { dialog.querySelector("button, [href], input, [tabindex]:not([tabindex='-1'])")?.focus(); return; }
   // A background update rebuilds the page; put keyboard focus back on the same control.
