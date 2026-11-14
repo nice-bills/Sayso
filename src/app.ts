@@ -21,6 +21,7 @@ import { RampLedger } from "./bridge/ledger.js";
 import { SimulatedDepositCredit } from "./bridge/deposit-credit.js";
 import { sweepEpoch, type MetalSettlementVerifier } from "./bridge/ramp.js";
 import { dashboardRouter } from "./dashboard/server.js";
+import { proofRoutes } from "./routes/proof.js";
 import { webRoutes } from "./routes/web.js";
 import { pennyPages } from "./routes/penny.js";
 import { forViewer, viewerMask } from "./routes/viewer.js";
@@ -38,7 +39,7 @@ import { ChainEarnings, type EarningsSource } from "./metal/earnings.js";
 import { MandateRefunder, MandateSweepVerifier, MetalMandate, USDZ, type PullResult } from "./metal/mandate.js";
 import { ChainMandateChecker, describeMandate, mandatePolicy, SimMandates } from "./metal/agent-mandate.js";
 import { escrow } from "./metal/escrow.js";
-import { MetalAnchorer, readAnchor, RECEIPT_TAG, Receipts, SimAnchorer, type Anchorer } from "./metal/receipts.js";
+import { MetalAnchorer, Receipts, SimAnchorer, type Anchorer } from "./metal/receipts.js";
 import { requireSignedOffer } from "@metalntwx/metal-pay/mandates";
 import { Trail } from "./trail.js";
 import { LIMITS, rateLimit } from "./ratelimit.js";
@@ -51,7 +52,7 @@ import { RateMedian } from "./payouts/rates.js";
 import type { Payout, PayoutBook } from "./payouts/book.js";
 import { booksBefore, flowsFromBooks, rampSince, reconcile, reportReconcile, type CurrencyFlows } from "./reconcile.js";
 import { FakeAirwallex, FakeMandate, FakeRefunder } from "./sim/offline.js";
-import { buildProof, CLAIMS, Disputes, judge, type Claim } from "./payouts/proof.js";
+import { CLAIMS, Disputes, judge, type Claim } from "./payouts/proof.js";
 import { OfferSigner, storedKey, type BatchTerms } from "./payouts/offer.js";
 import { chainPayerCheck, DISPUTE_SIGNATURE_TTL_MS, disputeMessage, simPayerCheck, type PayerCheck } from "./payouts/dispute-auth.js";
 import { Store } from "./store.js";
@@ -347,52 +348,10 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const batches = new BatchBook(store, svc);
   app.use(payoutApi(svc, mode, batches, { policy, record: (ids, proof) => ids.forEach((id) => trail.add(id, "mandate", describeMandate(proof), proof as unknown as Record<string, unknown>)) }, signOffer, signBatch));
 
-  // A payout's receipt, and the Metal transaction that anchors its hash. Public, like the payout itself:
-  // it holds no bank details, and anyone can check it against the chain.
-  const receiptView = (id: string): { status: number; body: Record<string, unknown> } => {
-    const p = svc.book.get(id);
-    if (!p) return { status: 404, body: { error: "no such payout" } };
-    const anchored = receipts.get(p.id);
-    if (!anchored.length) return { status: 409, body: { error: `payout is ${p.status}; a receipt is issued once it is paid or refunded` } };
-    return {
-      status: 200,
-      body: {
-        anchors: anchored, anchor_address: anchorAddress ?? null,
-        how_to_verify: "SHA-256 the receipt's JSON with its keys sorted (no spaces); the anchor transaction's data is 0x534159534f31 (\"SAYSO1\") followed by that hash, sent by anchor_address to itself.",
-      },
-    };
-  };
-  app.get("/v1/payouts/:id/receipt", (req, res) => { const r = receiptView(String(req.params.id)); res.status(r.status).json(r.body); });
-
-  // The landing's receipt check: the newest real receipt, and its anchor transaction as Metal reports it
-  // (read by Sayso from the RPC; the explorer link lets anyone read it themselves).
-  app.get("/v1/receipts/latest", async (_req, res) => {
-    const a = receipts.latest();
-    if (!a) return void res.status(404).json({ error: "no receipt has been issued yet" });
-    let chain: Record<string, unknown> = { read: false, why: a.tx?.startsWith("sim:") ? "this receipt was anchored by the simulator, not on Metal" : "no Metal RPC" };
-    const rpc = process.env.METAL_RPC_URL;
-    if (a.tx?.startsWith("0x") && rpc && !opts.offline) {
-      try {
-        const t = await readAnchor(createPublicClient({ transport: http(rpc) }), a.tx as `0x${string}`);
-        chain = { read: true, ...t, from_is_sayso: anchorAddress ? t.from.toLowerCase() === anchorAddress.toLowerCase() : null, tag: RECEIPT_TAG };
-      } catch (err) { chain = { read: false, why: `Metal RPC: ${String(err).slice(0, 120)}` }; }
-    }
-    res.json({ payout: a.payout, status: a.status, receipt: a.receipt, hash: a.hash, tx: a.tx, explorer: a.explorer, anchor_address: anchorAddress ?? null, chain });
-  });
-
-  // "Prove it": what Sayso can show when an agent's purchase is questioned. Public like the receipt:
-  // the payout id is the key, and the proof holds no bank details.
+  // Receipts and proofs are public; disputes are built here because the tick and the owner's routes use them too.
   const disputes = new Disputes(store);
-  const proofOf = async (p: Payout) => {
-    const t = p.transferId ? await awx.transferByRequestId(p.id).catch(() => undefined) : undefined;
-    return buildProof(p, trail.for(p.id), receipts.get(p.id), t?.status, offers.recorded(p.id));
-  };
-  const proofView = async (id: string): Promise<{ status: number; body: Record<string, unknown> }> => {
-    const p = svc.book.get(id);
-    if (!p) return { status: 404, body: { error: "no such payout" } };
-    return { status: 200, body: { ...(await proofOf(p)), disputes: disputes.for(p.id), claims: CLAIMS } };
-  };
-  app.get("/v1/payouts/:id/proof", async (req, res) => { const r = await proofView(String(req.params.id)); res.status(r.status).json(r.body); });
+  const { router: proofRouter, receiptView, proofView, proofOf } = proofRoutes({ svc, receipts, anchorAddress, offline: opts.offline, awx, trail, offers, disputes });
+  app.use(proofRouter);
   app.use(webRoutes({ inbox }));
 
   // The one-cent code check: the payee's side, reached from the email sent to the contact on file.
