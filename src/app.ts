@@ -14,7 +14,7 @@ import { Agent, type LoopAirwallex } from "./agent/loop.js";
 import { beneficiaries, obligations, policyConfig } from "./scenario.js";
 import { ApprovalGate } from "./treasury/approval.js";
 import { webhookRouter } from "./airwallex/webhooks.js";
-import { createAuth } from "./auth.js";
+import { createAuth, publicBase } from "./auth.js";
 import { authMdRouter } from "./agents/authmd.js";
 import { AgentKeys } from "./agents/keys.js";
 import { approvalPath, hostedMcpRouter, shortCode } from "./mcp/hosted.js";
@@ -197,7 +197,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
   const svc = new PayoutService({ awx, store, refunder, nameCheck, trail, rates, floatReserveMinor: policyConfig.reserveFloorMinor, onFinal: (p) => void receipts.issue(p).catch((e) => emit("escalate", `Receipt for ${p.id.slice(0, 8)} failed: ${String(e).slice(0, 200)}`)), balanceOf, batches: () => batches });
   const inbox = new Inbox(store, svc);
   const keys = new AgentKeys(store);
-  const platform = new Platform(store, keys, inbox, { offline: opts.offline, baseUrl: () => (process.env.PUBLIC_URL ?? "").replace(/\/$/, ""), approvalPath });
+  const platform = new Platform(store, keys, inbox, { offline: opts.offline, baseUrl: () => publicBase() ?? "", approvalPath });
   // Live, the ramp credits Sayso's own USD global account; a made-up id would only fail later at Airwallex.
   const globalAccount = process.env.AWX_GLOBAL_ACCOUNT_ID || (opts.offline ? "sim:ga_usd" : undefined);
   if (!globalAccount) emit("escalate", "AWX_GLOBAL_ACCOUNT_ID is not set: earnings will not be swept into Airwallex until it is");
@@ -426,7 +426,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   // The one-cent code check: the payee's side, reached from the email sent to the contact on file.
   // Plain HTML forms, no script, so it works in any mail app's browser.
-  const penny = new PennyChecks({ store, svc, inbox, awx, send: mailbox.sender(), publicUrl: process.env.PUBLIC_URL, offline: opts.offline });
+  const penny = new PennyChecks({ store, svc, inbox, awx, send: mailbox.sender(), publicUrl: publicBase(), offline: opts.offline });
   const pennyPage = (res: express.Response, status: number, body: string) => {
     res.setHeader("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
     res.status(status).type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sayso: confirm your bank details</title>
