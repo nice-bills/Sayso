@@ -43,6 +43,7 @@ describe("checkFields", () => {
     expect(checkFields({ ...f, amount: "480", currency: "euros" }, "").currency).toBeNull();
     expect(checkFields(f, "").amount).toBe("480.00");
     expect(checkFields(f, "").currency).toBe("EUR");
+    expect(checkFields({ ...f, currency: "eur" }, "").currency).toBe("EUR");
   });
 });
 

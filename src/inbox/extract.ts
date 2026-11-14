@@ -102,11 +102,13 @@ const squash = (s: string) => s.replace(/[\s-]/g, "").toUpperCase();
 export function checkFields(f: InvoiceFields, body: string): InvoiceFields {
   const text = squash(body);
   const inBody = (v: string | null) => (v && text.includes(squash(v)) ? v : null);
+  const cur = f.currency?.trim().toUpperCase() ?? null;
+  const country = f.bankCountry?.trim().toUpperCase() ?? null;
   return {
     ...f,
     amount: f.amount && /^\d+\.\d{2}$/.test(f.amount) ? f.amount : null,
-    currency: f.currency && /^[A-Z]{3}$/.test(f.currency) ? f.currency : null,
-    bankCountry: f.bankCountry && /^[A-Z]{2}$/.test(f.bankCountry) ? f.bankCountry : null,
+    currency: cur && /^[A-Z]{3}$/.test(cur) ? cur : null,
+    bankCountry: country && /^[A-Z]{2}$/.test(country) ? country : null,
     iban: inBody(f.iban), accountNumber: inBody(f.accountNumber), sortCode: inBody(f.sortCode), routingNumber: inBody(f.routingNumber),
   };
 }
