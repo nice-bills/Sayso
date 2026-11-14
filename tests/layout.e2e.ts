@@ -68,6 +68,11 @@ test('the payment filters stay inside the page', async ({ app, screen, browser }
   expect(bad).toEqual([]);
 });
 
+// Controls smaller than 24x24 (WCAG 2.2 target size), as "selector WxH" strings.
+const small = (browser: Browser, selector: string) => browser.evaluate((sel: string) =>
+  [...document.querySelectorAll(sel)].map((e) => e.getBoundingClientRect())
+    .filter((r) => r.width < 24 || r.height < 24).map((r) => `${sel} ${Math.round(r.width)}x${Math.round(r.height)}`), selector);
+
 test('the add-invoice form does not zoom iOS', async ({ app, screen, browser }) => {
   await browser.setViewport({ width: 390, height: 844 });
   await signIn(app, screen);
@@ -79,3 +84,26 @@ test('the add-invoice form does not zoom iOS', async ({ app, screen, browser }) 
   expect(sizes).toEqual([]);
 });
 
+test('app controls are at least 24px to tap', async ({ app, screen, browser }) => {
+  await browser.setViewport({ width: 390, height: 844 });
+  await signIn(app, screen);
+  const found = await small(browser, '.sh-hint .linkish');
+  await browser.locator('.sh-hint .linkish').click();
+  found.push(...await small(browser, '.sh-hint .linkish'));
+  await screen.getByRole('button', 'Everything').tap();
+  await screen.getByRole('tab', 'Payments').tap();
+  const row = 'article.row:has-text("Rechenzentrum Nord")';
+  await expect(browser.locator(`${row} .pill`)).toHaveText('Delivered', { timeout: 20_000 });
+  await browser.locator(`${row} button.row-head`).click();
+  await browser.locator(`${row} button:has-text("Prove it")`).click();
+  await expect(browser.locator(`${row} .prove`)).toBeVisible();
+  found.push(...await small(browser, '.prove .wi-reset'));
+  expect(found).toEqual([]);
+});
+
+test('landing controls are at least 24px to tap', async ({ app, browser }) => {
+  await browser.setViewport({ width: 390, height: 844 });
+  await app.open('/');
+  const found = [...await small(browser, '#r-amount'), ...await small(browser, '#r-reference'), ...await small(browser, '.lp-fcol a')];
+  expect(found).toEqual([]);
+});
