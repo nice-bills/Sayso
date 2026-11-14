@@ -127,17 +127,25 @@ export class AgentCard {
 
   /**
    * Called for each approved card transaction. Records the spend once (the money has left either
-   * way, so reconciliation counts it); a transaction that fails review also freezes the card.
+   * way, so reconciliation counts it); a transaction that fails review also freezes the card first, and a failed freeze is escalated and recorded as such.
    */
   async onTransaction(t: CardTransaction, now = new Date()): Promise<CardReview> {
     const review = reviewCardTransaction(t, this.policy, this.spentThisMonthMinor(now));
+    let froze = false;
+    if (review.verdict !== "ok") {
+      try {
+        await this.awx.updateCard(t.card_id, { card_status: "INACTIVE" });
+        froze = true;
+      } catch (err) {
+        emit("escalate", `Could not freeze the agent card after ${review.reason}: freeze it in Airwallex now`, { error: String(err).slice(0, 200), merchant: t.merchantName }, t.id);
+      }
+    }
     if (!this.store.latestOp(t.id, "card_spend")) {
-      this.store.insertOp({ requestId: t.id, obligationId: t.id, kind: "card_spend", attempt: 1, status: "settled", currency: t.currency, amountMinor: t.amountMinor, detail: `${now.toISOString()} ${t.merchantName}${review.verdict === "ok" ? "" : " (froze card)"}` });
+      this.store.insertOp({ requestId: t.id, obligationId: t.id, kind: "card_spend", attempt: 1, status: "settled", currency: t.currency, amountMinor: t.amountMinor, detail: `${now.toISOString()} ${t.merchantName}${review.verdict === "ok" ? "" : froze ? " (froze card)" : " (card freeze failed)"}` });
     }
     if (review.verdict === "ok") {
       emit("act", `Card paid ${t.merchantName} ${toMajor(t.amountMinor).toFixed(2)} ${t.currency}`, { mcc: t.mcc }, t.id);
-    } else {
-      await this.awx.updateCard(t.card_id, { card_status: "INACTIVE" });
+    } else if (froze) {
       emit("refuse", `Froze the agent card: ${review.reason}`, { merchant: t.merchantName, amount: toMajor(t.amountMinor) }, t.id);
     }
     return review;

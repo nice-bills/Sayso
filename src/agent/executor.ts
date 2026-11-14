@@ -96,14 +96,21 @@ async function submitTransfer(d: ExecutorDeps, requestId: string, a: Extract<Act
     d.store.updateOp(requestId, "submitted", t.id, chargedFeeDetail(t, a.currency));
     emit("act", `Payout ${toMajor(a.amountMinor).toFixed(2)} ${a.currency} to ${a.beneficiaryId} via ${a.method}${isRetry ? " (same request_id)" : ""}`, { status: t.status }, t.id);
   } catch (err) {
-    if (!isAmbiguous(err)) {
+    if (!isRetry && !isAmbiguous(err)) {
       d.store.updateOp(requestId, "failed", null, String(err));
       emit("refuse", `Payout for ${a.obligationId} rejected`, { error: String(err) });
       return;
     }
     // Did it go through? Look it up by our request_id before doing anything else.
     d.store.updateOp(requestId, "ambiguous", null, String(err));
-    const found = await d.awx.transferByRequestId(requestId).catch(() => undefined);
+    let found: Transfer | undefined;
+    try {
+      found = await d.awx.transferByRequestId(requestId);
+    } catch (lookupErr) {
+      // We can't tell whether it went through, so neither resend nor give up: a person checks.
+      emit("escalate", `Payout for ${a.obligationId} unconfirmed and the lookup failed; held for a person`, { error: String(lookupErr) });
+      return;
+    }
     if (found) {
       d.store.updateOp(requestId, "submitted", found.id);
       emit("observe", `Payout for ${a.obligationId} did go through; adopting it, not resending`, { status: found.status }, found.id);

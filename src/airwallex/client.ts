@@ -10,6 +10,8 @@
 
 import { randomUUID } from "node:crypto";
 
+const TIMEOUT_MS = 30_000; // a stalled connection must not hang a payout run; the executor treats an abort as ambiguous
+
 export interface AirwallexConfig {
   clientId: string;
   apiKey: string;
@@ -94,6 +96,7 @@ export class Airwallex {
     const res = await fetch(`${this.baseUrl}/api/v1/authentication/login`, {
       method: "POST",
       headers: { "x-client-id": this.cfg.clientId, "x-api-key": this.cfg.apiKey },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const body = (await res.json()) as { token?: string };
     if (!res.ok || !body.token) throw new AirwallexError(res.status, undefined, body, "/authentication/login");
@@ -110,6 +113,7 @@ export class Airwallex {
         method,
         headers: { Authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) },
         body: payload,
+        signal: AbortSignal.timeout(TIMEOUT_MS),
       });
       const text = await res.text();
       let parsed: unknown = {};

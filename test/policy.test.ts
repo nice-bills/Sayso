@@ -95,3 +95,12 @@ describe("plan", () => {
     expect(changed.some((a) => a.kind === "pay" && a.obligationId === "rent")).toBe(true);
   });
 });
+
+describe("approval on a part-held payment", () => {
+  it("asks for approval on the whole value of a part-held payment", () => {
+    const limited: PolicyConfig = { ...cfg, autonomousLimits: { high: toMinor(500), medium: toMinor(500), low: toMinor(100) } };
+    const p = plan(state({ balancesMinor: { USD: toMinor(4000), EUR: toMinor(1000) }, obligations: [rent] }), limited, now);
+    expect(p.actions).toContainEqual(expect.objectContaining({ kind: "pay", obligationId: "rent", fundedFrom: "mixed", needsApproval: true }));
+    expect(p.actions).toContainEqual(expect.objectContaining({ kind: "convert", obligationId: "rent", needsApproval: true }));
+  });
+});

@@ -1,6 +1,6 @@
 // Offline stand-ins for Airwallex and Metal, so the whole loop and dashboard run with no keys
 // and no network. They follow the same rules as the real services where those rules matter
-// to our code (request_id dedupe, a required transfer reason, FAILED as the failure state, mandate payee checks), and
+// to our code (request_id dedupe, a required transfer reason, FAILED then CANCELLED for a failed transfer, an insufficient balance, and the card's category, currency and amount limits, mandate payee checks), and
 // every proof they return starts with "sim:" so nothing here can be mistaken for a live result.
 
 import { randomUUID } from "node:crypto";
@@ -57,20 +57,21 @@ export class FakeAirwallex implements LoopAirwallex {
     if (existing) return existing; // same request_id, same transfer
     const amountMinor = toMinor(Number(b.transfer_amount));
     const fee = transferFee(b.transfer_method, b.transfer_currency);
+    if ((this.balances[b.transfer_currency] ?? 0) < amountMinor + fee) throw new AirwallexError(400, "insufficient_fund", {}, "/transfers/create");
     this.add(b.transfer_currency, -(amountMinor + fee));
     const t = { id: `sim:tfr_${this.transfers.size + 1}`, request_id: b.request_id, status: "PROCESSING", transfer_amount: toMajor(amountMinor), transfer_currency: b.transfer_currency, fee_amount: toMajor(fee), fee_currency: b.transfer_currency, method: b.transfer_method, lookups: 0, beneficiary_id: b.beneficiary_id };
     this.transfers.set(b.request_id, t);
     return t;
   };
 
-  /** Each lookup moves a transfer one step along PROCESSING -> SENT -> PAID. */
+  /** Each lookup moves a transfer one step along PROCESSING -> SENT -> PAID, or SENT -> FAILED -> CANCELLED for a closed account. */
   transferByRequestId = async (requestId: string) => {
     const t = this.transfers.get(requestId);
     if (!t) return undefined;
     t.lookups += 1;
     const ben = JSON.stringify(this.beneficiaries.get(t.beneficiary_id) ?? "");
     const fails = ben.includes(this.failMarker);
-    t.status = t.lookups === 1 ? "SENT" : fails ? "FAILED" : "PAID";
+    t.status = t.lookups === 1 ? "SENT" : !fails ? "PAID" : t.lookups === 2 ? "FAILED" : "CANCELLED";
     if (fails && t.lookups > 1 && !t.refunded) {
       t.refunded = true;
       this.add(t.transfer_currency, toMinor(t.transfer_amount)); // the bank returns the money
@@ -115,8 +116,17 @@ export class FakeAirwallex implements LoopAirwallex {
 
   createCardholder = async () => ({ cardholder_id: "sim:ch_1" });
   private cardMcc: string[] = [];
+  private cardCurrencies: string[] = [];
+  private perTxnMinor?: number;
+  private monthlyMinor?: number;
+  private readonly cardSpend: Array<{ month: string; minor: number }> = [];
   createCard = async (body: unknown) => {
-    this.cardMcc = (body as { authorization_controls?: { allowed_merchant_categories?: string[] } }).authorization_controls?.allowed_merchant_categories ?? [];
+    const c = (body as { authorization_controls?: { allowed_merchant_categories?: string[]; allowed_currencies?: string[]; transaction_limits?: { limits?: Array<{ amount: number; interval: string }> } } }).authorization_controls;
+    this.cardMcc = c?.allowed_merchant_categories ?? [];
+    this.cardCurrencies = c?.allowed_currencies ?? [];
+    const limit = (interval: string) => { const l = c?.transaction_limits?.limits?.find((x) => x.interval === interval); return l ? toMinor(l.amount) : undefined; };
+    this.perTxnMinor = limit("PER_TRANSACTION");
+    this.monthlyMinor = limit("MONTHLY");
     return { card_id: "sim:card_1" };
   };
   updateCard = async (cardId: string, body: { card_status: string }) => {
@@ -128,7 +138,13 @@ export class FakeAirwallex implements LoopAirwallex {
     const base = { card_transaction_id: `sim:itx_${randomUUID().slice(0, 8)}`, card_id: b.card_id, transaction_amount: b.transaction_amount, transaction_currency: b.transaction_currency, merchant: { name: b.merchant_info, category_code: b.merchant_category_code } };
     if (this.frozenCards.has(b.card_id)) return { ...base, process_result: "DECLINED", failure_reason: "CARD_NOT_ACTIVE" };
     if (this.cardMcc.length && !this.cardMcc.includes(b.merchant_category_code)) return { ...base, process_result: "DECLINED", failure_reason: "MERCHANT_CATEGORY_NOT_ALLOWED" };
-    this.add(b.transaction_currency, -toMinor(b.transaction_amount));
+    const minor = toMinor(b.transaction_amount);
+    const month = new Date().toISOString().slice(0, 7);
+    if (this.cardCurrencies.length && !this.cardCurrencies.includes(b.transaction_currency)) return { ...base, process_result: "DECLINED", failure_reason: "CURRENCY_NOT_ALLOWED" };
+    if (this.perTxnMinor !== undefined && minor > this.perTxnMinor) return { ...base, process_result: "DECLINED", failure_reason: "TRANSACTION_LIMIT_EXCEEDED" };
+    if (this.monthlyMinor !== undefined && this.cardSpend.filter((x) => x.month === month).reduce((n, x) => n + x.minor, 0) + minor > this.monthlyMinor) return { ...base, process_result: "DECLINED", failure_reason: "TRANSACTION_LIMIT_EXCEEDED" };
+    this.cardSpend.push({ month, minor });
+    this.add(b.transaction_currency, -minor);
     return { ...base, process_result: "APPROVED" };
   };
 }

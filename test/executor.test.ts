@@ -12,7 +12,7 @@ const pay = (over: Partial<Pay> = {}): Pay => ({
 });
 
 /** A fake Airwallex whose createTransfer behaviour is scripted per call. */
-function fakeAwx(script: Array<"ok" | "timeout_but_created" | "timeout" | "reject">) {
+function fakeAwx(script: Array<"ok" | "timeout_but_created" | "timeout" | "reject" | "dup">, opts: { lookupThrows?: boolean } = {}) {
   const created = new Map<string, Transfer>();
   let calls = 0;
   const awx: AirwallexPort = {
@@ -20,6 +20,7 @@ function fakeAwx(script: Array<"ok" | "timeout_but_created" | "timeout" | "rejec
     createTransfer: async (body) => {
       const step = script[calls++] ?? "ok";
       if (step === "reject") throw new AirwallexError(400, "invalid_argument", {}, "/transfers/create");
+      if (step === "dup") throw new AirwallexError(400, "duplicate_request", {}, "/transfers/create");
       if (step === "timeout") throw new AirwallexError(504, undefined, {}, "/transfers/create");
       // Airwallex dedupes on request_id: the same id never creates a second transfer.
       const t = created.get(body.request_id) ?? { id: `tfr_${created.size + 1}`, request_id: body.request_id, status: "PROCESSING", transfer_amount: Number(body.transfer_amount), transfer_currency: body.transfer_currency };
@@ -27,7 +28,10 @@ function fakeAwx(script: Array<"ok" | "timeout_but_created" | "timeout" | "rejec
       if (step === "timeout_but_created") throw new AirwallexError(504, undefined, {}, "/transfers/create");
       return t;
     },
-    transferByRequestId: async (id) => created.get(id),
+    transferByRequestId: async (id) => {
+      if (opts.lookupThrows) throw new Error("lookup down");
+      return created.get(id);
+    },
   };
   return { awx, created, calls: () => calls };
 }
@@ -55,6 +59,26 @@ describe("executePay", () => {
     await executePay(d, pay());
     expect(f.calls()).toBe(2);
     expect(f.created.size).toBe(1);
+  });
+
+  it("holds for a person when the create times out and the lookup fails", async () => {
+    const f = fakeAwx(["timeout"], { lookupThrows: true });
+    const d = deps(f.awx);
+    await executePay(d, pay());
+    expect(f.calls()).toBe(1);
+    expect(d.store.latestOp("rent-nov", "pay")!.status).toBe("ambiguous");
+    await executePay(d, pay());
+    expect(f.calls()).toBe(1);
+  });
+
+  it("never marks a retried create failed on a 4xx", async () => {
+    const f = fakeAwx(["timeout", "dup"]);
+    const d = deps(f.awx);
+    await executePay(d, pay());
+    expect(d.store.latestOp("rent-nov", "pay")!.status).not.toBe("failed");
+    const calls = f.calls();
+    await executePay(d, pay());
+    expect(f.calls()).toBe(calls);
   });
 
   it("never pays the same obligation twice when the plan runs again", async () => {

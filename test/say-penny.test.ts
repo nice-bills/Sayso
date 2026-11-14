@@ -129,6 +129,19 @@ describe("the one-cent code check", () => {
     }
   });
 
+  it("converts the currency for the cent like any payout", async () => {
+    const { cs, server, forward, post, payStudio } = await start();
+    try {
+      await payStudio();
+      const held = await forward(studioBankChange);
+      expect((await post(`/v1/inbox/${encodeURIComponent(held.body.id)}/penny`)).status).toBeLessThan(300);
+      const ops = (cs.svc as any).d.store.ops() as Array<{ kind: string; obligationId: string }>;
+      expect(ops.some((o) => o.kind === "convert" && o.obligationId.startsWith("penny-"))).toBe(true);
+    } finally {
+      server.close();
+    }
+  });
+
   it("blocks the invoice for good when the payee says the details aren't theirs, or after three wrong codes", async () => {
     const { server, base, post, forward, payStudio } = await start();
     try {

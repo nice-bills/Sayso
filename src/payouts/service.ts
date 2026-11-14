@@ -481,19 +481,20 @@ export class PayoutService {
     return this.submit(p, beneficiaryId);
   }
 
-  private async ensureFloat(p: Payout): Promise<void> {
-    const need = p.amountMinor + transferFee(p.method, p.currency, this.pricing);
+  /** Makes sure Airwallex holds enough of a currency for one transfer, converting only the shortfall from USD. */
+  async ensureFloatFor(currency: string, amountMinor: number, method: "LOCAL" | "SWIFT", forId: string): Promise<void> {
+    const need = amountMinor + transferFee(method, currency, this.pricing);
     const balances = await this.d.awx.currentBalances();
-    const have = toMinor(balances.find((b) => b.currency === p.currency)?.available_amount ?? 0);
+    const have = toMinor(balances.find((b) => b.currency === currency)?.available_amount ?? 0);
     if (have >= need) {
-      emit("decide", `Paying ${fmt(need, p.currency)} from ${p.currency} already held; no conversion`, { payout: p.id });
+      emit("decide", `Paying ${fmt(need, currency)} from ${currency} already held; no conversion`, { payout: forId });
       return;
     }
-    if (p.currency === "USD") throw new Error(`USD float is ${fmt(have, "USD")}, need ${fmt(need, "USD")}`);
+    if (currency === "USD") throw new Error(`USD float is ${fmt(have, "USD")}, need ${fmt(need, "USD")}`);
     const buyMinor = need - have;
     const requestId = randomUUID();
-    this.d.store.insertOp({ requestId, obligationId: p.id, kind: "convert", attempt: 1, status: "submitted", currency: p.currency, amountMinor: buyMinor });
-    const body = { request_id: requestId, sell_currency: "USD", buy_currency: p.currency, buy_amount: toMajor(buyMinor).toFixed(2) };
+    this.d.store.insertOp({ requestId, obligationId: forId, kind: "convert", attempt: 1, status: "submitted", currency, amountMinor: buyMinor });
+    const body = { request_id: requestId, sell_currency: "USD", buy_currency: currency, buy_amount: toMajor(buyMinor).toFixed(2) };
     const attempt = async () => {
       try {
         return await this.d.awx.fxConvert(body);
@@ -511,7 +512,11 @@ export class PayoutService {
       c = await attempt();
     }
     this.d.store.updateOp(requestId, "settled", c.id, JSON.stringify({ sell_currency: "USD", sell_minor: toMinor(c.sell_amount) }));
-    emit("act", `Converted ${toMajor(toMinor(c.sell_amount)).toFixed(2)} USD into the ${fmt(buyMinor, p.currency)} shortfall`, { payout: p.id }, c.id);
+    emit("act", `Converted ${toMajor(toMinor(c.sell_amount)).toFixed(2)} USD into the ${fmt(buyMinor, currency)} shortfall`, { payout: forId }, c.id);
+  }
+
+  private async ensureFloat(p: Payout): Promise<void> {
+    return this.ensureFloatFor(p.currency, p.amountMinor, p.method, p.id);
   }
 
   /** Airwallex account verification. Anything short of a full name match waits for a person; an outage never blocks. */
