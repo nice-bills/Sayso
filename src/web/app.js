@@ -191,22 +191,38 @@ function render() {
   dirty = false;
   staggered = 0;
   const y = window.scrollY;
+  const keep = focusKey(focused);
   $root.replaceChildren(...[state.signedIn === null ? h("div") : state.signedIn && (inApp() || state.claim || state.connect || state.focus) ? (state.claim ? claimView() : state.connect ? connectView() : appView()) : !state.signedIn && (state.claim || state.connect) ? claimGate() : landing(), state.signedIn ? whyDrawer() : null, state.toast ? h("div", { class: "toast", role: "status" }, state.toast) : null].flat().filter(Boolean));
-  window.scrollTo(0, y);
+  // Instant: with scroll-behavior: smooth a plain scrollTo animates, the next render cuts it short, and updates drift the page.
+  window.scrollTo({ top: y, behavior: "instant" });
   filmBehindApp();
   afterRender();
-  settleFocus();
+  settleFocus(keep);
   watchReveals();
 }
 // Where focus goes after the next render: a selector, set by whatever opened or closed a dialog.
 let focusAfter = null;
-function settleFocus() {
+// A selector for the focused control, only if it is unique now; never an index, which could land on another payment's button after the list changes.
+function focusKey(f) {
+  if (!f || f === document.body || !$root.contains(f)) return null;
+  const q = (a, v) => `[${a}="${CSS.escape(v)}"]`;
+  const own = f.id ? `#${CSS.escape(f.id)}` : f.dataset.why ? q("data-why", f.dataset.why) : f.dataset.id ? q("data-id", f.dataset.id) : f.tagName.toLowerCase() + [...f.classList].map((c) => `.${CSS.escape(c)}`).join("");
+  const row = f.id ? null : f.closest("[data-id]");
+  const key = row && row !== f ? `${q("data-id", row.dataset.id)} ${own}` : own;
+  return $root.querySelectorAll(key).length === 1 ? key : null;
+}
+function settleFocus(keep) {
   const dialog = $root.querySelector(".why-drawer, .osheet[role=dialog]");
   const want = focusAfter ? $root.querySelector(focusAfter) : null;
   focusAfter = null;
-  if (want) return want.focus();
+  // Instant scroll: a smooth one can be cut short by a background render's scrollTo, leaving the row off screen.
+  // Skip the row's 14px enter rise first: scrolling a displaced box leaves the head 14px short of the edge once it lands.
+  if (want) { want.closest(".row")?.getAnimations().forEach((a) => a.finish()); want.focus({ preventScroll: true }); want.scrollIntoView({ block: "nearest", behavior: "instant" }); return; }
   // A re-render while a dialog is open puts focus back inside it.
-  if (dialog && !dialog.contains(document.activeElement)) dialog.querySelector("button, [href], input, [tabindex]:not([tabindex='-1'])")?.focus();
+  if (dialog && !dialog.contains(document.activeElement)) { dialog.querySelector("button, [href], input, [tabindex]:not([tabindex='-1'])")?.focus(); return; }
+  // A background update rebuilds the page; put keyboard focus back on the same control.
+  const back = keep && (!document.activeElement || document.activeElement === document.body) ? $root.querySelectorAll(keep) : [];
+  if (back.length === 1) back[0].focus({ preventScroll: true });
 }
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
@@ -551,6 +567,8 @@ async function signedIn() {
   state.signedIn = true;
   await load(); goLive();
   if (!inApp() && !state.claim && !state.connect && !state.focus) history.pushState(null, "", "/app");
+  // The token field still has focus after Enter, and render() waits for inputs to lose it.
+  if ($root.contains(document.activeElement)) document.activeElement.blur();
   render(); window.scrollTo({ top: 0, behavior: "instant" });
 }
 
@@ -708,7 +726,7 @@ function appView() {
   return h("div", { class: "shell" },
     h("header", { class: "top" }, h("div", { class: "wrap" },
       brand(),
-      h("nav", { class: "tabs", role: "tablist" }, tabs.map(([id, label, ic, n]) => h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === id && !state.focus), onclick: () => { state.tab = id; sessionSet("tab", id); shown.clear(); leaveFocus(); render(); window.scrollTo(0, 0); } }, icon(ic, 20), h("span", { class: "tab-label" }, label), n ? h("span", { class: "count" }, n) : null))),
+      h("nav", { class: "tabs", role: "tablist" }, tabs.map(([id, label, ic, n]) => h("button", { class: "tab", role: "tab", "aria-selected": String(state.tab === id && !state.focus), onclick: () => { state.tab = id; sessionSet("tab", id); shown.clear(); leaveFocus(); render(); window.scrollTo({ top: 0, behavior: "instant" }); } }, icon(ic, 20), h("span", { class: "tab-label" }, label), n ? h("span", { class: "count" }, n) : null))),
       h("div", { class: "top-right" },
         passkeyButton(),
         s?.balances?.USD ? h("span", { class: "bal" }, "Available ", h("b", {}, money(s.balances.USD / 100, "USD"))) : null,
@@ -759,7 +777,7 @@ function homeView() {
         sum?.offline ? h("span", { class: "sh-mode", title: "Airwallex and Metal are simulated" }, "Demo") : null,
         state.me?.viewer ? h("span", { class: "sh-mode mode read-only", title: "You can look, but nothing you do pays or changes anything" }, "Read-only") : null,
         passkeyButton(true),
-        h("button", { class: "sh-icon", title: "Everything: inbox, payments, agents", "aria-label": "Everything", onclick: () => { state.tab = "inbox"; sessionSet("tab", "inbox"); render(); window.scrollTo(0, 0); } }, icon("ledger", 20)),
+        h("button", { class: "sh-icon", title: "Everything: inbox, payments, agents", "aria-label": "Everything", onclick: () => { state.tab = "inbox"; sessionSet("tab", "inbox"); render(); window.scrollTo({ top: 0, behavior: "instant" }); } }, icon("ledger", 20)),
       )),
     listening
       ? h("main", { class: "sh-main sh-listen" }, r ? null : live, h("div", { class: "wave", "aria-hidden": "true" }, Array.from({ length: 18 }, (_, i) => h("i", { style: `animation-delay:-${(i * 0.137) % 1}s` }))), replyLine(null))
@@ -795,7 +813,7 @@ function decisionsPane() {
   const latest = ps[0];
   const count = (f) => state.payouts.filter(f).length;
   const stat = (n, label) => h("div", { class: "dp-stat" }, h("b", {}, String(n)), h("span", {}, label));
-  const openRow = (p) => { state.tab = "payments"; sessionSet("tab", "payments"); state.rows.add(p.id); render(); window.scrollTo(0, 0); };
+  const openRow = (p) => { state.tab = "payments"; sessionSet("tab", "payments"); state.rows.add(p.id); state.filter = "all"; focusAfter = `.row[data-id="${CSS.escape(p.id)}"] .row-head`; render(); };
   const tone = latest ? FLAP_TONE[latest.decision.verdict] : "";
   return h("aside", { class: "dpane", "aria-label": "What Sayso decided" },
     h("div", { class: "dp-head" }, h("span", {}, "What Sayso decided"), h("span", { class: "dp-mode" }, state.summary?.offline ? "Offline demo" : state.summary?.sandbox ? "Airwallex sandbox · Metal testnet" : "Live")),
@@ -1463,8 +1481,8 @@ function payoutRow(p, opts = {}) {
       h("span", { class: "amt" }, money(p.amount, p.currency)),
       h("span", { class: `pill ${tone}` }, label)),
   ];
-  return h("article", { class: `row${open ? " open" : ""}${m.cls}`, style: m.style, "data-status": p.status },
-    opts.open || needsYou ? h("div", { class: "row-head" }, head)
+  return h("article", { class: `row${open ? " open" : ""}${m.cls}`, style: m.style, "data-status": p.status, "data-id": p.id },
+    opts.open || needsYou ? h("div", { class: "row-head", tabindex: "-1" }, head)
       : h("button", { type: "button", class: "row-head", "aria-expanded": String(open), onclick: toggle }, head),
     open ? h("div", { class: "row-body" },
       p.reference ? h("div", { class: "rb-ref" }, "Reference ", h("b", {}, p.reference)) : null,
