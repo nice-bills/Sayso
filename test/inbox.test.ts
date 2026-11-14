@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { heuristicRead } from "../src/agent/reader.js";
 import { extractByPattern } from "../src/inbox/extract.js";
 import { Inbox } from "../src/inbox/inbox.js";
+import { shortCode } from "../src/mcp/hosted.js";
 import { PayoutService, publicView } from "../src/payouts/service.js";
 import { FakeAirwallex, FakeRefunder } from "../src/sim/offline.js";
 import { Store } from "../src/store.js";
@@ -12,8 +13,10 @@ function setup() {
   const store = new Store(":memory:");
   const awx = new FakeAirwallex({ USD: toMinor(2000) });
   const svc = new PayoutService({ awx, store, refunder: new FakeRefunder(), read: async (t) => heuristicRead(t) });
-  return { inbox: new Inbox(store, svc), svc, awx };
+  return { inbox: new Inbox(store, svc), svc, awx, store };
 }
+
+const addNewer = (store: Store, n: number) => { for (let i = 0; i < n; i++) store.db.prepare("INSERT INTO inbox (id, sender, subject, received_at, body, fields, missing, status) VALUES (?,?,?,?,?,?,?,?)").run(`filler-${i}`, "x", "x", new Date(Date.now() + 86_400_000 + i * 1000).toISOString(), "", "{}", "[]", "ignored"); };
 
 describe("extractByPattern", () => {
   it("reads European and British invoices", () => {
@@ -32,6 +35,26 @@ describe("Inbox", () => {
     await svc.follow();
     expect(svc.book.get(item.payoutId!)?.status).toBe("paid");
     expect(awx.balances.EUR).toBe(0);
+  });
+
+  it("approving an invoice whose quote ran out quotes it again and pays", async () => {
+    const { inbox, svc } = setup();
+    const item = await inbox.receive(studioInvoice);
+    const oldId = item.payoutId!;
+    const paid = await inbox.approve(item.id, "owner", {}, new Date(Date.now() + 8 * 24 * 3_600_000));
+    expect(paid.status).toBe("paying");
+    expect(paid.payoutId).not.toBe(oldId);
+    expect(svc.book.get(oldId)?.status).toBe("expired");
+    expect(svc.book.get(paid.payoutId!)?.status).not.toBe("quoted");
+  });
+
+  it("a single invoice is found past the newest 200", async () => {
+    const { inbox, store } = setup();
+    const item = await inbox.receive(studioInvoice);
+    addNewer(store, 201);
+    expect(inbox.list().some((i) => i.id === item.id)).toBe(false);
+    expect(inbox.view(item.id)?.id).toBe(item.id);
+    expect(inbox.byShortCode(shortCode(item.id), shortCode)?.id).toBe(item.id);
   });
 
   it("does not queue the same invoice twice", async () => {

@@ -94,7 +94,8 @@ export class Inbox {
     let payoutId: string | null = null;
     if (status === "awaiting_approval") {
       try {
-        const p = await this.svc.quote(toPayoutRequest(fields, e), e.receivedAt, { ttlMs: APPROVAL_TTL_MS, fromFloat: true });
+        // The quote clock is when Sayso got it: the Date header is the sender's to write.
+        const p = await this.svc.quote(toPayoutRequest(fields, e), new Date(), { ttlMs: APPROVAL_TTL_MS, fromFloat: true });
         payoutId = p.id;
         status = p.status === "needs_review" ? "needs_verification" : p.status === "rejected" ? "rejected" : "awaiting_approval";
       } catch (err) {
@@ -130,8 +131,24 @@ export class Inbox {
     } else if (item.status !== "awaiting_approval") {
       throw new PayoutError(409, `invoice is ${item.status}`);
     }
+    let payoutId = item.payoutId;
+    const old = this.svc.book.get(payoutId);
+    if (old?.status === "quoted" && new Date(old.expiresAt) < now) {
+      // The quote ran out while the invoice waited; paying would 410 and strand it in `paying`. Price it again first.
+      const body = (this.store.db.prepare("SELECT body FROM inbox WHERE id = ?").get(id) as { body: string }).body;
+      const e: InboundEmail = { messageId: id, from: item.from, subject: item.subject, body, receivedAt: now };
+      const fresh = await this.svc.quote(toPayoutRequest(item.fields, e), now, { ttlMs: APPROVAL_TTL_MS, fromFloat: true });
+      const next: InboxStatus = fresh.status === "needs_review" ? "needs_verification" : fresh.status === "rejected" ? "rejected" : item.status;
+      // Direct CAS: the INBOX table has no awaiting_approval -> needs_verification/rejected edge and must not grow one.
+      const moved = this.store.db.prepare("UPDATE inbox SET payout_id = ?, status = ? WHERE id = ? AND payout_id = ? AND status = ?").run(fresh.id, next, id, old.id, item.status);
+      if (Number(moved.changes) !== 1) throw new PayoutError(409, "invoice changed while it was being priced again");
+      this.svc.book.transition(old.id, ["quoted"], "expired");
+      if (fresh.status !== "quoted") throw new PayoutError(409, "the quote ran out and the new one needs checking again");
+      payoutId = fresh.id;
+      emit("observe", `The quote for ${item.fields.payeeName ?? "the payee"} ran out, so Sayso priced it again`, { inbox: id });
+    }
     if (!this.setStatus(id, "paying", [item.status])) throw new PayoutError(409, "already approved");
-    await this.svc.payInternally(item.payoutId, approver, now);
+    await this.svc.payInternally(payoutId, approver, now);
     return this.get(id)!;
   }
 
@@ -146,11 +163,24 @@ export class Inbox {
   }
 
   list(): Array<InboxItem & { payout: ReturnType<typeof publicView> | null }> {
-    return this.store.db.prepare("SELECT * FROM inbox ORDER BY received_at DESC LIMIT 200").all().map((r) => {
-      const item = this.decode(r)!;
-      const p = item.payoutId ? this.svc.book.get(item.payoutId) : undefined;
-      return { ...item, payout: p ? publicView(p) : null };
-    });
+    return this.store.db.prepare("SELECT * FROM inbox ORDER BY received_at DESC LIMIT 200").all().map((r) => this.withPayout(this.decode(r)!));
+  }
+
+  /** One invoice with its payout, however old it is. */
+  view(id: string) {
+    const item = this.get(id);
+    return item ? this.withPayout(item) : undefined;
+  }
+
+  // shortcut: scans every id; store the code in an indexed column if the inbox grows past tens of thousands
+  byShortCode(code: string, hash: (id: string) => string) {
+    const hit = (this.store.db.prepare("SELECT id FROM inbox").all() as Array<{ id: string }>).find((r) => hash(r.id) === code);
+    return hit ? this.view(hit.id) : undefined;
+  }
+
+  private withPayout(item: InboxItem) {
+    const p = item.payoutId ? this.svc.book.get(item.payoutId) : undefined;
+    return { ...item, payout: p ? publicView(p) : null };
   }
 
   /** Compare-and-set, so two taps can't both pay. */
