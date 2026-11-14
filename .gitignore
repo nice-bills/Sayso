@@ -21,3 +21,4 @@ node_modules/
 .claude/worktrees/
 demo/
 recon/
+vendor/

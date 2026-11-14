@@ -3,6 +3,7 @@
 // `offline: true` swaps Airwallex and Metal for the simulators; everything else is the same code.
 
 import express from "express";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
 import { METAL_NETWORKS, registerMetalScheme, sellerToken } from "@metalntwx/metal-pay";
@@ -395,8 +396,11 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     res.setHeader("content-security-policy", "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https://huggingface.co https://*.huggingface.co https://*.hf.co");
     res.sendFile("whisper-worker.js", { root: webDir });
   });
-  app.use("/vendor/transformers", express.static(nodeModules + "@huggingface/transformers/dist", { immutable: true, maxAge: "30d" }));
-  app.use("/vendor/ort", express.static(nodeModules + "onnxruntime-web/dist", { immutable: true, maxAge: "30d" }));
+  // The image copies just these browser files into vendor/ (see Dockerfile); dev and tests serve them from node_modules.
+  const vendor = fileURLToPath(new URL("../vendor/", import.meta.url));
+  const from = (built: string, dev: string) => existsSync(vendor + built) ? vendor + built : nodeModules + dev;
+  app.use("/vendor/transformers", express.static(from("transformers", "@huggingface/transformers/dist"), { immutable: true, maxAge: "30d" }));
+  app.use("/vendor/ort", express.static(from("ort", "onnxruntime-web/dist"), { immutable: true, maxAge: "30d" }));
   // Lenis: the landing page's damped smooth scroll.
   app.use("/vendor/lenis", express.static(nodeModules + "lenis/dist", { immutable: true, maxAge: "30d" }));
   app.use("/film", express.static(webDir + "/film", { maxAge: "7d" }));
