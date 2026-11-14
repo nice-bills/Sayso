@@ -18,7 +18,8 @@ export const INBOX = register(machine("invoice", ["needs_details", "awaiting_app
   needs_verification: { means: "Held. The owner has to confirm the bank details with the payee first.", waitingOn: "owner", to: ["paying", "ignored"] },
   rejected: { means: "Sayso will not pay this one.", waitingOn: "nobody", to: [] },
   // Final for the invoice; from here the payout behind it carries the progress.
-  paying: { means: "Approved. Follow the payout for delivery.", waitingOn: "nobody", to: [] },
+  // Only when the quote behind it ran out unpaid: it goes back to the owner, who approves it again at a fresh price.
+  paying: { means: "Approved. Follow the payout for delivery.", waitingOn: "nobody", to: ["awaiting_approval"] },
   ignored: { means: "The owner set it aside.", waitingOn: "nobody", to: [] },
   duplicate: { means: "It looks like an invoice that is already here, so it was not queued again.", waitingOn: "owner", to: ["ignored"] },
 }));
@@ -133,7 +134,7 @@ export class Inbox {
     }
     let payoutId = item.payoutId;
     const old = this.svc.book.get(payoutId);
-    if (old?.status === "quoted" && new Date(old.expiresAt) < now) {
+    if (old && ((old.status === "quoted" && new Date(old.expiresAt) < now) || old.status === "expired")) {
       // The quote ran out while the invoice waited; paying would 410 and strand it in `paying`. Price it again first.
       const body = (this.store.db.prepare("SELECT body FROM inbox WHERE id = ?").get(id) as { body: string }).body;
       const e: InboundEmail = { messageId: id, from: item.from, subject: item.subject, body, receivedAt: now };
@@ -150,6 +151,19 @@ export class Inbox {
     if (!this.setStatus(id, "paying", [item.status])) throw new PayoutError(409, "already approved");
     await this.svc.payInternally(payoutId, approver, now);
     return this.get(id)!;
+  }
+
+  /** Invoices approved but never paid because their quote ran out: back to the owner. */
+  rescueStranded(now = new Date()): number {
+    let n = 0;
+    for (const r of this.store.db.prepare("SELECT id, payout_id FROM inbox WHERE status = 'paying'").all() as Array<{ id: string; payout_id: string | null }>) {
+      const p = r.payout_id ? this.svc.book.get(r.payout_id) : undefined;
+      if (!p || !(p.status === "expired" || (p.status === "quoted" && new Date(p.expiresAt) < now))) continue;
+      if (!this.setStatus(r.id, "awaiting_approval", ["paying"])) continue;
+      emit("observe", `The quote for ${this.get(r.id)?.fields.payeeName ?? "the payee"} ran out before it was paid, so it is back with you to approve`, { inbox: r.id });
+      n++;
+    }
+    return n;
   }
 
   ignore(id: string): InboxItem {

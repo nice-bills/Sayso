@@ -48,6 +48,27 @@ describe("Inbox", () => {
     expect(svc.book.get(paid.payoutId!)?.status).not.toBe("quoted");
   });
 
+  it("re-quotes when the payout is already marked expired", async () => {
+    const { inbox, svc } = setup();
+    const item = await inbox.receive(studioInvoice);
+    svc.book.transition(item.payoutId!, ["quoted"], "expired");
+    const paid = await inbox.approve(item.id, "owner");
+    expect(paid.status).toBe("paying");
+    expect(paid.payoutId).not.toBe(item.payoutId);
+    expect(svc.book.get(paid.payoutId!)?.status).not.toBe("quoted");
+  });
+
+  it("an invoice stranded in paying by an expired quote goes back to the owner", async () => {
+    const { inbox, svc, store } = setup();
+    const item = await inbox.receive(studioInvoice);
+    store.db.prepare("UPDATE inbox SET status = 'paying' WHERE id = ?").run(item.id);
+    expect(inbox.rescueStranded()).toBe(0); // quote still valid
+    svc.book.transition(item.payoutId!, ["quoted"], "expired");
+    expect(inbox.rescueStranded()).toBe(1);
+    expect(inbox.get(item.id)?.status).toBe("awaiting_approval");
+    expect((await inbox.approve(item.id, "owner")).status).toBe("paying");
+  });
+
   it("a single invoice is found past the newest 200", async () => {
     const { inbox, store } = setup();
     const item = await inbox.receive(studioInvoice);
