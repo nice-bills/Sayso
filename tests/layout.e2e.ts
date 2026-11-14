@@ -107,3 +107,36 @@ test('landing controls are at least 24px to tap', async ({ app, browser }) => {
   const found = [...await small(browser, '#r-amount'), ...await small(browser, '#r-reference'), ...await small(browser, '.lp-fcol a')];
   expect(found).toEqual([]);
 });
+
+async function visitor(app: { open(path: string): Promise<unknown> }, screen: Screen) {
+  await app.open('/');
+  await screen.getByRole('button', 'Look around, read-only').tap();
+  await expect(screen.getByRole('button', 'Talk')).toBeVisible();
+}
+
+test('the visitor keeps the Read-only badge at 1024', async ({ app, screen, browser }) => {
+  await browser.setViewport({ width: 1024, height: 768 });
+  await visitor(app, screen);
+  const shown = (sel: string) => browser.evaluate((s: string) => (document.querySelector(s) as HTMLElement | null)?.offsetWidth ?? -1, sel);
+  expect(await shown('.sh-mode.read-only')).toBeGreaterThan(0);
+  expect(await overflow(browser)).toBeLessThanOrEqual(0);
+  await screen.getByRole('button', 'Everything').tap();
+  expect(await shown('.top .mode.read-only')).toBeGreaterThan(0);
+  expect(await overflow(browser)).toBeLessThanOrEqual(0);
+});
+
+test('the visitor header does not overflow from 981 to 1140', async ({ app, screen, browser }) => {
+  await browser.setViewport({ width: 1024, height: 768 });
+  await visitor(app, screen);
+  await screen.getByRole('button', 'Everything').tap();
+  const bad: string[] = [];
+  for (const tab of ['Inbox', 'Payments', 'Agents']) {
+    await screen.getByRole('tab', tab).tap();
+    for (const width of [990, 1024, 1080, 1140]) {
+      await browser.setViewport({ width, height: 768 });
+      const over = await overflow(browser);
+      if (over > 0) bad.push(`${tab}@${width}: ${over}`);
+    }
+  }
+  expect(bad).toEqual([]);
+});
