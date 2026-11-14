@@ -9,7 +9,7 @@ async function signIn(app: { open(path: string): Promise<unknown> }, screen: Scr
   await app.open('/');
   await screen.getByLabel('Owner token').fill('sayso-demo');
   await screen.getByRole('button', 'Sign in').tap();
-  await expect(screen.getByRole('button', 'Hold to talk')).toBeVisible();
+  await expect(screen.getByRole('button', 'Talk')).toBeVisible();
 }
 
 /** Home is just the balance, one card and the orb; everything else is one tap away. */
@@ -24,7 +24,7 @@ test('a wrong token does not get in', async ({ app, screen }) => {
   await screen.getByLabel('Owner token').fill('not-the-token');
   await screen.getByRole('button', 'Sign in').tap();
   await expect(screen.getByRole('alert')).toContainText("That token isn't right.");
-  await expect(screen.getByRole('button', 'Hold to talk')).not.toBeVisible();
+  await expect(screen.getByRole('button', 'Talk')).not.toBeVisible();
 });
 
 test('one tap pays a forwarded invoice', async ({ app, screen, browser }) => {
@@ -85,7 +85,7 @@ test('saying a payment shows what was heard and what was understood', async ({ a
 test('a lookalike asking for new bank details is checked with a 1-cent code', async ({ app, screen, browser }) => {
   await signIn(app, screen);
   // Home's top card is the held one: tapping it opens it.
-  await screen.getByRole('button', 'Held: €340.00 to Kreuzberg Studio GmbH. Opens it.').tap();
+  await screen.getByRole('button', 'Held: €340.00 to Kreuzberg Studio GmbH. Opens it. Arrow keys show the next.').tap();
   await screen.getByRole('button', 'Check with a 1-cent code').tap();
   const note = browser.locator('.alert.note').first();
   await expect(note).toContainText('billing@kreuzberg-studio.example');
@@ -97,7 +97,7 @@ test('a lookalike asking for new bank details is checked with a 1-cent code', as
 
 test('the held invoice shows its decision, and one input flips it from hold to pay', async ({ app, screen, browser }) => {
   await signIn(app, screen);
-  await screen.getByRole('button', 'Held: €340.00 to Kreuzberg Studio GmbH. Opens it.').tap();
+  await screen.getByRole('button', 'Held: €340.00 to Kreuzberg Studio GmbH. Opens it. Arrow keys show the next.').tap();
   const decision = browser.locator('.sh-card .decision');
   const verdict = browser.locator('.sh-card .decision .dc-verdict');
   await expect(verdict).toHaveText('Hold');
@@ -164,7 +164,7 @@ test('the landing checks a real receipt: its own hash matches, an edited one doe
 test('a visitor can look around read-only, and nothing they do pays', async ({ app, screen, browser }) => {
   await app.open('/');
   await screen.getByRole('button', 'Look around, read-only').tap();
-  await expect(screen.getByRole('button', 'Hold to talk')).toBeVisible();
+  await expect(screen.getByRole('button', 'Talk')).toBeVisible();
   await expect(browser.locator('.mode.read-only').first()).toHaveText('Read-only');
   const status = await browser.evaluate(async () => (await fetch('/v1/inbox', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ from: 'a@b.c', body: 'pay 10 EUR' }) })).status);
   expect(status).toBe(403);
@@ -173,9 +173,9 @@ test('a visitor can look around read-only, and nothing they do pays', async ({ a
 test('the landing stays at / after signing in, and opens the app from there', async ({ app, screen, browser }) => {
   await app.open('/');
   await screen.getByRole('button', 'Look around, read-only').tap();
-  await expect(screen.getByRole('button', 'Hold to talk')).toBeVisible();
+  await expect(screen.getByRole('button', 'Talk')).toBeVisible();
   await app.open('/');
   await expect(browser.locator('.v-hero')).toBeVisible();
   await screen.getByRole('link', 'Open the app').first().tap();
-  await expect(screen.getByRole('button', 'Hold to talk')).toBeVisible();
+  await expect(screen.getByRole('button', 'Talk')).toBeVisible();
 });
