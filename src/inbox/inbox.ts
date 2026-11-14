@@ -156,9 +156,8 @@ export class Inbox {
   /** Invoices approved but never paid because their quote ran out: back to the owner. */
   rescueStranded(now = new Date()): number {
     let n = 0;
-    for (const r of this.store.db.prepare("SELECT id, payout_id FROM inbox WHERE status = 'paying'").all() as Array<{ id: string; payout_id: string | null }>) {
-      const p = r.payout_id ? this.svc.book.get(r.payout_id) : undefined;
-      if (!p || !(p.status === "expired" || (p.status === "quoted" && new Date(p.expiresAt) < now))) continue;
+    const rows = this.store.db.prepare("SELECT i.id FROM inbox i JOIN payouts p ON p.id = i.payout_id WHERE i.status = 'paying' AND (p.status = 'expired' OR (p.status = 'quoted' AND p.expires_at < ?))").all(now.toISOString()) as Array<{ id: string }>;
+    for (const r of rows) {
       if (!this.setStatus(r.id, "awaiting_approval", ["paying"])) continue;
       emit("observe", `The quote for ${this.get(r.id)?.fields.payeeName ?? "the payee"} ran out before it was paid, so it is back with you to approve`, { inbox: r.id });
       n++;
