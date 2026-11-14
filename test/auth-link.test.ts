@@ -41,3 +41,38 @@ describe("the emailed sign-in link", () => {
     }
   });
 });
+
+describe("owner sessions live on the server", () => {
+  const setup = () => {
+    process.env.OWNER_TOKEN = "t";
+    const auth = createAuth({ offline: false, log: () => {}, store: new Store(":memory:") });
+    delete process.env.OWNER_TOKEN;
+    const server = express().use(auth.router).get("/x", auth.requireOwner, (_req, res) => void res.json({ ok: true })).listen(0);
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const signIn = async () => {
+      const r = await fetch(`${base}/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: "t" }) });
+      expect(r.status).toBe(200);
+      return r.headers.get("set-cookie")!.split(";")[0]!;
+    };
+    const status = async (cookie: string) => (await fetch(`${base}/x`, { headers: { cookie } })).status;
+    return { server, base, signIn, status };
+  };
+  it("logout ends the session on the server", async () => {
+    const { server, base, signIn, status } = setup();
+    try {
+      const cookie = await signIn();
+      expect(await status(cookie)).toBe(200);
+      await fetch(`${base}/auth/logout`, { method: "POST", headers: { cookie } });
+      expect(await status(cookie)).toBe(401);
+    } finally { server.close(); }
+  });
+  it("sign out everywhere ends every session", async () => {
+    const { server, base, signIn, status } = setup();
+    try {
+      const a = await signIn(), b = await signIn();
+      await fetch(`${base}/auth/logout/all`, { method: "POST", headers: { cookie: a, "content-type": "application/json" }, body: "{}" });
+      expect(await status(a)).toBe(401);
+      expect(await status(b)).toBe(401);
+    } finally { server.close(); }
+  });
+});

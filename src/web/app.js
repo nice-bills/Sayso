@@ -111,7 +111,7 @@ async function askDevice(kind, options) {
 }
 async function addPasskey() {
   const { challenge_id, options } = await api("/auth/passkey/register/options", {});
-  await api("/auth/passkey/register", { challenge_id, response: await askDevice("create", options) });
+  await api("/auth/passkey/register", { challenge_id, response: await askDevice("create", options), confirmation: await confirmWith("register", "owner") });
   state.me = { ...state.me, passkeys: true, methods: { ...state.me?.methods, passkey: true } };
 }
 /** A passkey check bound to one action. Undefined while no passkey is set up (the server then doesn't ask). */
@@ -695,6 +695,7 @@ function appView() {
         s ? h("span", { class: "mode", title: s.offline ? "Airwallex and Metal are simulated" : "Real Airwallex and Metal APIs" }, h("span", { class: `dot${s.offline ? "" : " live"}` }), s.offline ? "Offline demo" : s.sandbox ? "Sandbox" : "Live") : null,
         h("a", { class: "btn quiet icon-btn", href: "/ops/", target: "_blank", rel: "noopener", title: "Back office", "aria-label": "Back office" }, icon("ledger", 18)),
         h("button", { class: "btn quiet icon-btn", title: "Sign out", "aria-label": "Sign out", onclick: async () => { await api("/auth/logout", {}); state.me = await api("/auth/me").catch(() => state.me); state.signedIn = false; history.pushState(null, "", "/"); render(); } }, icon("out", 18)),
+        h("button", { class: "btn quiet icon-btn", title: "Sign out everywhere", "aria-label": "Sign out everywhere", onclick: async () => { await api("/auth/logout/all", {}); state.me = await api("/auth/me").catch(() => state.me); state.signedIn = false; history.pushState(null, "", "/"); render(); } }, icon("out", 18)),
       ),
     )),
     h("div", { class: "wrap" },
