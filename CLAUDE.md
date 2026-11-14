@@ -10,7 +10,7 @@ Needs Node 24.8+ (`node:sqlite`, `--env-file-if-exists`).
 - `npm run typecheck`: `tsc --noEmit`.
 - `npm test`: vitest, offline.
 - `npm run serve:offline`: run the app with simulated rails.
-- `npm run test:e2e`: e2e suite; needs a running app.
+- `npm run test:e2e`: e2e suite; starts the app offline itself unless APP_URL is set.
 
 ## Layout
 
