@@ -66,6 +66,7 @@ export type AppPayoutState = keyof typeof APP_PAYOUT.states;
 
 // "paid" is not final: a bank can return a payout later, and the app should hear about the refund.
 const TERMINAL = new Set(["failed", "refunded", "rejected", "ignored", "duplicate"]);
+const PAID_WATCH_MS = 120 * 86_400_000; // banks return payouts within weeks; 120 days covers the slow ones
 
 /** The state an app hears about, from the inbox item and the payout behind it. */
 export function stateOf(item: InboxItem & { payout: { status: string } | null }): string {
@@ -141,6 +142,8 @@ export class Platform {
         delivered_at TEXT, last_error TEXT
       );
       CREATE INDEX IF NOT EXISTS platform_events_due ON platform_events (delivered_at, next_at);`);
+    const cols = store.db.prepare("PRAGMA table_info(platform_refs)").all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === "state_at")) store.db.exec("ALTER TABLE platform_refs ADD COLUMN state_at TEXT");
   }
 
   // ---------- apps (owner) ----------
@@ -299,8 +302,9 @@ export class Platform {
 
   /** Queues an event for each payout whose state changed since the app last heard, then delivers what's due. */
   async tick(now = Date.now()): Promise<void> {
-    const refs = this.store.db.prepare("SELECT r.*, a.revoked_at FROM platform_refs r JOIN platform_apps a ON a.id = r.app_id").all() as Array<{ app_id: string; ref: string; inbox_id: string; last_state: string | null; seq: number; revoked_at: string | null }>;
-    const live = refs.filter((r) => !TERMINAL.has(r.last_state ?? ""));
+    const refs = this.store.db.prepare("SELECT r.*, a.revoked_at FROM platform_refs r JOIN platform_apps a ON a.id = r.app_id").all() as Array<{ app_id: string; ref: string; inbox_id: string; last_state: string | null; seq: number; state_at: string | null; revoked_at: string | null }>;
+    // A paid ref is let go after PAID_WATCH_MS; a null state_at (older row) stays watched until its next change.
+    const live = refs.filter((r) => !TERMINAL.has(r.last_state ?? "") && !(r.last_state === "paid" && r.state_at && Date.parse(r.state_at) < now - PAID_WATCH_MS));
     if (live.length) {
       for (const r of live) {
         const item = this.inbox.view(r.inbox_id);
@@ -314,7 +318,7 @@ export class Platform {
         const body = JSON.stringify({ id: `evt_${randomUUID()}`, type: `payout.${state}`, created: new Date(now).toISOString(), app_id: r.app_id, sequence: seq, data });
         const id = JSON.parse(body).id as string;
         this.store.db.prepare("INSERT INTO platform_events (id, app_id, body, next_at) VALUES (?,?,?,?)").run(id, r.app_id, body, now);
-        this.store.db.prepare("UPDATE platform_refs SET last_state = ?, seq = ? WHERE app_id = ? AND ref = ?").run(state, seq, r.app_id, r.ref);
+        this.store.db.prepare("UPDATE platform_refs SET last_state = ?, seq = ?, state_at = ? WHERE app_id = ? AND ref = ?").run(state, seq, new Date(now).toISOString(), r.app_id, r.ref);
       }
     }
     await this.deliver(now);

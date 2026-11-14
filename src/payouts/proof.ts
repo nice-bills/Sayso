@@ -204,6 +204,10 @@ export class Disputes {
     this.store.db.prepare("UPDATE disputes SET anchor_tx = ? WHERE id = ?").run(tx, id);
   }
 
+  unanchored(limit = 25): Array<{ id: string; proof_hash: string }> {
+    return this.store.db.prepare("SELECT id, proof_hash FROM disputes WHERE verdict = 'denied' AND anchor_tx IS NULL ORDER BY at LIMIT ?").all(limit) as Array<{ id: string; proof_hash: string }>;
+  }
+
   settle(id: string, verdict: Dispute["verdict"], reason: string): void {
     this.store.db.prepare("UPDATE disputes SET verdict = ?, reason = ? WHERE id = ?").run(verdict, reason, id);
   }
