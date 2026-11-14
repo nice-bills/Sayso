@@ -1092,7 +1092,7 @@ const SAID = { payee: "Pay", amount: "Amount", reference: "Reference", bank: "In
 const WHY = { heard: "You said", read: "Read", risk: "Rules", payee: "Bank", mandate: "Mandate", observe: "Seen", decide: "Decided", act: "Moved", reconcile: "Settled", escalate: "Flagged", refuse: "Refused", receipt: "Receipt" };
 function whyButton(id) {
   const open = Boolean(state.why[id]);
-  return h("button", { class: "btn quiet small why-btn", "data-why": id, type: "button", disabled: state.busy[`why:${id}`], onclick: () => open ? (delete state.why[id], render()) : act(`why:${id}`, async () => { state.why = { [id]: await api(`/v1/payouts/${encodeURIComponent(id)}/why`) }; focusAfter = ".why-drawer .icon-btn"; }) }, open ? "Hide why" : "Why?");
+  return h("button", { class: "btn quiet small why-btn", "data-why": id, type: "button", disabled: state.busy[`why:${id}`], onclick: () => open ? (delete state.why[id], focusAfter = `.why-btn[data-why="${CSS.escape(id)}"]`, render()) : act(`why:${id}`, async () => { state.why = { [id]: await api(`/v1/payouts/${encodeURIComponent(id)}/why`) }; focusAfter = ".why-drawer .icon-btn"; }) }, open ? "Hide why" : "Why?");
 }
 // The open "Why?" slides in as a side panel over the page (one at a time), like the inbox mock.
 function whyDrawer() {
