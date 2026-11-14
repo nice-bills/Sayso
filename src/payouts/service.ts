@@ -738,7 +738,7 @@ export class PayoutService {
     const book = this.d.batches?.();
     if (!book) return;
     // Only a batch whose recorded payment is real has lines worth starting: funded means the payment settled.
-    const rows = this.d.store.db.prepare("SELECT id FROM batches b WHERE b.status = 'funded' AND b.funding_tx IS NOT NULL AND EXISTS (SELECT 1 FROM payouts p WHERE p.status = 'accepted' AND instr(b.payout_ids, p.id) > 0)").all() as Array<{ id: string }>;
+    const rows = this.d.store.db.prepare("SELECT id FROM batches b WHERE b.status = 'funded' AND b.funding_tx IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(b.payout_ids) j JOIN payouts p ON p.id = j.value WHERE p.status = 'accepted')").all() as Array<{ id: string }>;
     for (const row of rows) {
       const b = book.get(row.id);
       // Without the payer the lines could not be refunded if they failed, so say nothing rather than guess.

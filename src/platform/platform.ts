@@ -139,7 +139,8 @@ export class Platform {
       CREATE TABLE IF NOT EXISTS platform_events (
         id TEXT PRIMARY KEY, app_id TEXT NOT NULL, body TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL,
         delivered_at TEXT, last_error TEXT
-      );`);
+      );
+      CREATE INDEX IF NOT EXISTS platform_events_due ON platform_events (delivered_at, next_at);`);
   }
 
   // ---------- apps (owner) ----------

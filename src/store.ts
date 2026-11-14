@@ -38,6 +38,7 @@ export class Store {
         updated_at TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE (obligation_id, kind, attempt)
       );
+      CREATE INDEX IF NOT EXISTS operations_airwallex ON operations (airwallex_id);
       CREATE TABLE IF NOT EXISTS webhook_events (
         event_id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
