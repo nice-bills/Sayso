@@ -279,7 +279,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
     try {
       for (const d of disputes.unanchored()) {
         // A denied dispute rests on its anchored proof; one that failed to anchor is tried again here.
-        const a = await anchorer.anchor(d.proof_hash as `0x${string}`).catch(() => undefined);
+        const a = await anchorer.anchor(d.proof_hash as `0x${string}`, (tx) => disputes.anchored(d.id, tx)).catch(() => undefined);
         if (a) disputes.anchored(d.id, a.tx);
       }
     } catch (e) { emit("escalate", `Retrying dispute anchors failed: ${String(e).slice(0, 200)}`); }
@@ -535,7 +535,7 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
       else if (j.verdict === "review") emit("escalate", `A dispute on ${p.payeeName}'s payout needs you: ${CLAIMS[claim]}. ${j.reason}`, { payout: p.id });
       else {
         // Denied: the proof it rests on is anchored on Metal (the tick retries if this fails), so the answer can't be rewritten later.
-        const a = await anchorer.anchor(proof.hash as `0x${string}`).catch(() => undefined);
+        const a = await anchorer.anchor(proof.hash as `0x${string}`, (tx) => disputes.anchored(d.id, tx)).catch(() => undefined);
         if (a) disputes.anchored(d.id, a.tx);
         emit("refuse", `Dispute on ${p.payeeName}'s payout denied: ${j.reason}`, { payout: p.id }, a?.explorer);
       }
