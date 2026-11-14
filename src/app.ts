@@ -212,11 +212,14 @@ export async function buildSayso(opts: { offline: boolean; simMetal?: boolean; d
 
   async function sweep() {
     if (!globalAccount) return;
-    const e = await earnings.pending();
+    // Finish the oldest unfinished epoch with its stored amount before starting a new one, so a stuck pull is never repeated.
+    const open = ledger.unfinished();
+    const e = open ? { epoch: open.epoch, amountMinor: open.amountMinor } : await earnings.pending();
     if (!e) return;
     const r = await sweepEpoch({ ...e, currency: "USD" }, ledger, verifier, credit);
     if (r.outcome === "credited") emit("act", `Moved ${fmt(e.amountMinor, "USD")} of earnings into the Airwallex float, exactly once`, { epoch: e.epoch }, r.sweep.airwallexDepositId ?? undefined);
     else if (r.outcome === "rejected") emit("refuse", `Sweep ${e.epoch} not credited: ${r.sweep.reason}`);
+    else if (r.outcome === "pending") emit("observe", `Sweep ${e.epoch} is not final yet (${r.reason}); retrying on the next tick`);
   }
 
   // Set once the live sandbox refuses to issue a card and the simulator stands in for it.
