@@ -307,7 +307,8 @@ a.proof { display: inline-flex; align-items: center; gap: 3px; color: var(--acce
 @media (max-width: 520px) { .form { grid-template-columns: minmax(0, 1fr); } }
 details summary { cursor: pointer; color: var(--muted); font-size: 14px; font-weight: 550; }
 .sheet { display: grid; gap: 12px; }
-.sheet textarea { min-height: 180px; resize: vertical; font-size: 14px; }
+.sheet textarea { min-height: 180px; resize: vertical; font-size: 16px; }
+.sheet .field { font-size: 16px; } /* 16px stops iOS zooming on focus */
 
 
 

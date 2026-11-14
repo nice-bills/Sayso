@@ -67,3 +67,15 @@ test('the payment filters stay inside the page', async ({ app, screen, browser }
   }
   expect(bad).toEqual([]);
 });
+
+test('the add-invoice form does not zoom iOS', async ({ app, screen, browser }) => {
+  await browser.setViewport({ width: 390, height: 844 });
+  await signIn(app, screen);
+  await screen.getByRole('button', 'Everything').tap();
+  await browser.locator('.add-btn').click();
+  await expect(browser.locator('form.sheet textarea')).toBeVisible();
+  const sizes = await browser.evaluate(() => [...document.querySelectorAll('form.sheet input:not([type=file]), form.sheet textarea')]
+    .map((e) => `${(e as HTMLInputElement).name} ${getComputedStyle(e).fontSize}`).filter((s) => parseFloat(s.split(' ')[1]!) < 16));
+  expect(sizes).toEqual([]);
+});
+
