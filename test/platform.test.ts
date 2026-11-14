@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { buildSayso } from "../src/app.js";
 import { AgentKeys } from "../src/agents/keys.js";
 import { Inbox } from "../src/inbox/inbox.js";
-import { Platform, checkWebhookUrl, signWebhook, verifyWebhook } from "../src/platform/platform.js";
+import { Platform, checkWebhookUrl, isPublicAddress, resolvesPublic, signWebhook, verifyWebhook } from "../src/platform/platform.js";
 import { checkRules, describeRules, NO_RULES, parseRulesByPattern, RulesError, compileRules } from "../src/platform/rules.js";
 import { PayoutService } from "../src/payouts/service.js";
 import { FakeAirwallex, FakeRefunder } from "../src/sim/offline.js";
@@ -53,6 +53,14 @@ describe("webhook signatures", () => {
   it("accepts only public https hosts outside offline mode", () => {
     for (const bad of ["http://example.com/x", "https://localhost/x", "https://10.0.0.5/x", "https://169.254.169.254/x", "https://192.168.1.2/x"]) expect(() => checkWebhookUrl(bad, false)).toThrow();
     expect(checkWebhookUrl("https://my-app.base44.app/functions/sayso-webhook", false)).toContain("base44.app");
+    expect(() => checkWebhookUrl("https://100.64.1.1/x", false)).toThrow();
+  });
+  it("tells public addresses from private ones", async () => {
+    expect(isPublicAddress("8.8.8.8")).toBe(true);
+    for (const ip of ["10.1.2.3", "100.64.1.1", "169.254.169.254", "::1", "fd00::1", "::ffff:127.0.0.1", "not an ip"]) expect(isPublicAddress(ip)).toBe(false);
+    expect(await resolvesPublic("x", (async () => [{ address: "10.0.0.5", family: 4 }]) as never)).toBe(false);
+    expect(await resolvesPublic("x", (async () => [{ address: "93.184.216.34", family: 4 }, { address: "10.0.0.5", family: 4 }]) as never)).toBe(false);
+    expect(await resolvesPublic("x", (async () => [{ address: "93.184.216.34", family: 4 }]) as never)).toBe(true);
   });
 });
 
