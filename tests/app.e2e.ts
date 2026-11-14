@@ -63,6 +63,19 @@ test('opening a decision from Home focuses that exact payment and keeps it on sc
   expect(await focused()).toEqual({ head: true, open: true, who: latest, visible: true });
 });
 
+test('switching tabs and opening Everything jump to the top at once', async ({ app, screen, browser }) => {
+  await openEverything(app, screen);
+  await browser.setViewport({ width: 1280, height: 600 });
+  // Same tick as the click: a smooth scroll has not moved yet, so only an instant one reads 0.
+  const down = () => browser.evaluate(() => { window.scrollTo({ top: 400, behavior: 'instant' }); return window.scrollY; });
+  await screen.getByRole('tab', 'Payments').tap();
+  expect(await down()).toBeGreaterThan(0);
+  expect(await browser.evaluate(() => { ([...document.querySelectorAll('button.tab')].find((b) => b.textContent?.includes('Inbox')) as HTMLElement).click(); return window.scrollY; })).toBe(0);
+  await browser.locator('button.tab').first().click(); // Home
+  expect(await down()).toBeGreaterThan(0);
+  expect(await browser.evaluate(() => { (document.querySelector('button.sh-icon[aria-label="Everything"]') as HTMLElement).click(); return window.scrollY; })).toBe(0);
+});
+
 test('one tap pays a forwarded invoice', async ({ app, screen, browser }) => {
   await openEverything(app, screen);
   await screen.getByRole('button', 'Pay £72.00').tap();
