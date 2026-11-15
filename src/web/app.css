@@ -632,7 +632,7 @@ body:has(.say-home) { background: var(--bg); }
 .row { background: var(--surface); border-radius: var(--r); display: grid; overflow: hidden; }
 .row-head { all: unset; box-sizing: border-box; display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer; width: 100%; }
 /* clear the sticky .top when focus scrolls a row into view */
-.row-head { scroll-margin-top: 92px; }
+.row-head { scroll-margin-top: 92px; scroll-margin-bottom: 8px; } /* and keep a little room at the bottom edge, so rounding never clips it */
 div.row-head { cursor: default; }
 @media (hover: hover) { button.row-head:hover { background: rgba(255, 255, 255, .18); } }
 button.row-head:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; border-radius: var(--r); }
