@@ -4,6 +4,13 @@
 
 **Prizes entered:** Judges' Choice, Founder's Choice, Metal (Metal + Airwallex).
 
+<p>
+  <a href="https://www.airwallex.com"><img src="logos/airwallex.png" alt="Airwallex" height="44"></a>
+  <a href="https://docs.metalntwx.com"><img src="logos/metal.png" alt="Metal" height="44"></a>
+  <a href="https://base44.com"><img src="logos/base44.png" alt="Base44" height="44"></a>
+  <a href="https://claude.com"><img src="logos/claude.png" alt="Claude" height="44"></a>
+</p>
+
 **Sponsor tech used:**
 - **Airwallex** (sandbox API): beneficiary validation and account verification, transfers, FX quotes and conversions, balances, global accounts, issuing cards, signed webhooks.
 - **Metal** (testnet): USDZ, x402 payments through Metal's facilitator, owner-bound mandates for agent spend, refunds and earnings sweeps, receipts anchored on chain.

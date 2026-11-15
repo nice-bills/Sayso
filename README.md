@@ -2,6 +2,13 @@
 
 **Any AI agent can pay any real-world invoice.** An agent holding USDZ on **Metal** asks Sayso to pay "€480 to this IBAN", pays the quoted price over x402, and Sayso delivers the money in local currency through **Airwallex**. Businesses get the same thing without writing code: forward an invoice to Sayso's inbox, tap once, and it's paid.
 
+<p>
+  <a href="https://www.airwallex.com"><img src="docs/logos/airwallex.png" alt="Airwallex" height="44"></a>
+  <a href="https://docs.metalntwx.com"><img src="docs/logos/metal.png" alt="Metal" height="44"></a>
+  <a href="https://base44.com"><img src="docs/logos/base44.png" alt="Base44" height="44"></a>
+  <a href="https://claude.com"><img src="docs/logos/claude.png" alt="Claude" height="44"></a>
+</p>
+
 **Sponsor tech used:**
 - **Airwallex** (sandbox API): beneficiary validation and account verification (Verification of Payee, Confirmation of Payee), transfers, FX quotes and conversions, balances, global accounts, issuing cards, signed webhooks.
 - **Metal** (testnet): USDZ, x402 payments through Metal's facilitator (`@metalntwx/metal-pay`), owner-bound mandates for agent spend, refunds and earnings sweeps, receipts anchored on chain.
