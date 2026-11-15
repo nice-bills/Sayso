@@ -203,7 +203,7 @@ html:has(.lp), body:has(.lp) { background: #0a0a09; }
 .lp-foot-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1.4fr; gap: 40px; }
 .lp-fcol { display: grid; gap: 10px; align-content: start; font-size: 15px; }
 .lp-fcol h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--lp-faint); }
-.lp-fcol a { text-decoration: none; color: var(--dim); transition: color .2s; word-break: break-word; }
+.lp-fcol a { padding: 1px 0; margin: -1px 0; text-decoration: none; color: var(--dim); transition: color .2s; word-break: break-word; }
 .lp-fcol a:hover { color: var(--fg); }
 .lp-fcol > span { color: var(--dim); }
 .lp-fid p { margin: 6px 0 0; color: var(--dim); max-width: 30ch; line-height: 1.55; }
