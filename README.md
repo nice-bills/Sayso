@@ -2,6 +2,19 @@
 
 **Any AI agent can pay any real-world invoice.** An agent holding USDZ on **Metal** asks Sayso to pay "€480 to this IBAN", pays the quoted price over x402, and Sayso delivers the money in local currency through **Airwallex**. Businesses get the same thing without writing code: forward an invoice to Sayso's inbox, tap once, and it's paid.
 
+<p>
+  <a href="https://www.airwallex.com"><img src="docs/logos/airwallex.png" alt="Airwallex" height="44"></a>
+  <a href="https://docs.metalntwx.com"><img src="docs/logos/metal.png" alt="Metal" height="44"></a>
+  <a href="https://base44.com"><img src="docs/logos/base44.png" alt="Base44" height="44"></a>
+  <a href="https://claude.com"><img src="docs/logos/claude.png" alt="Claude" height="44"></a>
+</p>
+
+**Sponsor tech used:**
+- **Airwallex** (sandbox API): beneficiary validation and account verification (Verification of Payee, Confirmation of Payee), transfers, FX quotes and conversions, balances, global accounts, issuing cards, signed webhooks.
+- **Metal** (testnet): USDZ, x402 payments through Metal's facilitator (`@metalntwx/metal-pay`), owner-bound mandates for agent spend, refunds and earnings sweeps, receipts anchored on chain.
+- **Base44:** Freelance Hub, a Base44 app, uses Sayso as its payout layer over signed webhooks.
+- **Claude and MCP:** Claude reads forwarded invoices; any agent connects through Sayso's MCP server.
+
 **Live:** [sayso-mp5d.onrender.com](https://sayso-mp5d.onrender.com) (choose "Look around, read-only"). Airwallex sandbox and Metal testnet, so no real money moves.
 
 | | |
@@ -32,7 +45,16 @@ The rails decide what is allowed, not the prompt:
 
 Built for the Airwallex Agentic Banking Hackathon (2026). Demo script: [docs/DEMO-SCRIPT.md](docs/DEMO-SCRIPT.md). Write-up: [docs/SUBMISSION.md](docs/SUBMISSION.md).
 
-![The inbox](docs/app-inbox.png)
+## The app
+
+| | |
+|---|---|
+| ![Home: the balance, what needs you, and every decision Sayso made](docs/screens/app-home.jpg) | ![Inbox: forwarded invoices, each ready to pay or held with the reason](docs/screens/app-inbox.jpg) |
+| **Home.** The balance, what needs you, and every verdict Sayso gave. | **Inbox.** Forwarded invoices. One tap pays; a changed bank account is held. |
+| ![Payments: a held payout with the price, balance and risk that decided it](docs/screens/app-payments.jpg) | <img src="docs/screens/app-held-phone.jpg" alt="On a phone: a held invoice with its decision" width="260"> |
+| **Payments.** Each payout shows the cost, balance and risk that decided it. | **On a phone.** The same decision, one thumb away. |
+
+Screens from `npm run serve:offline` (simulated rails, seeded data).
 
 ## Try it now (no keys, no network)
 
