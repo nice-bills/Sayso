@@ -15,6 +15,8 @@
 - **Base44:** Freelance Hub, a Base44 app, uses Sayso as its payout layer over signed webhooks.
 - **Claude and MCP:** Claude reads forwarded invoices; any agent connects through Sayso's MCP server.
 
+**Track:** Kit 11, x402 Business Agents (Metal + Airwallex). Sayso is the business side of that kit: an x402 API that agents pay per call in USDZ on Metal, under mandates their owners sign, with the money delivered through Airwallex. Refunds and earnings sweeps run under capped Metal mandates, and every receipt is anchored on chain. It also covers Kit 01 (Adaptive Treasury Controller), Kit 03 (Payment Ops Incident Commander) and Kit 08 (Marketplace Settlement Agent): see [Tracks](docs/SUBMISSION.md#tracks).
+
 **Watch the demo (4:32):** [youtu.be/AlF9QM4m-6Q](https://youtu.be/AlF9QM4m-6Q)
 
 <a href="https://youtu.be/AlF9QM4m-6Q"><img src="docs/demo-thumbnail.jpg" alt="Watch the Sayso demo on YouTube" width="640"></a>
