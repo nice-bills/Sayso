@@ -137,4 +137,4 @@ Not entered: tracks 9 and 10 (they need Airi CLI access and a merchant storefron
 - Repo: https://github.com/nice-bills/Sayso
 - Live app: https://sayso-mp5d.onrender.com (sign in with "Look around, read-only" to see the live sandbox data)
 - Setup: README.md, "Try it now" (offline, no keys) and "Live run"
-- Video: (add after recording)
+- Video: https://youtu.be/AlF9QM4m-6Q

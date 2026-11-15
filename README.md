@@ -15,6 +15,10 @@
 - **Base44:** Freelance Hub, a Base44 app, uses Sayso as its payout layer over signed webhooks.
 - **Claude and MCP:** Claude reads forwarded invoices; any agent connects through Sayso's MCP server.
 
+**Watch the demo (4:32):** [youtu.be/AlF9QM4m-6Q](https://youtu.be/AlF9QM4m-6Q)
+
+<a href="https://youtu.be/AlF9QM4m-6Q"><img src="docs/demo-thumbnail.jpg" alt="Watch the Sayso demo on YouTube" width="640"></a>
+
 **Live:** [sayso-mp5d.onrender.com](https://sayso-mp5d.onrender.com) (choose "Look around, read-only"). Airwallex sandbox and Metal testnet, so no real money moves.
 
 | | |
