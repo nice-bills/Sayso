@@ -4,6 +4,12 @@
 
 **Prizes entered:** Judges' Choice, Founder's Choice, Metal (Metal + Airwallex).
 
+**Sponsor tech used:**
+- **Airwallex** (sandbox API): beneficiary validation and account verification, transfers, FX quotes and conversions, balances, global accounts, issuing cards, signed webhooks.
+- **Metal** (testnet): USDZ, x402 payments through Metal's facilitator, owner-bound mandates for agent spend, refunds and earnings sweeps, receipts anchored on chain.
+- **Base44:** Freelance Hub, a Base44 app, uses Sayso as its payout layer.
+- **Claude and MCP:** Claude reads forwarded invoices; any agent connects through Sayso's MCP server.
+
 ## What it does
 
 Sayso is a payout rail between agent money and the real economy.
